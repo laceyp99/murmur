@@ -1,0 +1,9 @@
+"""
+Entry point for running Murmur as a module.
+Usage: python -m src
+"""
+
+from .main import main
+
+if __name__ == "__main__":
+    main()

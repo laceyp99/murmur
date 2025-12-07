@@ -1,0 +1,16 @@
+# Core dependencies
+torch>=2.0.0
+openai-whisper>=20231117
+numpy>=1.24.0
+
+# Audio recording
+sounddevice>=0.4.6
+
+# Hotkey handling
+keyboard>=0.13.5 
+
+# Clipboard
+pyperclip>=1.8.2
+
+# Notifications (optional, will fallback to console if not available)
+win10toast>=0.9
