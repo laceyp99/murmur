@@ -16,6 +16,7 @@ DEFAULT_CONFIG = {
     "sample_rate": 16000,
     "max_recording_duration": 300,
     "enable_logging": True,
+    "enable_notifications": True
 }
 
 # Global config instance

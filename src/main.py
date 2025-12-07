@@ -67,7 +67,7 @@ class MurmurApp:
             sys.exit(1)
         
         print(f"\n{'='*50}")
-        print("Murmur - Local Speech-to-Text")
+        print("murmur - Local Speech-to-Text")
         print(f"{'='*50}")
         print(f"Hotkey: {self.config.hotkey}")
         print(f"Model: {self.config.model_name}")
@@ -76,7 +76,7 @@ class MurmurApp:
         print(f"Logged entries: {self.logger.get_entry_count()} ({self.logger.get_total_duration():.1f}s audio)")
         print(f"{'='*50}\n")
         
-        self.notifications.notify("Murmur", "Ready! Press hotkey to start recording.")
+        self.notifications.notify("murmur", "Ready! Press hotkey to start recording.")
     
     def stop(self) -> None:
         """Stop the application."""
@@ -86,7 +86,7 @@ class MurmurApp:
         if self.recorder.is_recording():
             self.recorder.stop_recording()
         
-        print("\nMurmur stopped.")
+        print("\nmurmur stopped.")
     
     def _on_recording_start(self) -> None:
         """Handle recording start."""
@@ -153,7 +153,7 @@ class MurmurApp:
 
 def main():
     """Main entry point for the application."""
-    print("Starting Murmur...")
+    print("Starting murmur...")
     
     try:
         app = MurmurApp(preload_model=True)

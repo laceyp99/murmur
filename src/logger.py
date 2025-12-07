@@ -42,7 +42,7 @@ class DataLogger:
         if log_dir is None:
             # Default to a 'training_data' folder in AppData
             app_data = os.environ.get('APPDATA', os.path.expanduser('~'))
-            log_dir = Path(app_data) / 'Murmur' / 'training_data'
+            log_dir = Path(app_data) / 'murmur' / 'training_data'
         
         self.log_dir = Path(log_dir)
         self.audio_dir = self.log_dir / 'audio'

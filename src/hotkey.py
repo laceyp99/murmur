@@ -159,7 +159,7 @@ def wait_for_exit() -> None:
     This is useful for keeping the main thread alive while
     hotkeys are being processed in the background.
     """
-    print("\nMurmur is running. Press Escape or Ctrl+C to exit.\n")
+    print("\nmurmur is running. Press Escape or Ctrl+C to exit.\n")
     try:
         keyboard.wait('escape')
     except KeyboardInterrupt:

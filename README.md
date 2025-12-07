@@ -93,7 +93,8 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
   "language": null,
   "sample_rate": 16000,
   "max_recording_duration": 300,
-  "enable_logging": true
+  "enable_logging": true,
+  "enable_notifications": true
 }
 ```
 

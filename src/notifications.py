@@ -80,20 +80,20 @@ class NotificationManager:
     
     def notify_recording_started(self) -> None:
         """Notify that recording has started."""
-        self.notify("Murmur", "Recording started... Speak now!")
+        self.notify("murmur", "Recording started... Speak now!")
     
     def notify_recording_stopped(self) -> None:
         """Notify that recording has stopped."""
-        self.notify("Murmur", "Recording stopped. Processing...")
+        self.notify("murmur", "Recording stopped. Processing...")
     
     def notify_transcription_complete(self, text: str) -> None:
         """Notify that transcription is complete."""
         preview = text[:50] + "..." if len(text) > 50 else text
-        self.notify("Murmur", f"Copied: {preview}")
+        self.notify("murmur", f"Copied: {preview}")
     
     def notify_error(self, error: str) -> None:
         """Notify about an error."""
-        self.notify("Murmur Error", error)
+        self.notify("murmur Error", error)
 
 
 # Global notification manager instance
