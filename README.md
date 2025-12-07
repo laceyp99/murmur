@@ -1,6 +1,8 @@
-# Murmur - Local Speech-to-Text Hotkey App
+# murmur: local speech-to-text hotkey app
 
-A lightweight Windows application that enables dictation anywhere on your system. Press a global hotkey to record your voice, and Murmur will transcribe it using OpenAI's Whisper model running locally on your machine, then copy the text to your clipboard for instant pasting.
+![header](murmur.png "murmur pipeline")
+
+A lightweight Windows application that enables dictation anywhere on your system. Press a global hotkey to record your voice, and murmur will transcribe it using OpenAI's Whisper model running locally on your machine, then copy the text to your clipboard for instant pasting.
 
 ## Features
 
@@ -60,7 +62,7 @@ Whisper requires FFmpeg. You can install it via manual installation. Download fr
 
 ## Usage
 
-### Starting Murmur
+### Starting murmur
 
 Run the application:
 
@@ -68,7 +70,7 @@ Run the application:
 python run.py
 ```
 
-### Using Murmur
+### Using murmur
 
 1. **Press `Ctrl+Shift+Space`** to start recording
 2. **Speak** your text
@@ -77,11 +79,11 @@ python run.py
 
 ### First Run
 
-On the first run, Murmur will download the Whisper model (this may take a few minutes depending on the model size).
+On the first run, murmur will download the Whisper model (this may take a few minutes depending on the model size).
 
 ## Configuration
 
-Configuration is stored in `%APPDATA%\Murmur\config.json`:
+Configuration is stored in `%APPDATA%\murmur\config.json`:
 
 ```json
 {
@@ -123,7 +125,7 @@ Configuration is stored in `%APPDATA%\Murmur\config.json`:
 
 **"Failed to register hotkey"**
 - Another application may be using the same hotkey
-- Run Murmur as Administrator
+- Run murmur as Administrator
 - Try a different hotkey combination
 
 **"No speech detected"**
@@ -145,9 +147,9 @@ print(f"Device: {torch.cuda.get_device_name(0)}")
 
 ## Training Data
 
-When `enable_logging` is true, Murmur saves all recordings for fine-tuning:
+When `enable_logging` is true, murmur saves all recordings for fine-tuning:
 
-**Location:** `%APPDATA%\Murmur\training_data\`
+**Location:** `%APPDATA%\murmur\training_data\`
 
 ```
 training_data/
