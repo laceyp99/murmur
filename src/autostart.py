@@ -7,30 +7,29 @@ import sys
 import winreg
 from pathlib import Path
 
-def set_autostart(enabled: bool) -> bool:
+def set_autostart(enabled: bool):
     """
-    Enable or disable auto-start for Murmur in the Windows Registry.
-    
-    Args:
-        enabled: Whether to enable auto-start.
-        
-    Returns:
-        True if successful, False otherwise.
+    Enable or disable auto-start with Windows.
+    Uses sys.executable to ensure it uses the same environment that launched the app.
     """
     app_name = "Murmur"
-    # Get the path to the pythonw.exe inside the venv
-    # If running from venv, sys.executable will be ...\venv\Scripts\python.exe
-    # We want to ensure we use pythonw.exe for background running
-    venv_python = sys.executable.lower().replace("python.exe", "pythonw.exe")
+    
+    # sys.executable points to the current python.exe or pythonw.exe
+    current_python = sys.executable
+    
+    # Ensure we use the windowless version for background startup
+    if current_python.lower().endswith("python.exe"):
+        python_exe = current_python.lower().replace("python.exe", "pythonw.exe")
+    else:
+        python_exe = current_python
+
     script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "run.py"))
+    cmd = f'"{python_exe}" "{script_path}"'
     
-    cmd = f'"{venv_python}" "{script_path}"'
-    
-    key = winreg.HKEY_CURRENT_USER
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     
     try:
-        reg_key = winreg.OpenKey(key, key_path, 0, winreg.KEY_SET_VALUE)
+        reg_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
         if enabled:
             winreg.SetValueEx(reg_key, app_name, 0, winreg.REG_SZ, cmd)
         else:
@@ -39,10 +38,8 @@ def set_autostart(enabled: bool) -> bool:
             except FileNotFoundError:
                 pass
         winreg.CloseKey(reg_key)
-        return True
     except Exception as e:
         print(f"Failed to update autostart registry: {e}")
-        return False
 
 def is_autostart_enabled() -> bool:
     """Check if auto-start is currently enabled in the registry."""
