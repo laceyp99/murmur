@@ -1,6 +1,6 @@
 # murmur: local speech-to-text hotkey app
 
-![header](murmur.png "murmur pipeline")
+![header](murmur pipeline.png "murmur pipeline")
 
 A lightweight Windows application that enables dictation anywhere on your system. Press a global hotkey to record your voice, and murmur will transcribe it using OpenAI's Whisper model running locally on your machine, then copy the text to your clipboard for instant pasting.
 
