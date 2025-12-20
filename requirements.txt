@@ -12,5 +12,9 @@ keyboard>=0.13.5
 # Clipboard
 pyperclip>=1.8.2
 
+# System Tray and UI
+pystray>=0.19.5
+Pillow>=10.0.0
+
 # Notifications (optional, will fallback to console if not available)
 win10toast>=0.9

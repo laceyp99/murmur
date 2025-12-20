@@ -14,6 +14,8 @@ from .clipboard import copy_to_clipboard
 from .hotkey import HotkeyManager, HotkeyState, wait_for_exit
 from .notifications import get_notification_manager
 from .logger import get_logger
+from .tray import TrayManager
+from .autostart import set_autostart
 
 
 class MurmurApp:
@@ -41,12 +43,17 @@ class MurmurApp:
         self.hotkey_manager = HotkeyManager()
         self.notifications = get_notification_manager()
         self.logger = get_logger()
+        self.tray = TrayManager(on_exit_callback=self.stop)
         
         self._running = False
         
         if preload_model:
             print("Preloading Whisper model...")
             self.transcriber.load_model()
+        
+        # Ensure autostart matches config
+        if self.config.start_with_windows:
+            set_autostart(True)
     
     def start(self) -> None:
         """Start the application and begin listening for hotkeys."""
@@ -80,8 +87,12 @@ class MurmurApp:
     
     def stop(self) -> None:
         """Stop the application."""
+        if not self._running:
+            return
+            
         self._running = False
         self.hotkey_manager.unregister()
+        self.tray.stop()
         
         if self.recorder.is_recording():
             self.recorder.stop_recording()
@@ -92,23 +103,27 @@ class MurmurApp:
         """Handle recording start."""
         print("🎤 Recording started...")
         self.notifications.notify_recording_started()
+        self.tray.set_status("Recording...")
         
         try:
             self.recorder.start_recording()
         except Exception as e:
             print(f"Error starting recording: {e}")
             self.notifications.notify_error(f"Recording failed: {e}")
+            self.tray.set_status("Error")
             self.hotkey_manager.set_idle()
     
     def _on_recording_stop(self) -> None:
         """Handle recording stop via hotkey."""
         print("⏹️ Recording stopped.")
+        self.tray.set_status("Processing...")
         
         audio_data = self.recorder.stop_recording()        
         if audio_data is not None:
             self._process_audio(audio_data)
         else:
             print("⚠️ No audio data captured.")
+            self.tray.set_status("Ready")
             self.hotkey_manager.set_idle()
     
     def _process_audio(self, audio_data: AudioData) -> None:
@@ -144,6 +159,7 @@ class MurmurApp:
             self.notifications.notify_error(f"Transcription failed: {e}")
         
         finally:
+            self.tray.set_status("Ready")
             self.hotkey_manager.set_idle()
     
     def _on_state_change(self, state: HotkeyState) -> None:
@@ -159,9 +175,10 @@ def main():
         app = MurmurApp(preload_model=True)
         app.start()
         
-        # Keep the main thread alive
-        wait_for_exit()
+        # Run the tray icon (this is the main loop)
+        app.tray.run()
         
+        # When tray exits, stop the app
         app.stop()
     
     except KeyboardInterrupt:

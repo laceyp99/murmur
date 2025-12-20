@@ -16,7 +16,8 @@ DEFAULT_CONFIG = {
     "sample_rate": 16000,
     "max_recording_duration": 300,
     "enable_logging": True,
-    "enable_notifications": True
+    "enable_notifications": True,
+    "start_with_windows": True
 }
 
 # Global config instance
@@ -97,6 +98,11 @@ class Config:
     def enable_notifications(self) -> bool:
         """Get the notifications setting."""
         return self.get("enable_notifications", True)
+
+    @property
+    def start_with_windows(self) -> bool:
+        """Get the start with windows setting."""
+        return self.get("start_with_windows", True)
 
 
 def get_config() -> Config:

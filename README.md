@@ -10,8 +10,9 @@ A lightweight Windows application that enables dictation anywhere on your system
 - 🔒 **100% Local** - No internet required, all processing on your machine
 - 🚀 **GPU Accelerated** - Fast transcription with CUDA support
 - 📋 **Clipboard Integration** - Transcription copied automatically
+- � **System Tray** - Runs in the background with a status icon
+- ⚙️ **Settings GUI** - Easily configure hotkey, model, and auto-start
 - 📁 **Training Data Logging** - Saves audio and transcriptions for fine-tuning
-- ⚙️ **Configurable** - Customize hotkey, model, and settings
 
 ## System Requirements
 
@@ -70,16 +71,35 @@ Run the application:
 python run.py
 ```
 
+To run in the background without a console window, use:
+
+```bash
+pythonw run.py
+```
+
+Or double-click `run_background.vbs`.
+
 ### Using murmur
 
-1. **Press `Ctrl+Shift+Space`** to start recording
-2. **Speak** your text
-3. **Press `Ctrl+Shift+Space`** again to stop recording
-4. **Paste** with `Ctrl+V` anywhere
+1. **System Tray**: Look for the murmur icon in your system tray (bottom right). Right-click it to access **Settings** or **Exit**.
+2. **Press `Ctrl+Shift+Space`** to start recording
+3. **Speak** your text
+4. **Press `Ctrl+Shift+Space`** again to stop recording
+5. **Paste** with `Ctrl+V` anywhere
 
 ### First Run
 
 On the first run, murmur will download the Whisper model (this may take a few minutes depending on the model size).
+
+### Whisper Model Sizes
+
+| Model | Parameters | VRAM Required | Relative Speed |
+|-------|------------|---------------|----------------|
+| tiny | 39M | ~1 GB | ~32x |
+| base | 74M | ~1 GB | ~16x |
+| small | 244M | ~2 GB | ~6x |
+| medium | 769M | ~5 GB | ~2x |
+| large | 1550M | ~10 GB | 1x |
 
 ## Configuration
 
@@ -109,16 +129,7 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
 | `sample_rate` | Audio sample rate in Hz | `16000` |
 | `max_recording_duration` | Maximum recording length in seconds | `300` |
 | `enable_logging` | Save audio/transcriptions for training | `true` |
-
-### Whisper Model Sizes
-
-| Model | Parameters | VRAM Required | Relative Speed |
-|-------|------------|---------------|----------------|
-| tiny | 39M | ~1 GB | ~32x |
-| base | 74M | ~1 GB | ~16x |
-| small | 244M | ~2 GB | ~6x |
-| medium | 769M | ~5 GB | ~2x |
-| large | 1550M | ~10 GB | 1x |
+| `start_with_windows` | Automatically start on login | `true` |
 
 ## Troubleshooting
 
@@ -138,14 +149,6 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
 - Use a smaller Whisper model (tiny or base)
 - Check that GPU is being used: look for "Device: cuda" on startup
 
-### Verify GPU
-
-```python
-import torch
-print(f"CUDA available: {torch.cuda.is_available()}")
-print(f"Device: {torch.cuda.get_device_name(0)}")
-```
-
 ## Training Data
 
 When `enable_logging` is true, murmur saves all recordings for fine-tuning:
@@ -162,23 +165,4 @@ training_data/
 Each JSONL entry:
 ```json
 {"timestamp": "2024-12-06T14:30:22", "audio_file": "20241206_143022_123456.wav", "transcription": "Your text", "duration": 3.5, "model": "small", "processing_time": 0.8}
-```
-
-## Project Structure
-
-```
-murmur/
-├── src/
-│   ├── __init__.py       # Package initialization
-│   ├── main.py           # Application entry point
-│   ├── config.py         # Configuration management
-│   ├── audio.py          # Audio recording
-│   ├── transcription.py  # Whisper transcription
-│   ├── clipboard.py      # Clipboard operations
-│   ├── hotkey.py         # Global hotkey handling
-│   ├── notifications.py  # Windows notifications
-│   └── logger.py         # Training data logging
-├── run.py                # Convenience runner
-├── requirements.txt      # Dependencies
-└── README.md
 ```
