@@ -17,7 +17,8 @@ DEFAULT_CONFIG = {
     "max_recording_duration": 300,
     "enable_logging": True,
     "enable_notifications": True,
-    "start_with_windows": True
+    "start_with_windows": True,
+    "pause_media_while_recording": True,
 }
 
 # Global config instance
@@ -26,17 +27,17 @@ _config_instance = None
 
 class Config:
     """Manages application configuration."""
-    
+
     def __init__(self):
         self.config_dir = Path(os.environ.get("APPDATA", ".")) / "Murmur"
         self.config_file = self.config_dir / "config.json"
         self._config: Dict[str, Any] = {}
         self._load()
-    
+
     def _load(self):
         """Load configuration from file or create default."""
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        
+
         if self.config_file.exists():
             try:
                 with open(self.config_file, "r") as f:
@@ -47,7 +48,7 @@ class Config:
         else:
             self._config = DEFAULT_CONFIG.copy()
             self._save()
-    
+
     def _save(self):
         """Save configuration to file."""
         try:
@@ -55,45 +56,45 @@ class Config:
                 json.dump(self._config, f, indent=2)
         except IOError:
             pass
-    
+
     def get(self, key: str, default: Any = None) -> Any:
         """Get a configuration value."""
         return self._config.get(key, default)
-    
+
     def set(self, key: str, value: Any):
         """Set a configuration value and save."""
         self._config[key] = value
         self._save()
-    
+
     def get_all(self) -> Dict[str, Any]:
         """Get all configuration values."""
         return self._config.copy()
-    
+
     @property
     def hotkey(self) -> str:
         """Get the hotkey setting."""
         return self.get("hotkey", "ctrl+shift+space")
-    
+
     @property
     def model_name(self) -> str:
         """Get the model name setting."""
         return self.get("model", "small")
-    
+
     @property
     def language(self) -> Optional[str]:
         """Get the language setting."""
         return self.get("language", None)
-    
+
     @property
     def device(self) -> str:
         """Get the device setting (cuda or cpu)."""
         return self.get("device", "cuda")
-    
+
     @property
     def sample_rate(self) -> int:
         """Get the sample rate setting."""
         return self.get("sample_rate", 16000)
-    
+
     @property
     def enable_notifications(self) -> bool:
         """Get the notifications setting."""
@@ -103,6 +104,11 @@ class Config:
     def start_with_windows(self) -> bool:
         """Get the start with windows setting."""
         return self.get("start_with_windows", True)
+
+    @property
+    def pause_media_while_recording(self) -> bool:
+        """Get the pause media while recording setting."""
+        return self.get("pause_media_while_recording", True)
 
 
 def get_config() -> Config:

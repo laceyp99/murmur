@@ -10,7 +10,8 @@ A lightweight Windows application that enables dictation anywhere on your system
 - 🔒 **100% Local** - No internet required, all processing on your machine
 - 🚀 **GPU Accelerated** - Fast transcription with CUDA support
 - 📋 **Clipboard Integration** - Transcription copied automatically
-- � **System Tray** - Runs in the background with a status icon
+- 🔇 **Auto-Pause Media** - Automatically pauses playing media during recording
+- 🖥️ **System Tray** - Runs in the background with a status icon
 - ⚙️ **Settings GUI** - Easily configure hotkey, model, and auto-start
 - 📁 **Training Data Logging** - Saves audio and transcriptions for fine-tuning
 
@@ -114,7 +115,9 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
   "sample_rate": 16000,
   "max_recording_duration": 300,
   "enable_logging": true,
-  "enable_notifications": true
+  "enable_notifications": true,
+  "start_with_windows": true,
+  "pause_media_while_recording": true
 }
 ```
 
@@ -129,7 +132,9 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
 | `sample_rate` | Audio sample rate in Hz | `16000` |
 | `max_recording_duration` | Maximum recording length in seconds | `300` |
 | `enable_logging` | Save audio/transcriptions for training | `true` |
+| `enable_notifications` | Show Windows toast notifications | `true` |
 | `start_with_windows` | Automatically start on login | `true` |
+| `pause_media_while_recording` | Pause system media during recording | `true` |
 
 ## Troubleshooting
 

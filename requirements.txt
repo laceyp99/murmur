@@ -18,3 +18,9 @@ Pillow>=10.0.0
 
 # Notifications (optional, will fallback to console if not available)
 win10toast>=0.9
+
+# Windows media control (pause/resume during recording)
+winrt-runtime>=3.0.0
+winrt-Windows.Foundation>=3.0.0
+winrt-Windows.Foundation.Collections>=3.0.0
+winrt-Windows.Media.Control>=3.0.0
