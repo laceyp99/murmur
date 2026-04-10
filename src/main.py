@@ -156,7 +156,6 @@ class MurmurApp:
     def _process_audio(self, audio_data: AudioData) -> None:
         """Process recorded audio through transcription."""
         self.hotkey_manager.set_processing()
-        self.notifications.notify_recording_stopped()
 
         print(f"📝 Processing {audio_data.duration:.1f}s of audio...")
 

@@ -82,10 +82,6 @@ class NotificationManager:
         """Notify that recording has started."""
         self.notify("murmur", "Recording started... Speak now!")
     
-    def notify_recording_stopped(self) -> None:
-        """Notify that recording has stopped."""
-        self.notify("murmur", "Recording stopped. Processing...")
-    
     def notify_transcription_complete(self, text: str) -> None:
         """Notify that transcription is complete."""
         preview = text[:50] + "..." if len(text) > 50 else text
