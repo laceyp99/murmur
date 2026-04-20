@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 
+APP_DIR_NAME = "murmur"
+
+
 DEFAULT_CONFIG = {
     "hotkey": "ctrl+shift+space",
     "model": "small",
@@ -15,21 +18,33 @@ DEFAULT_CONFIG = {
     "language": None,
     "sample_rate": 16000,
     "max_recording_duration": 300,
-    "enable_logging": True,
+    "enable_logging": False,
     "enable_notifications": True,
     "start_with_windows": True,
     "pause_media_while_recording": True,
+    "logging_consent_updated_at": None,
+    "logging_consent_source": None,
 }
 
 # Global config instance
 _config_instance = None
 
 
+def get_app_data_dir() -> Path:
+    """Get the canonical Murmur AppData directory."""
+    return Path(os.environ.get("APPDATA", ".")) / APP_DIR_NAME
+
+
+def get_training_data_dir() -> Path:
+    """Get the canonical training data directory."""
+    return get_app_data_dir() / "training_data"
+
+
 class Config:
     """Manages application configuration."""
 
     def __init__(self):
-        self.config_dir = Path(os.environ.get("APPDATA", ".")) / "Murmur"
+        self.config_dir = get_app_data_dir()
         self.config_file = self.config_dir / "config.json"
         self._config: Dict[str, Any] = {}
         self._load()
@@ -109,6 +124,11 @@ class Config:
     def pause_media_while_recording(self) -> bool:
         """Get the pause media while recording setting."""
         return self.get("pause_media_while_recording", True)
+
+    @property
+    def enable_logging(self) -> bool:
+        """Get the training-data logging setting."""
+        return self.get("enable_logging", False)
 
 
 def get_config() -> Config:

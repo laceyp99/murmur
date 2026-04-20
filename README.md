@@ -13,7 +13,7 @@ A lightweight Windows application that enables dictation anywhere on your system
 - 🔇 **Auto-Pause Media** - Automatically pauses playing media during recording
 - 🖥️ **System Tray** - Runs in the background with a status icon
 - ⚙️ **Settings GUI** - Easily configure hotkey, model, and auto-start
-- 📁 **Training Data Logging** - Saves audio and transcriptions for fine-tuning
+- 📁 **Training Data Logging** - Optional local-only audio/transcript capture for fine-tuning
 
 ## System Requirements
 
@@ -114,10 +114,12 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
   "language": null,
   "sample_rate": 16000,
   "max_recording_duration": 300,
-  "enable_logging": true,
+  "enable_logging": false,
   "enable_notifications": true,
   "start_with_windows": true,
-  "pause_media_while_recording": true
+  "pause_media_while_recording": true,
+  "logging_consent_updated_at": null,
+  "logging_consent_source": null
 }
 ```
 
@@ -131,10 +133,12 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
 | `language` | Language code (null for auto-detect) | `null` |
 | `sample_rate` | Audio sample rate in Hz | `16000` |
 | `max_recording_duration` | Maximum recording length in seconds | `300` |
-| `enable_logging` | Save audio/transcriptions for training | `true` |
+| `enable_logging` | Save raw audio/transcriptions for training after explicit opt-in | `false` |
 | `enable_notifications` | Show Windows toast notifications | `true` |
 | `start_with_windows` | Automatically start on login | `true` |
 | `pause_media_while_recording` | Pause system media during recording | `true` |
+| `logging_consent_updated_at` | Local timestamp of the last logging consent change | `null` |
+| `logging_consent_source` | Local source of the last logging consent change | `null` |
 
 ## Troubleshooting
 
@@ -156,6 +160,8 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
 
 ## Training Data
 
+Training data logging is disabled by default. To enable it, open **Settings** from the tray icon, turn on **Enable Training Data Logging**, and confirm the privacy prompt.
+
 When `enable_logging` is true, murmur saves all recordings for fine-tuning:
 
 **Location:** `%APPDATA%\murmur\training_data\`
@@ -171,3 +177,9 @@ Each JSONL entry:
 ```json
 {"timestamp": "2024-12-06T14:30:22", "audio_file": "20241206_143022_123456.wav", "transcription": "Your text", "duration": 3.5, "model": "small", "processing_time": 0.8}
 ```
+
+Privacy notes:
+
+- Raw WAV audio and transcript text are only stored after you opt in.
+- You can disable logging at any time from Settings.
+- You can delete existing logged data from Settings with **Delete Logged Data**.

@@ -82,10 +82,16 @@ class MurmurApp:
         print(f"Hotkey: {self.config.hotkey}")
         print(f"Model: {self.config.model_name}")
         print(f"Device: {self.transcriber.get_device_info()['device']}")
-        print(f"Logging: {self.logger.get_log_directory()}")
-        print(
-            f"Logged entries: {self.logger.get_entry_count()} ({self.logger.get_total_duration():.1f}s audio)"
-        )
+        logging_status = "enabled" if self.logger.is_enabled() else "disabled"
+        print(f"Training data logging: {logging_status}")
+        print(f"Training data path: {self.logger.get_log_directory()}")
+        if self.logger.is_enabled():
+            print(
+                "Privacy notice: raw WAV audio and transcription text will be stored locally until you delete them from Settings."
+            )
+            print(
+                f"Logged entries: {self.logger.get_entry_count()} ({self.logger.get_total_duration():.1f}s audio)"
+            )
         print(f"{'=' * 50}\n")
 
         self.notifications.notify("murmur", "Ready! Press hotkey to start recording.")
