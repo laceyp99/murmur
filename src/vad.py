@@ -106,11 +106,11 @@ class WebRTCVADSegmenter:
         sample_rate: int = 16000,
         frame_duration_ms: int = 20,
         aggressiveness: int = 1,
-        start_padding_ms: int = 200,
-        end_padding_ms: int = 300,
-        silence_duration_ms: int = 600,
+        start_padding_ms: int = 300,
+        end_padding_ms: int = 500,
+        silence_duration_ms: int = 400,
         min_segment_duration_ms: int = 500,
-        merge_gap_ms: int = 250,
+        merge_gap_ms: int = 150,
         vad: Optional[object] = None,
     ):
         if frame_duration_ms not in (10, 20, 30):
