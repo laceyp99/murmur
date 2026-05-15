@@ -6,6 +6,9 @@ numpy>=1.24.0
 # Audio recording
 sounddevice>=0.4.6
 
+# Voice activity detection
+webrtcvad-wheels>=2.0.14
+
 # Hotkey handling
 keyboard>=0.13.5 
 
