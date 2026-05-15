@@ -10,6 +10,7 @@ from typing import Optional
 from .config import get_config, Config
 from .audio import AudioRecorder, AudioData
 from .transcription import Transcriber
+from .vad import WebRTCVADSegmenter
 from .clipboard import copy_to_clipboard
 from .hotkey import HotkeyManager, HotkeyState, wait_for_exit
 from .notifications import get_notification_manager
@@ -41,6 +42,7 @@ class MurmurApp:
         self.config = get_config()
         self.recorder = AudioRecorder()
         self.transcriber = Transcriber()
+        self.segmenter = WebRTCVADSegmenter(sample_rate=self.config.sample_rate)
         self.hotkey_manager = HotkeyManager()
         self.notifications = get_notification_manager()
         self.logger = get_logger()
@@ -166,9 +168,8 @@ class MurmurApp:
         print(f"📝 Processing {audio_data.duration:.1f}s of audio...")
 
         try:
-            # Transcribe
             start_time = time.time()
-            text = self.transcriber.transcribe(audio_data)
+            text = self._transcribe_audio(audio_data)
             elapsed = time.time() - start_time
 
             if text:
@@ -193,6 +194,32 @@ class MurmurApp:
         finally:
             self.tray.set_status("Ready")
             self.hotkey_manager.set_idle()
+
+    def _transcribe_audio(self, audio_data: AudioData) -> str:
+        """Transcribe audio through VAD segments with a full-clip fallback."""
+        try:
+            segmenter = self._get_segmenter(audio_data.sample_rate)
+            segments = segmenter.segment_audio(audio_data.audio)
+        except Exception as exc:
+            print(f"⚠️ VAD segmentation failed: {exc}. Falling back to full clip.")
+            return self.transcriber.transcribe(audio_data)
+
+        if not segments:
+            print("⚠️ No VAD speech segments detected. Falling back to full clip.")
+            return self.transcriber.transcribe(audio_data)
+
+        print(f"Detected {len(segments)} speech segment(s).")
+        for index, segment in enumerate(segments):
+            print(f"  Segment {index}: {segment.duration:.2f}s")
+
+        return self.transcriber.transcribe_segments(segments, debug=True).text
+
+    def _get_segmenter(self, sample_rate: int) -> WebRTCVADSegmenter:
+        """Return a segmenter configured for the audio sample rate."""
+        if self.segmenter.sample_rate == sample_rate:
+            return self.segmenter
+
+        return WebRTCVADSegmenter(sample_rate=sample_rate)
 
     def _on_state_change(self, state: HotkeyState) -> None:
         """Handle state changes."""
