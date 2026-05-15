@@ -27,3 +27,6 @@ winrt-runtime>=3.0.0
 winrt-Windows.Foundation>=3.0.0
 winrt-Windows.Foundation.Collections>=3.0.0
 winrt-Windows.Media.Control>=3.0.0
+
+# Testing
+pytest>=8.0.0
