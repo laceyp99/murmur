@@ -72,11 +72,18 @@ class LiveVADSegmentationWorker:
         )
         self._thread.start()
 
-    def submit_audio_block(self, audio_block: np.ndarray) -> None:
+    def submit_audio_block(self, audio_block: np.ndarray, *, copy: bool = True) -> None:
         """Queue a recorder block for background VAD processing."""
         if not self._running:
             return
-        self._queue.put(np.asarray(audio_block, dtype=np.float32).reshape(-1).copy())
+
+        prepared_block = np.asarray(audio_block, dtype=np.float32).reshape(-1)
+        if copy:
+            prepared_block = prepared_block.copy()
+        elif not prepared_block.flags.c_contiguous:
+            prepared_block = np.ascontiguousarray(prepared_block)
+
+        self._queue.put(prepared_block)
 
     def stop(self) -> None:
         """Stop the worker and flush any pending speech segment."""
