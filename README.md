@@ -96,6 +96,7 @@ Or double-click `run_background.vbs`.
 - murmur captures audio in lightweight 100 ms recorder blocks.
 - A background WebRTC VAD worker reframes those blocks into 20 ms speech frames.
 - Completed speech segments are transcribed serially in the background while you are still recording.
+- If the live VAD or live transcription path fails mid-recording, murmur logs the failure and falls back to finalizing from the full recorded audio when you stop.
 - When you stop, murmur flushes any pending speech, drains the live transcription queue, applies one final document cleanup pass, and copies the final text to the clipboard.
 
 ### First Run
