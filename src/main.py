@@ -308,15 +308,18 @@ class MurmurApp:
             self._live_vad_disabled_reason = f"Live VAD unavailable: {exc}"
             print(f"⚠️ {self._live_vad_disabled_reason}")
             self.recorder.set_block_callback(None)
+            self.recorder.set_block_callback_error_handler(None)
             return
 
         worker.start()
         self.live_segmenter = worker
+        self.recorder.set_block_callback_error_handler(self._on_live_block_callback_error)
         self.recorder.set_block_callback(worker.submit_audio_block)
 
     def _stop_live_segmentation(self) -> None:
         """Detach and stop the live segmentation worker."""
         self.recorder.set_block_callback(None)
+        self.recorder.set_block_callback_error_handler(None)
 
         if self.live_segmenter is None:
             return
@@ -429,6 +432,13 @@ class MurmurApp:
         self.notifications.notify(
             "murmur",
             "Live transcription paused. Final transcript will finish after recording.",
+        )
+
+    def _on_live_block_callback_error(self, exc: Exception) -> None:
+        """Handle a recorder block callback failure during live segmentation."""
+        print(f"⚠️ Live audio callback failed: {exc}")
+        self._on_live_pipeline_degraded(
+            f"Live audio callback failed: {exc}"
         )
 
     def _on_state_change(self, state: HotkeyState) -> None:

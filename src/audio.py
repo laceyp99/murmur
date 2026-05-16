@@ -34,6 +34,8 @@ class AudioRecorder:
         self._stream: Optional[sd.InputStream] = None
         self._recording_start: Optional[float] = None
         self._block_callback: Optional[Callable[[np.ndarray], None]] = None
+        self._on_block_callback_error: Optional[Callable[[Exception], None]] = None
+        self._block_callback_failed = False
 
     def set_block_callback(
         self,
@@ -42,6 +44,14 @@ class AudioRecorder:
         """Register a lightweight per-block callback used during recording."""
         with self._lock:
             self._block_callback = callback
+
+    def set_block_callback_error_handler(
+        self,
+        handler: Optional[Callable[[Exception], None]],
+    ) -> None:
+        """Register a handler for the first per-block callback failure."""
+        with self._lock:
+            self._on_block_callback_error = handler
     
     def start_recording(self):
         """Start recording audio."""
@@ -52,6 +62,7 @@ class AudioRecorder:
             self._recording = True
             self._audio_data = []
             self._recording_start = time.time()
+            self._block_callback_failed = False
         
         self._stream = sd.InputStream(
             samplerate=self.sample_rate,
@@ -101,6 +112,7 @@ class AudioRecorder:
         
         audio_block: Optional[np.ndarray] = None
         block_callback: Optional[Callable[[np.ndarray], None]] = None
+        error_handler: Optional[Callable[[Exception], None]] = None
         with self._lock:
             if not self._recording:
                 return
@@ -108,12 +120,22 @@ class AudioRecorder:
             audio_block = indata.copy()
             self._audio_data.append(audio_block)
             block_callback = self._block_callback
+            error_handler = self._on_block_callback_error
 
         if block_callback is not None and audio_block is not None:
             try:
                 block_callback(audio_block)
-            except Exception:
-                pass
+            except Exception as exc:
+                should_report = False
+                with self._lock:
+                    if not self._block_callback_failed:
+                        self._block_callback_failed = True
+                        should_report = True
+                    self._block_callback = None
+
+                print(f"⚠️ Audio block callback failed; disabling live callback: {exc}")
+                if should_report and error_handler is not None:
+                    error_handler(exc)
     
     def get_recording_duration(self) -> float:
         """Get current recording duration in seconds."""

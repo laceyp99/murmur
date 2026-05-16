@@ -73,10 +73,19 @@ class FakeRecorder:
     def __init__(self, audio_data):
         self.audio_data = audio_data
         self.stop_calls = 0
+        self.sample_rate = 16000
+        self.block_callback = None
+        self.block_callback_error_handler = None
 
     def stop_recording(self):
         self.stop_calls += 1
         return self.audio_data
+
+    def set_block_callback(self, callback):
+        self.block_callback = callback
+
+    def set_block_callback_error_handler(self, handler):
+        self.block_callback_error_handler = handler
 
 
 class FakeTray:
@@ -339,6 +348,66 @@ def test_on_live_pipeline_degraded_marks_app_once_and_notifies_once():
 
     assert app._live_pipeline_degraded is True
     assert app._live_pipeline_degraded_reason == "worker failed"
+    assert app.notifications.messages == [
+        (
+            "murmur",
+            "Live transcription paused. Final transcript will finish after recording.",
+        )
+    ]
+
+
+def test_start_live_segmentation_registers_recorder_callbacks():
+    transcriber = FakeTranscriber()
+    recorder = FakeRecorder(audio_data=None)
+    worker = SimpleNamespace(start_calls=0, submit_audio_block=lambda block: block)
+
+    def start_worker():
+        worker.start_calls += 1
+
+    worker.start = start_worker
+
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.recorder = recorder
+    app.live_segmenter = None
+    app.notifications = FakeNotifications()
+    app._build_live_segmenter = lambda sample_rate: worker
+
+    app._start_live_segmentation()
+
+    assert worker.start_calls == 1
+    assert app.live_segmenter is worker
+    assert recorder.block_callback == worker.submit_audio_block
+    assert recorder.block_callback_error_handler == app._on_live_block_callback_error
+
+
+def test_stop_live_segmentation_clears_recorder_callbacks_and_stops_worker():
+    transcriber = FakeTranscriber()
+    recorder = FakeRecorder(audio_data=None)
+    stopped = []
+    worker = SimpleNamespace(stop=lambda: stopped.append(True))
+
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.recorder = recorder
+    app.live_segmenter = worker
+
+    app._stop_live_segmentation()
+
+    assert recorder.block_callback is None
+    assert recorder.block_callback_error_handler is None
+    assert stopped == [True]
+    assert app.live_segmenter is None
+
+
+def test_on_live_block_callback_error_marks_pipeline_degraded_once():
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.notifications = FakeNotifications()
+
+    app._on_live_block_callback_error(RuntimeError("queue submit failed"))
+    app._on_live_block_callback_error(RuntimeError("later failure"))
+
+    assert app._live_pipeline_degraded is True
+    assert app._live_pipeline_degraded_reason == "Live audio callback failed: queue submit failed"
     assert app.notifications.messages == [
         (
             "murmur",
