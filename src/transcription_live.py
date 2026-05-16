@@ -103,7 +103,12 @@ class LiveTranscriptionWorker:
             self.on_segment_queued(segment)
 
     def stop(self) -> None:
-        """Stop the background worker without draining future work."""
+        """Stop the background worker after finishing already queued segments.
+
+        New segments submitted after shutdown begins are ignored, but any
+        segments already queued before the shutdown sentinel may still be
+        transcribed before the worker thread exits.
+        """
         if not self._running:
             return
 
