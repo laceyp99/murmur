@@ -10,7 +10,12 @@ class FakeLiveTranscriber:
 
     def transcribe_segment(self, segment):
         self.calls.append(segment.segment_id)
-        return self._responses[segment.segment_id]
+        response = self._responses[segment.segment_id]
+        if isinstance(response, list):
+            response = response.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def make_segment(segment_id, duration=0.5):
@@ -68,3 +73,64 @@ def test_live_transcription_worker_skips_empty_transcript_appends():
 
     assert accumulator.get_text() == "next"
     assert appended_text == [(1, "next")]
+
+
+def test_live_transcription_worker_retries_failed_segment_and_continues_processing():
+    failed_segments = []
+    degraded_messages = []
+    accumulator = TranscriptAccumulator()
+    worker = LiveTranscriptionWorker(
+        transcriber=FakeLiveTranscriber(
+            {
+                0: [RuntimeError("boom"), RuntimeError("boom again")],
+                1: "next",
+            }
+        ),
+        accumulator=accumulator,
+        on_segment_failed=lambda segment, exc, attempts: failed_segments.append(
+            (segment.segment_id, str(exc), attempts)
+        ),
+        on_worker_degraded=degraded_messages.append,
+        max_segment_retries=1,
+    )
+
+    worker.start()
+    worker.submit_segment(make_segment(0))
+    worker.submit_segment(make_segment(1))
+    worker.stop()
+
+    assert worker.is_degraded() is True
+    assert worker.failure_count == 1
+    assert worker.get_last_error() == (
+        "Live transcription failed for segment 0 after 2 attempts: boom again"
+    )
+    assert accumulator.get_text() == "next"
+    assert worker.transcriber.calls == [0, 0, 1]
+    assert failed_segments == [(0, "boom again", 2)]
+    assert degraded_messages == [
+        "Live transcription failed for segment 0 after 2 attempts: boom again"
+    ]
+
+
+def test_live_transcription_worker_disables_failing_chunk_callback_and_keeps_running():
+    appended_chunk_ids = []
+    accumulator = TranscriptAccumulator()
+
+    def failing_chunk_callback(chunk, text):
+        appended_chunk_ids.append(chunk.segment_id)
+        raise RuntimeError("chunk callback broke")
+
+    worker = LiveTranscriptionWorker(
+        transcriber=FakeLiveTranscriber({0: "first", 1: "second"}),
+        accumulator=accumulator,
+        on_chunk_appended=failing_chunk_callback,
+    )
+
+    worker.start()
+    worker.submit_segment(make_segment(0))
+    worker.submit_segment(make_segment(1))
+    worker.stop()
+
+    assert worker.is_degraded() is False
+    assert accumulator.get_text() == "first second"
+    assert appended_chunk_ids == [0]

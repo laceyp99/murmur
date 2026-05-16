@@ -64,6 +64,8 @@ def make_app(segmenter, transcriber, config=None):
     app.config = config or FakeConfig()
     app._vad_disabled_reason = None
     app._live_vad_disabled_reason = None
+    app._live_pipeline_degraded = False
+    app._live_pipeline_degraded_reason = None
     return app
 
 
@@ -305,6 +307,44 @@ def test_finalize_recording_falls_back_to_offline_processing_when_live_text_miss
     app._finalize_recording(audio_data)
 
     assert called == [audio_data]
+
+
+def test_finalize_recording_falls_back_to_offline_processing_when_live_pipeline_degraded(monkeypatch):
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.live_transcript_accumulator = main_module.TranscriptAccumulator()
+    app.live_transcript_accumulator.add_chunk(
+        SimpleNamespace(segment_id=0, text="partial live", latency_seconds=0.1)
+    )
+    app._live_pipeline_degraded = True
+    app._live_pipeline_degraded_reason = "live segment failed"
+
+    called = []
+    audio_data = make_audio_data()
+    monkeypatch.setattr(app, "_process_audio", lambda provided_audio: called.append(provided_audio))
+
+    app._finalize_recording(audio_data)
+
+    assert called == [audio_data]
+    assert transcriber.finalize_calls == []
+
+
+def test_on_live_pipeline_degraded_marks_app_once_and_notifies_once():
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.notifications = FakeNotifications()
+
+    app._on_live_pipeline_degraded("worker failed")
+    app._on_live_pipeline_degraded("later failure")
+
+    assert app._live_pipeline_degraded is True
+    assert app._live_pipeline_degraded_reason == "worker failed"
+    assert app.notifications.messages == [
+        (
+            "murmur",
+            "Live transcription paused. Final transcript will finish after recording.",
+        )
+    ]
 
 
 def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch):

@@ -57,6 +57,8 @@ class MurmurApp:
         self._was_media_playing = False
         self._vad_disabled_reason: Optional[str] = None
         self._live_vad_disabled_reason: Optional[str] = None
+        self._live_pipeline_degraded = False
+        self._live_pipeline_degraded_reason: Optional[str] = None
 
         if preload_model:
             print("Preloading Whisper model...")
@@ -121,6 +123,8 @@ class MurmurApp:
     def _on_recording_start(self) -> None:
         """Handle recording start."""
         print("🎤 Recording started...")
+        self._live_pipeline_degraded = False
+        self._live_pipeline_degraded_reason = None
         self.notifications.notify_recording_started()
         self.tray.set_status("Recording...")
 
@@ -175,6 +179,12 @@ class MurmurApp:
 
     def _finalize_recording(self, audio_data: AudioData) -> None:
         """Finalize stop-time output from the live transcript, or fall back offline."""
+        if self._live_pipeline_degraded:
+            reason = self._live_pipeline_degraded_reason or "Live transcription degraded"
+            print(f"⚠️ {reason}. Recomputing final transcript from the full recording.")
+            self._process_audio(audio_data)
+            return
+
         live_text = self._get_live_transcript_text()
         if not live_text:
             self._process_audio(audio_data)
@@ -323,8 +333,10 @@ class MurmurApp:
             transcriber=self.transcriber,
             accumulator=self.live_transcript_accumulator,
             on_segment_queued=self._on_live_segment_queued,
+            on_segment_failed=self._on_live_segment_failed,
             on_segment_transcribed=self._on_live_segment_transcribed,
             on_chunk_appended=self._on_live_chunk_appended,
+            on_worker_degraded=self._on_live_pipeline_degraded,
         )
         worker.start()
         self.live_transcription_worker = worker
@@ -334,7 +346,13 @@ class MurmurApp:
         if self.live_transcription_worker is None:
             return
 
-        self.live_transcription_worker.stop()
+        worker = self.live_transcription_worker
+        if worker.is_degraded():
+            self._on_live_pipeline_degraded(
+                worker.get_last_error() or "Live transcription degraded"
+            )
+
+        worker.stop()
         self.live_transcription_worker = None
 
     def _build_live_segmenter(self, sample_rate: int) -> LiveVADSegmentationWorker:
@@ -384,6 +402,33 @@ class MurmurApp:
             "Live transcript appended: "
             f"id={chunk.segment_id} "
             f"current_text={current_text!r}"
+        )
+
+    def _on_live_segment_failed(
+        self,
+        segment: LiveSpeechSegment,
+        exc: Exception,
+        attempt_count: int,
+    ) -> None:
+        """Emit debug logging when live transcription permanently fails for a segment."""
+        print(
+            "⚠️ Live segment failed: "
+            f"id={segment.segment_id} "
+            f"attempts={attempt_count} "
+            f"error={exc}"
+        )
+
+    def _on_live_pipeline_degraded(self, message: str) -> None:
+        """Mark the live pipeline degraded and notify the user once per recording."""
+        if self._live_pipeline_degraded:
+            return
+
+        self._live_pipeline_degraded = True
+        self._live_pipeline_degraded_reason = message
+        print(f"⚠️ {message}")
+        self.notifications.notify(
+            "murmur",
+            "Live transcription paused. Final transcript will finish after recording.",
         )
 
     def _on_state_change(self, state: HotkeyState) -> None:
