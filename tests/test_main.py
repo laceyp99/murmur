@@ -29,6 +29,7 @@ class FakeTranscriber:
         self.segment_calls = []
         self.audio_calls = []
         self.live_segment_calls = []
+        self.finalize_calls = []
 
     def transcribe_segments(self, segments, debug=False):
         self.segment_calls.append({"segments": list(segments), "debug": debug})
@@ -41,6 +42,10 @@ class FakeTranscriber:
     def transcribe_segment(self, segment):
         self.live_segment_calls.append(segment)
         return f"live-{segment.segment_id}"
+
+    def finalize_text(self, text):
+        self.finalize_calls.append(text)
+        return f"FINAL:{text}" if text else ""
 
 
 class FakeConfig:
@@ -60,6 +65,69 @@ def make_app(segmenter, transcriber, config=None):
     app._vad_disabled_reason = None
     app._live_vad_disabled_reason = None
     return app
+
+
+class FakeRecorder:
+    def __init__(self, audio_data):
+        self.audio_data = audio_data
+        self.stop_calls = 0
+
+    def stop_recording(self):
+        self.stop_calls += 1
+        return self.audio_data
+
+
+class FakeTray:
+    def __init__(self):
+        self.statuses = []
+
+    def set_status(self, status):
+        self.statuses.append(status)
+
+
+class FakeNotifications:
+    def __init__(self):
+        self.completed = []
+        self.messages = []
+        self.errors = []
+
+    def notify_transcription_complete(self, text):
+        self.completed.append(text)
+
+    def notify(self, title, message):
+        self.messages.append((title, message))
+
+    def notify_error(self, message):
+        self.errors.append(message)
+
+
+class FakeLogger:
+    def __init__(self):
+        self.entries = []
+
+    def log(self, audio_data, text, elapsed):
+        self.entries.append((audio_data, text, elapsed))
+
+
+class FakeHotkeyManager:
+    def __init__(self):
+        self.processing_calls = 0
+        self.idle_calls = 0
+
+    def set_processing(self):
+        self.processing_calls += 1
+
+    def set_idle(self):
+        self.idle_calls += 1
+
+
+class FakeMediaController:
+    def __init__(self):
+        self.play_calls = 0
+
+    def play(self):
+        self.play_calls += 1
+        return True
 
 
 def make_audio_data():
@@ -195,3 +263,79 @@ def test_start_live_transcription_replaces_existing_worker():
     assert first_worker is not app.live_transcription_worker
     assert first_accumulator is not app.live_transcript_accumulator
     app._stop_live_transcription()
+
+
+def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeypatch):
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.live_transcript_accumulator = main_module.TranscriptAccumulator()
+    app.live_transcript_accumulator.add_chunk(
+        SimpleNamespace(segment_id=0, text="hello world", latency_seconds=0.1)
+    )
+    app.tray = FakeTray()
+    app.notifications = FakeNotifications()
+    app.logger = FakeLogger()
+    app.hotkey_manager = FakeHotkeyManager()
+
+    copied_text = []
+    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: copied_text.append(text) or True)
+
+    audio_data = make_audio_data()
+    app._finalize_recording(audio_data)
+
+    assert copied_text == ["FINAL:hello world"]
+    assert transcriber.audio_calls == []
+    assert transcriber.segment_calls == []
+    assert transcriber.finalize_calls == ["hello world"]
+    assert app.notifications.completed == ["FINAL:hello world"]
+    assert app.logger.entries == [(audio_data, "FINAL:hello world", 0.0)]
+    assert app.tray.statuses == ["Ready"]
+    assert app.hotkey_manager.processing_calls == 1
+    assert app.hotkey_manager.idle_calls == 1
+
+
+def test_finalize_recording_falls_back_to_offline_processing_when_live_text_missing(monkeypatch):
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    called = []
+    audio_data = make_audio_data()
+
+    monkeypatch.setattr(app, "_process_audio", lambda provided_audio: called.append(provided_audio))
+
+    app._finalize_recording(audio_data)
+
+    assert called == [audio_data]
+
+
+def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch):
+    transcriber = FakeTranscriber()
+    audio_data = make_audio_data()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.recorder = FakeRecorder(audio_data)
+    app.tray = FakeTray()
+    app.notifications = FakeNotifications()
+    app.logger = FakeLogger()
+    app.hotkey_manager = FakeHotkeyManager()
+    app.media_controller = FakeMediaController()
+    app._was_media_playing = True
+    app.live_transcript_accumulator = main_module.TranscriptAccumulator()
+    app.live_transcript_accumulator.add_chunk(
+        SimpleNamespace(segment_id=0, text="tail kept", latency_seconds=0.1)
+    )
+
+    segmentation_stops = []
+    transcription_stops = []
+    copied_text = []
+    monkeypatch.setattr(app, "_stop_live_segmentation", lambda: segmentation_stops.append(True))
+    monkeypatch.setattr(app, "_stop_live_transcription", lambda: transcription_stops.append(True))
+    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: copied_text.append(text) or True)
+
+    app._on_recording_stop()
+
+    assert app.tray.statuses[0] == "Finalizing..."
+    assert segmentation_stops == [True]
+    assert transcription_stops == [True]
+    assert copied_text == ["FINAL:tail kept"]
+    assert app.media_controller.play_calls == 1
+    assert app.hotkey_manager.processing_calls == 1
+    assert app.hotkey_manager.idle_calls == 1

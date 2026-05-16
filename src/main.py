@@ -153,7 +153,7 @@ class MurmurApp:
     def _on_recording_stop(self) -> None:
         """Handle recording stop via hotkey."""
         print("⏹️ Recording stopped.")
-        self.tray.set_status("Processing...")
+        self.tray.set_status("Finalizing...")
 
         audio_data = self.recorder.stop_recording()
         self._stop_live_segmentation()
@@ -167,9 +167,23 @@ class MurmurApp:
             self._was_media_playing = False
 
         if audio_data is not None:
-            self._process_audio(audio_data)
+            self._finalize_recording(audio_data)
         else:
             print("⚠️ No audio data captured.")
+            self.tray.set_status("Ready")
+            self.hotkey_manager.set_idle()
+
+    def _finalize_recording(self, audio_data: AudioData) -> None:
+        """Finalize stop-time output from the live transcript, or fall back offline."""
+        live_text = self._get_live_transcript_text()
+        if not live_text:
+            self._process_audio(audio_data)
+            return
+
+        self.hotkey_manager.set_processing()
+        try:
+            self._complete_transcription(audio_data, live_text)
+        finally:
             self.tray.set_status("Ready")
             self.hotkey_manager.set_idle()
 
@@ -182,22 +196,7 @@ class MurmurApp:
         try:
             start_time = time.time()
             text = self._transcribe_audio(audio_data)
-            elapsed = time.time() - start_time
-
-            if text:
-                # Copy to clipboard
-                if copy_to_clipboard(text):
-                    print(f'✅ Transcribed in {elapsed:.1f}s: "{text}"')
-                    self.notifications.notify_transcription_complete(text)
-
-                    # Log for training data
-                    self.logger.log(audio_data, text, elapsed)
-                else:
-                    print(f'⚠️ Transcribed but failed to copy: "{text}"')
-                    self.notifications.notify_error("Failed to copy to clipboard")
-            else:
-                print("⚠️ No speech detected.")
-                self.notifications.notify("Murmur", "No speech detected.")
+            self._complete_transcription(audio_data, text, time.time() - start_time)
 
         except Exception as e:
             print(f"❌ Transcription error: {e}")
@@ -230,6 +229,39 @@ class MurmurApp:
             print(f"  Segment {index}: {segment.duration:.2f}s")
 
         return self.transcriber.transcribe_segments(segments, debug=True).text
+
+    def _get_live_transcript_text(self) -> str:
+        """Return the finalized live transcript text accumulated during recording."""
+        if self.live_transcript_accumulator is None:
+            return ""
+
+        raw_text = self.live_transcript_accumulator.get_text().strip()
+        if not raw_text:
+            return ""
+
+        return self.transcriber.finalize_text(raw_text)
+
+    def _complete_transcription(
+        self,
+        audio_data: AudioData,
+        text: str,
+        elapsed: Optional[float] = None,
+    ) -> None:
+        """Finish clipboard, notification, and logging for a completed transcript."""
+        if not text:
+            print("⚠️ No speech detected.")
+            self.notifications.notify("Murmur", "No speech detected.")
+            return
+
+        runtime = 0.0 if elapsed is None else elapsed
+        if copy_to_clipboard(text):
+            print(f'✅ Transcribed in {runtime:.1f}s: "{text}"')
+            self.notifications.notify_transcription_complete(text)
+            self.logger.log(audio_data, text, runtime)
+            return
+
+        print(f'⚠️ Transcribed but failed to copy: "{text}"')
+        self.notifications.notify_error("Failed to copy to clipboard")
 
     def _get_segmenter(self, sample_rate: int) -> Optional[WebRTCVADSegmenter]:
         """Return a cached segmenter, or disable VAD if initialization fails."""
