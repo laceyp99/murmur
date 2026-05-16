@@ -10,6 +10,7 @@ from typing import Optional
 from .config import get_config, Config
 from .audio import AudioRecorder, AudioData
 from .transcription import Transcriber
+from .vad import WebRTCVADSegmenter
 from .clipboard import copy_to_clipboard
 from .hotkey import HotkeyManager, HotkeyState, wait_for_exit
 from .notifications import get_notification_manager
@@ -41,6 +42,7 @@ class MurmurApp:
         self.config = get_config()
         self.recorder = AudioRecorder()
         self.transcriber = Transcriber()
+        self.segmenter: Optional[WebRTCVADSegmenter] = None
         self.hotkey_manager = HotkeyManager()
         self.notifications = get_notification_manager()
         self.logger = get_logger()
@@ -49,6 +51,7 @@ class MurmurApp:
 
         self._running = False
         self._was_media_playing = False
+        self._vad_disabled_reason: Optional[str] = None
 
         if preload_model:
             print("Preloading Whisper model...")
@@ -166,9 +169,8 @@ class MurmurApp:
         print(f"📝 Processing {audio_data.duration:.1f}s of audio...")
 
         try:
-            # Transcribe
             start_time = time.time()
-            text = self.transcriber.transcribe(audio_data)
+            text = self._transcribe_audio(audio_data)
             elapsed = time.time() - start_time
 
             if text:
@@ -193,6 +195,60 @@ class MurmurApp:
         finally:
             self.tray.set_status("Ready")
             self.hotkey_manager.set_idle()
+
+    def _transcribe_audio(self, audio_data: AudioData) -> str:
+        """Transcribe audio through VAD segments with a full-clip fallback."""
+        segmenter = self._get_segmenter(audio_data.sample_rate)
+        if segmenter is None:
+            reason = self._vad_disabled_reason or "VAD unavailable"
+            print(f"⚠️ {reason}. Falling back to full clip.")
+            return self.transcriber.transcribe(audio_data)
+
+        try:
+            segments = segmenter.segment_audio(audio_data.audio)
+        except Exception as exc:
+            print(f"⚠️ VAD segmentation failed: {exc}. Falling back to full clip.")
+            return self.transcriber.transcribe(audio_data)
+
+        if not segments:
+            print("⚠️ No VAD speech segments detected. Falling back to full clip.")
+            return self.transcriber.transcribe(audio_data)
+
+        print(f"Detected {len(segments)} speech segment(s).")
+        for index, segment in enumerate(segments):
+            print(f"  Segment {index}: {segment.duration:.2f}s")
+
+        return self.transcriber.transcribe_segments(segments, debug=True).text
+
+    def _get_segmenter(self, sample_rate: int) -> Optional[WebRTCVADSegmenter]:
+        """Return a cached segmenter, or disable VAD if initialization fails."""
+        if self._vad_disabled_reason is not None:
+            return None
+
+        if self.segmenter is not None and self.segmenter.sample_rate == sample_rate:
+            return self.segmenter
+
+        try:
+            self.segmenter = self._build_segmenter(sample_rate)
+        except Exception as exc:
+            self.segmenter = None
+            self._vad_disabled_reason = f"VAD unavailable: {exc}"
+            return None
+
+        return self.segmenter
+
+    def _build_segmenter(self, sample_rate: int) -> WebRTCVADSegmenter:
+        """Create a VAD segmenter using the current application config."""
+        end_padding_ms = self.config.vad_padding_ms
+        start_padding_ms = round(end_padding_ms * 0.6)
+
+        return WebRTCVADSegmenter(
+            sample_rate=sample_rate,
+            aggressiveness=self.config.vad_aggressiveness,
+            start_padding_ms=start_padding_ms,
+            end_padding_ms=end_padding_ms,
+            silence_duration_ms=self.config.vad_silence_duration_ms,
+        )
 
     def _on_state_change(self, state: HotkeyState) -> None:
         """Handle state changes."""

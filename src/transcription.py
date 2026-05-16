@@ -3,14 +3,42 @@ Transcription module for Murmur.
 Handles Whisper model loading and speech-to-text transcription.
 """
 
+from dataclasses import dataclass
+import re
+import time
+from typing import List, Optional, Protocol, Sequence
+
 import numpy as np
 import torch
 import whisper
-from typing import Optional
-import re
 
 from .config import get_config
 from .audio import AudioData
+
+
+class AudioSegmentLike(Protocol):
+    """Structural type for audio segments accepted by the transcriber."""
+
+    audio: np.ndarray
+    sample_rate: int
+
+
+@dataclass(frozen=True)
+class SegmentTranscription:
+    """A single segment transcription and its runtime metadata."""
+
+    index: int
+    text: str
+    duration: float
+    processing_time: float
+
+
+@dataclass(frozen=True)
+class TranscriptionResult:
+    """Combined segment outputs and the final cleaned document text."""
+
+    text: str
+    segments: List[SegmentTranscription]
 
 
 class Transcriber:
@@ -20,10 +48,15 @@ class Transcriber:
     Supports GPU acceleration via CUDA when available.
     """
     
-    def __init__(self):
-        self.config = get_config()
-        self._model: Optional[whisper.Whisper] = None
-        self._device: str = self._get_device()
+    def __init__(
+        self,
+        config=None,
+        model: Optional[whisper.Whisper] = None,
+        device: Optional[str] = None,
+    ):
+        self.config = config or get_config()
+        self._model: Optional[whisper.Whisper] = model
+        self._device: str = device or self._get_device()
     
     def _get_device(self) -> str:
         """Determine the best device to use for inference."""
@@ -57,37 +90,90 @@ class Transcriber:
         Returns:
             Transcribed text string.
         """
+        return self.transcribe_segments([audio_data]).text
+
+    def transcribe_segments(
+        self,
+        segments: Sequence[AudioSegmentLike],
+        debug: bool = False,
+    ) -> TranscriptionResult:
+        """Transcribe ordered audio segments and return raw and final text."""
         if self._model is None:
             self.load_model()
-        
-        # Ensure audio is in the correct format
-        audio = audio_data.audio.astype(np.float32)
-        
-        # Normalize audio
-        if np.max(np.abs(audio)) > 0:
-            audio = audio / np.max(np.abs(audio))
-        
-        # Transcribe
+
+        segment_results: List[SegmentTranscription] = []
+        for index, segment in enumerate(segments):
+            start_time = time.time()
+            text = self._transcribe_segment_audio(segment.audio)
+            elapsed = time.time() - start_time
+
+            if not text:
+                continue
+
+            segment_result = SegmentTranscription(
+                index=index,
+                text=text,
+                duration=self._get_audio_duration(segment),
+                processing_time=elapsed,
+            )
+            segment_results.append(segment_result)
+
+            if debug:
+                print(
+                    f"Segment {index}: {segment_result.duration:.2f}s "
+                    f"transcribed in {segment_result.processing_time:.2f}s"
+                )
+
+        final_text = self._post_process_document(
+            " ".join(segment.text for segment in segment_results)
+        )
+
+        return TranscriptionResult(text=final_text, segments=segment_results)
+
+    def _transcribe_segment_audio(self, audio: np.ndarray) -> str:
+        """Transcribe one waveform segment without final document cleanup."""
+        if self._model is None:
+            self.load_model()
+
+        prepared_audio = self._prepare_audio(audio)
+        if prepared_audio.size == 0:
+            return ""
+
         result = self._model.transcribe(
-            audio,
+            prepared_audio,
             language=self.config.language,
             fp16=(self._device == "cuda"),
-            task="transcribe"
+            task="transcribe",
         )
-        
-        text = result["text"].strip()
-        
-        # Apply post-processing
-        text = self._post_process(text)
-        
-        return text
-    
-    def _post_process(self, text: str) -> str:
+
+        return self._post_process_segment_text(result["text"])
+
+    def _prepare_audio(self, audio: np.ndarray) -> np.ndarray:
+        """Convert audio to a normalized float32 mono waveform for Whisper."""
+        normalized_audio = np.asarray(audio, dtype=np.float32).reshape(-1)
+        if normalized_audio.size == 0:
+            return normalized_audio
+
+        peak = np.max(np.abs(normalized_audio))
+        if peak > 0:
+            normalized_audio = normalized_audio / peak
+
+        return normalized_audio
+
+    def _post_process_segment_text(self, text: str) -> str:
+        """Clean segment text without forcing document-level punctuation."""
+        if not text:
+            return ""
+
+        return self._fix_common_issues(text.strip())
+
+    def _post_process_document(self, text: str) -> str:
         """
-        Apply post-processing to the transcribed text.
+        Apply post-processing to the final transcribed document.
         
         Handles punctuation, capitalization, and minor corrections.
         """
+        text = self._fix_common_issues(text)
         if not text:
             return text
         
@@ -102,6 +188,13 @@ class Transcriber:
         text = self._fix_common_issues(text)
         
         return text
+
+    def _get_audio_duration(self, segment: AudioSegmentLike) -> float:
+        """Compute segment duration from the waveform length and sample rate."""
+        if segment.sample_rate <= 0:
+            return 0.0
+
+        return len(np.asarray(segment.audio).reshape(-1)) / segment.sample_rate
     
     def _fix_common_issues(self, text: str) -> str:
         """Fix common transcription issues."""

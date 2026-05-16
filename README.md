@@ -113,6 +113,9 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
   "device": "cuda",
   "language": null,
   "sample_rate": 16000,
+  "vad_aggressiveness": 1,
+  "vad_padding_ms": 500,
+  "vad_silence_duration_ms": 400,
   "max_recording_duration": 300,
   "enable_logging": false,
   "enable_notifications": true,
@@ -132,6 +135,9 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
 | `device` | Compute device (cuda, cpu) | `cuda` |
 | `language` | Language code (null for auto-detect) | `null` |
 | `sample_rate` | Audio sample rate in Hz | `16000` |
+| `vad_aggressiveness` | WebRTC VAD aggressiveness level | `1` |
+| `vad_padding_ms` | Speech end padding in ms; start padding is derived asymmetrically from this value | `500` |
+| `vad_silence_duration_ms` | Silence duration in ms required to close a speech segment | `400` |
 | `max_recording_duration` | Maximum recording length in seconds | `300` |
 | `enable_logging` | Save raw audio/transcriptions for training after explicit opt-in | `false` |
 | `enable_notifications` | Show Windows toast notifications | `true` |

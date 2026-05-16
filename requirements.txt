@@ -6,6 +6,9 @@ numpy>=1.24.0
 # Audio recording
 sounddevice>=0.4.6
 
+# Voice activity detection
+webrtcvad-wheels>=2.0.14
+
 # Hotkey handling
 keyboard>=0.13.5 
 
@@ -24,3 +27,6 @@ winrt-runtime>=3.0.0
 winrt-Windows.Foundation>=3.0.0
 winrt-Windows.Foundation.Collections>=3.0.0
 winrt-Windows.Media.Control>=3.0.0
+
+# Testing
+pytest>=8.0.0
