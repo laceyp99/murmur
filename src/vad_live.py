@@ -255,8 +255,11 @@ class LiveVADSegmentationWorker:
         self._current_frames = []
         self._last_speech_index = None
         self._silence_run_frames = 0
-        self._pre_speech_frames.clear()
 
+        for frame in overflow_frames:
+            self._track_pending_gap_frame(frame)
+
+        self._pre_speech_frames.clear()
         if self.start_padding_frames <= 0:
             return
 
