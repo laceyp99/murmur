@@ -10,7 +10,8 @@ from typing import Optional
 from .config import get_config, Config
 from .audio import AudioRecorder, AudioData
 from .transcription import Transcriber
-from .vad import WebRTCVADSegmenter
+from .transcription_live import LiveTranscriptionWorker, TranscriptAccumulator, TranscriptChunk
+from .vad import LiveSpeechSegment, LiveVADSegmentationWorker, VADSettings, WebRTCVADSegmenter
 from .clipboard import copy_to_clipboard
 from .hotkey import HotkeyManager, HotkeyState, wait_for_exit
 from .notifications import get_notification_manager
@@ -43,6 +44,9 @@ class MurmurApp:
         self.recorder = AudioRecorder()
         self.transcriber = Transcriber()
         self.segmenter: Optional[WebRTCVADSegmenter] = None
+        self.live_segmenter: Optional[LiveVADSegmentationWorker] = None
+        self.live_transcription_worker: Optional[LiveTranscriptionWorker] = None
+        self.live_transcript_accumulator: Optional[TranscriptAccumulator] = None
         self.hotkey_manager = HotkeyManager()
         self.notifications = get_notification_manager()
         self.logger = get_logger()
@@ -52,6 +56,9 @@ class MurmurApp:
         self._running = False
         self._was_media_playing = False
         self._vad_disabled_reason: Optional[str] = None
+        self._live_vad_disabled_reason: Optional[str] = None
+        self._live_pipeline_degraded = False
+        self._live_pipeline_degraded_reason: Optional[str] = None
 
         if preload_model:
             print("Preloading Whisper model...")
@@ -116,6 +123,8 @@ class MurmurApp:
     def _on_recording_start(self) -> None:
         """Handle recording start."""
         print("🎤 Recording started...")
+        self._live_pipeline_degraded = False
+        self._live_pipeline_degraded_reason = None
         self.notifications.notify_recording_started()
         self.tray.set_status("Recording...")
 
@@ -130,8 +139,12 @@ class MurmurApp:
                     )
 
         try:
+            self._start_live_transcription()
+            self._start_live_segmentation()
             self.recorder.start_recording()
         except Exception as e:
+            self._stop_live_transcription()
+            self._stop_live_segmentation()
             print(f"Error starting recording: {e}")
             self.notifications.notify_error(f"Recording failed: {e}")
             self.tray.set_status("Error")
@@ -144,9 +157,11 @@ class MurmurApp:
     def _on_recording_stop(self) -> None:
         """Handle recording stop via hotkey."""
         print("⏹️ Recording stopped.")
-        self.tray.set_status("Processing...")
+        self.tray.set_status("Finalizing...")
 
         audio_data = self.recorder.stop_recording()
+        self._stop_live_segmentation()
+        self._stop_live_transcription()
 
         # Resume media if it was playing before recording
         if self._was_media_playing:
@@ -156,9 +171,29 @@ class MurmurApp:
             self._was_media_playing = False
 
         if audio_data is not None:
-            self._process_audio(audio_data)
+            self._finalize_recording(audio_data)
         else:
             print("⚠️ No audio data captured.")
+            self.tray.set_status("Ready")
+            self.hotkey_manager.set_idle()
+
+    def _finalize_recording(self, audio_data: AudioData) -> None:
+        """Finalize stop-time output from the live transcript, or fall back offline."""
+        if self._live_pipeline_degraded:
+            reason = self._live_pipeline_degraded_reason or "Live transcription degraded"
+            print(f"⚠️ {reason}. Recomputing final transcript from the full recording.")
+            self._process_audio(audio_data)
+            return
+
+        live_text = self._get_live_transcript_text()
+        if not live_text:
+            self._process_audio(audio_data)
+            return
+
+        self.hotkey_manager.set_processing()
+        try:
+            self._complete_transcription(audio_data, live_text)
+        finally:
             self.tray.set_status("Ready")
             self.hotkey_manager.set_idle()
 
@@ -171,22 +206,7 @@ class MurmurApp:
         try:
             start_time = time.time()
             text = self._transcribe_audio(audio_data)
-            elapsed = time.time() - start_time
-
-            if text:
-                # Copy to clipboard
-                if copy_to_clipboard(text):
-                    print(f'✅ Transcribed in {elapsed:.1f}s: "{text}"')
-                    self.notifications.notify_transcription_complete(text)
-
-                    # Log for training data
-                    self.logger.log(audio_data, text, elapsed)
-                else:
-                    print(f'⚠️ Transcribed but failed to copy: "{text}"')
-                    self.notifications.notify_error("Failed to copy to clipboard")
-            else:
-                print("⚠️ No speech detected.")
-                self.notifications.notify("Murmur", "No speech detected.")
+            self._complete_transcription(audio_data, text, time.time() - start_time)
 
         except Exception as e:
             print(f"❌ Transcription error: {e}")
@@ -220,6 +240,39 @@ class MurmurApp:
 
         return self.transcriber.transcribe_segments(segments, debug=True).text
 
+    def _get_live_transcript_text(self) -> str:
+        """Return the finalized live transcript text accumulated during recording."""
+        if self.live_transcript_accumulator is None:
+            return ""
+
+        raw_text = self.live_transcript_accumulator.get_text().strip()
+        if not raw_text:
+            return ""
+
+        return self.transcriber.finalize_text(raw_text)
+
+    def _complete_transcription(
+        self,
+        audio_data: AudioData,
+        text: str,
+        elapsed: Optional[float] = None,
+    ) -> None:
+        """Finish clipboard, notification, and logging for a completed transcript."""
+        if not text:
+            print("⚠️ No speech detected.")
+            self.notifications.notify("Murmur", "No speech detected.")
+            return
+
+        runtime = 0.0 if elapsed is None else elapsed
+        if copy_to_clipboard(text):
+            print(f'✅ Transcribed in {runtime:.1f}s: "{text}"')
+            self.notifications.notify_transcription_complete(text)
+            self.logger.log(audio_data, text, runtime)
+            return
+
+        print(f'⚠️ Transcribed but failed to copy: "{text}"')
+        self.notifications.notify_error("Failed to copy to clipboard")
+
     def _get_segmenter(self, sample_rate: int) -> Optional[WebRTCVADSegmenter]:
         """Return a cached segmenter, or disable VAD if initialization fails."""
         if self._vad_disabled_reason is not None:
@@ -239,15 +292,149 @@ class MurmurApp:
 
     def _build_segmenter(self, sample_rate: int) -> WebRTCVADSegmenter:
         """Create a VAD segmenter using the current application config."""
-        end_padding_ms = self.config.vad_padding_ms
-        start_padding_ms = round(end_padding_ms * 0.6)
+        return WebRTCVADSegmenter(settings=self._build_vad_settings(sample_rate))
 
-        return WebRTCVADSegmenter(
-            sample_rate=sample_rate,
-            aggressiveness=self.config.vad_aggressiveness,
-            start_padding_ms=start_padding_ms,
-            end_padding_ms=end_padding_ms,
-            silence_duration_ms=self.config.vad_silence_duration_ms,
+    def _start_live_segmentation(self) -> None:
+        """Start live VAD segmentation if the runtime supports it."""
+        self._stop_live_segmentation()
+
+        if self._live_vad_disabled_reason is not None:
+            print(f"⚠️ {self._live_vad_disabled_reason}. Live segmentation disabled.")
+            return
+
+        try:
+            worker = self._build_live_segmenter(self.recorder.sample_rate)
+        except Exception as exc:
+            self._live_vad_disabled_reason = f"Live VAD unavailable: {exc}"
+            print(f"⚠️ {self._live_vad_disabled_reason}")
+            self.recorder.set_block_callback(None)
+            self.recorder.set_block_callback_error_handler(None)
+            return
+
+        worker.start()
+        self.live_segmenter = worker
+        self.recorder.set_block_callback_error_handler(self._on_live_block_callback_error)
+        self.recorder.set_block_callback(worker.submit_audio_block)
+
+    def _stop_live_segmentation(self) -> None:
+        """Detach and stop the live segmentation worker."""
+        self.recorder.set_block_callback(None)
+        self.recorder.set_block_callback_error_handler(None)
+
+        if self.live_segmenter is None:
+            return
+
+        self.live_segmenter.stop()
+        self.live_segmenter = None
+
+    def _start_live_transcription(self) -> None:
+        """Start the serial live transcription worker and transcript accumulator."""
+        self._stop_live_transcription()
+
+        self.live_transcript_accumulator = TranscriptAccumulator()
+        worker = LiveTranscriptionWorker(
+            transcriber=self.transcriber,
+            accumulator=self.live_transcript_accumulator,
+            on_segment_queued=self._on_live_segment_queued,
+            on_segment_failed=self._on_live_segment_failed,
+            on_segment_transcribed=self._on_live_segment_transcribed,
+            on_chunk_appended=self._on_live_chunk_appended,
+            on_worker_degraded=self._on_live_pipeline_degraded,
+        )
+        worker.start()
+        self.live_transcription_worker = worker
+
+    def _stop_live_transcription(self) -> None:
+        """Stop the background live transcription worker."""
+        if self.live_transcription_worker is None:
+            return
+
+        worker = self.live_transcription_worker
+        if worker.is_degraded():
+            self._on_live_pipeline_degraded(
+                worker.get_last_error() or "Live transcription degraded"
+            )
+
+        worker.stop()
+        self.live_transcription_worker = None
+
+    def _build_live_segmenter(self, sample_rate: int) -> LiveVADSegmentationWorker:
+        """Create the live VAD worker using the current application config."""
+        return LiveVADSegmentationWorker(
+            settings=self._build_vad_settings(sample_rate),
+            on_segment=self._on_live_segment_ready,
+        )
+
+    def _build_vad_settings(self, sample_rate: int) -> VADSettings:
+        """Return the shared VAD runtime settings for this sample rate."""
+        return VADSettings.from_app_config(self.config, sample_rate=sample_rate)
+
+    def _on_live_segment_ready(self, segment: LiveSpeechSegment) -> None:
+        """Emit debug logging and queue sealed live segments for transcription."""
+        print(
+            "Live segment sealed: "
+            f"id={segment.segment_id} "
+            f"start={segment.start_sample} "
+            f"end={segment.end_sample} "
+            f"duration={segment.duration:.2f}s"
+        )
+
+        if self.live_transcription_worker is not None:
+            self.live_transcription_worker.submit_segment(segment)
+
+    def _on_live_segment_queued(self, segment: LiveSpeechSegment) -> None:
+        """Emit debug logging when a live segment is queued for transcription."""
+        print(
+            "Live segment queued: "
+            f"id={segment.segment_id} "
+            f"duration={segment.duration:.2f}s"
+        )
+
+    def _on_live_segment_transcribed(self, chunk: TranscriptChunk) -> None:
+        """Emit debug logging when a live segment finishes transcribing."""
+        print(
+            "Live segment transcribed: "
+            f"id={chunk.segment_id} "
+            f"latency={chunk.latency_seconds:.2f}s "
+            f"text={chunk.text!r}"
+        )
+
+    def _on_live_chunk_appended(self, chunk: TranscriptChunk, current_text: str) -> None:
+        """Emit debug logging when transcript text is appended in segment order."""
+        print(
+            "Live transcript appended: "
+            f"id={chunk.segment_id} "
+            f"current_text={current_text!r}"
+        )
+
+    def _on_live_segment_failed(
+        self,
+        segment: LiveSpeechSegment,
+        exc: Exception,
+        attempt_count: int,
+    ) -> None:
+        """Emit debug logging when live transcription permanently fails for a segment."""
+        print(
+            "⚠️ Live segment failed: "
+            f"id={segment.segment_id} "
+            f"attempts={attempt_count} "
+            f"error={exc}"
+        )
+
+    def _on_live_pipeline_degraded(self, message: str) -> None:
+        """Mark the live pipeline degraded and record it once per recording."""
+        if self._live_pipeline_degraded:
+            return
+
+        self._live_pipeline_degraded = True
+        self._live_pipeline_degraded_reason = message
+        print(f"⚠️ {message}")
+
+    def _on_live_block_callback_error(self, exc: Exception) -> None:
+        """Handle a recorder block callback failure during live segmentation."""
+        print(f"⚠️ Live audio callback failed: {exc}")
+        self._on_live_pipeline_degraded(
+            f"Live audio callback failed: {exc}"
         )
 
     def _on_state_change(self, state: HotkeyState) -> None:

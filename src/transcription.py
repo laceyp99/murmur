@@ -92,6 +92,10 @@ class Transcriber:
         """
         return self.transcribe_segments([audio_data]).text
 
+    def finalize_text(self, text: str) -> str:
+        """Apply document-level cleanup to pre-transcribed text."""
+        return self._post_process_document(text)
+
     def transcribe_segments(
         self,
         segments: Sequence[AudioSegmentLike],
@@ -124,11 +128,13 @@ class Transcriber:
                     f"transcribed in {segment_result.processing_time:.2f}s"
                 )
 
-        final_text = self._post_process_document(
-            " ".join(segment.text for segment in segment_results)
-        )
+        final_text = self.finalize_text(" ".join(segment.text for segment in segment_results))
 
         return TranscriptionResult(text=final_text, segments=segment_results)
+
+    def transcribe_segment(self, segment: AudioSegmentLike) -> str:
+        """Transcribe one segment without document-level cleanup."""
+        return self._transcribe_segment_audio(segment.audio)
 
     def _transcribe_segment_audio(self, audio: np.ndarray) -> str:
         """Transcribe one waveform segment without final document cleanup."""

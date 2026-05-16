@@ -18,7 +18,7 @@ DEFAULT_CONFIG = {
     "language": None,
     "sample_rate": 16000,
     "vad_aggressiveness": 1,
-    "vad_padding_ms": 500,
+    "vad_padding_ms": 220,
     "vad_silence_duration_ms": 400,
     "max_recording_duration": 300,
     "enable_logging": False,
