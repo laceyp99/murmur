@@ -6,7 +6,7 @@ import numpy as np
 import sounddevice as sd
 import threading
 import time
-from typing import Optional
+from typing import Callable, Optional
 from dataclasses import dataclass
 
 from .config import Config, get_config
@@ -33,6 +33,15 @@ class AudioRecorder:
         self._lock = threading.RLock()
         self._stream: Optional[sd.InputStream] = None
         self._recording_start: Optional[float] = None
+        self._block_callback: Optional[Callable[[np.ndarray], None]] = None
+
+    def set_block_callback(
+        self,
+        callback: Optional[Callable[[np.ndarray], None]],
+    ) -> None:
+        """Register a lightweight per-block callback used during recording."""
+        with self._lock:
+            self._block_callback = callback
     
     def start_recording(self):
         """Start recording audio."""
@@ -90,11 +99,21 @@ class AudioRecorder:
         if status:
             pass  # Ignore status messages
         
+        audio_block: Optional[np.ndarray] = None
+        block_callback: Optional[Callable[[np.ndarray], None]] = None
         with self._lock:
             if not self._recording:
                 return
             
-            self._audio_data.append(indata.copy())
+            audio_block = indata.copy()
+            self._audio_data.append(audio_block)
+            block_callback = self._block_callback
+
+        if block_callback is not None and audio_block is not None:
+            try:
+                block_callback(audio_block)
+            except Exception:
+                pass
     
     def get_recording_duration(self) -> float:
         """Get current recording duration in seconds."""

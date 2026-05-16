@@ -7,6 +7,7 @@ import pytest
 main_module = pytest.importorskip("src.main")
 AudioData = main_module.AudioData
 MurmurApp = main_module.MurmurApp
+VADSettings = main_module.VADSettings
 
 
 class FakeSegmenter:
@@ -125,10 +126,11 @@ def test_transcribe_audio_disables_vad_when_segmenter_init_fails(monkeypatch):
 
 def test_get_segmenter_builds_from_vad_config(monkeypatch):
     segmenter = FakeSegmenter(sample_rate=44100)
-    captured_kwargs = {}
+    captured_settings = None
 
-    def build_segmenter(**kwargs):
-        captured_kwargs.update(kwargs)
+    def build_segmenter(*, settings):
+        nonlocal captured_settings
+        captured_settings = settings
         return segmenter
 
     config = SimpleNamespace(
@@ -143,10 +145,10 @@ def test_get_segmenter_builds_from_vad_config(monkeypatch):
     built_segmenter = app._get_segmenter(44100)
 
     assert built_segmenter is segmenter
-    assert captured_kwargs == {
-        "sample_rate": 44100,
-        "aggressiveness": 2,
-        "start_padding_ms": 330,
-        "end_padding_ms": 550,
-        "silence_duration_ms": 650,
-    }
+    assert captured_settings == VADSettings(
+        sample_rate=44100,
+        aggressiveness=2,
+        start_padding_ms=330,
+        end_padding_ms=550,
+        silence_duration_ms=650,
+    )

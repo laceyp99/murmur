@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from src.vad import (
+    LiveVADSegmentationWorker,
     _SegmentBounds,
     WebRTCVADSegmenter,
     float32_to_pcm16,
@@ -189,3 +190,70 @@ def test_segment_audio_resamples_unsupported_source_rates_for_vad():
 def test_segmenter_validates_constructor_parameters(kwargs, message):
     with pytest.raises(ValueError, match=message):
         WebRTCVADSegmenter(sample_rate=16000, vad=FakeVad([]), **kwargs)
+
+
+def test_live_worker_emits_ordered_segments_for_queued_blocks():
+    frame_samples = 320
+    worker = LiveVADSegmentationWorker(
+        sample_rate=16000,
+        frame_duration_ms=20,
+        start_padding_ms=20,
+        end_padding_ms=20,
+        silence_duration_ms=40,
+        min_segment_duration_ms=20,
+        vad=FakeVad(
+            [
+                False,
+                True,
+                True,
+                False,
+                False,
+                True,
+                True,
+                False,
+                False,
+            ]
+        ),
+    )
+    emitted_segments = []
+    worker.on_segment = emitted_segments.append
+
+    worker.start()
+    worker.submit_audio_block(np.ones(frame_samples * 5, dtype=np.float32))
+    worker.submit_audio_block(np.ones(frame_samples * 4, dtype=np.float32))
+    worker.stop()
+
+    assert [segment.segment_id for segment in emitted_segments] == [0, 1]
+    assert [segment.start_sample for segment in emitted_segments] == [0, frame_samples * 4]
+    assert [segment.end_sample for segment in emitted_segments] == [frame_samples * 4, frame_samples * 8]
+    np.testing.assert_array_equal(
+        emitted_segments[0].audio,
+        np.ones(frame_samples * 4, dtype=np.float32),
+    )
+    np.testing.assert_array_equal(
+        emitted_segments[1].audio,
+        np.ones(frame_samples * 4, dtype=np.float32),
+    )
+
+
+def test_live_worker_retains_partial_frame_between_blocks():
+    worker = LiveVADSegmentationWorker(
+        sample_rate=16000,
+        frame_duration_ms=20,
+        start_padding_ms=0,
+        end_padding_ms=0,
+        silence_duration_ms=20,
+        min_segment_duration_ms=20,
+        vad=FakeVad([True, False]),
+    )
+    emitted_segments = []
+    worker.on_segment = emitted_segments.append
+
+    worker.start()
+    worker.submit_audio_block(np.ones(160, dtype=np.float32))
+    worker.submit_audio_block(np.ones(480, dtype=np.float32))
+    worker.stop()
+
+    assert len(emitted_segments) == 1
+    assert emitted_segments[0].start_sample == 0
+    assert emitted_segments[0].end_sample == 320

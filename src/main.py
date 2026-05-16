@@ -10,7 +10,7 @@ from typing import Optional
 from .config import get_config, Config
 from .audio import AudioRecorder, AudioData
 from .transcription import Transcriber
-from .vad import WebRTCVADSegmenter
+from .vad import LiveSpeechSegment, LiveVADSegmentationWorker, VADSettings, WebRTCVADSegmenter
 from .clipboard import copy_to_clipboard
 from .hotkey import HotkeyManager, HotkeyState, wait_for_exit
 from .notifications import get_notification_manager
@@ -43,6 +43,7 @@ class MurmurApp:
         self.recorder = AudioRecorder()
         self.transcriber = Transcriber()
         self.segmenter: Optional[WebRTCVADSegmenter] = None
+        self.live_segmenter: Optional[LiveVADSegmentationWorker] = None
         self.hotkey_manager = HotkeyManager()
         self.notifications = get_notification_manager()
         self.logger = get_logger()
@@ -52,6 +53,7 @@ class MurmurApp:
         self._running = False
         self._was_media_playing = False
         self._vad_disabled_reason: Optional[str] = None
+        self._live_vad_disabled_reason: Optional[str] = None
 
         if preload_model:
             print("Preloading Whisper model...")
@@ -130,8 +132,10 @@ class MurmurApp:
                     )
 
         try:
+            self._start_live_segmentation()
             self.recorder.start_recording()
         except Exception as e:
+            self._stop_live_segmentation()
             print(f"Error starting recording: {e}")
             self.notifications.notify_error(f"Recording failed: {e}")
             self.tray.set_status("Error")
@@ -147,6 +151,7 @@ class MurmurApp:
         self.tray.set_status("Processing...")
 
         audio_data = self.recorder.stop_recording()
+        self._stop_live_segmentation()
 
         # Resume media if it was playing before recording
         if self._was_media_playing:
@@ -239,15 +244,57 @@ class MurmurApp:
 
     def _build_segmenter(self, sample_rate: int) -> WebRTCVADSegmenter:
         """Create a VAD segmenter using the current application config."""
-        end_padding_ms = self.config.vad_padding_ms
-        start_padding_ms = round(end_padding_ms * 0.6)
+        return WebRTCVADSegmenter(settings=self._build_vad_settings(sample_rate))
 
-        return WebRTCVADSegmenter(
-            sample_rate=sample_rate,
-            aggressiveness=self.config.vad_aggressiveness,
-            start_padding_ms=start_padding_ms,
-            end_padding_ms=end_padding_ms,
-            silence_duration_ms=self.config.vad_silence_duration_ms,
+    def _start_live_segmentation(self) -> None:
+        """Start live VAD segmentation if the runtime supports it."""
+        self._stop_live_segmentation()
+
+        if self._live_vad_disabled_reason is not None:
+            print(f"⚠️ {self._live_vad_disabled_reason}. Live segmentation disabled.")
+            return
+
+        try:
+            worker = self._build_live_segmenter(self.recorder.sample_rate)
+        except Exception as exc:
+            self._live_vad_disabled_reason = f"Live VAD unavailable: {exc}"
+            print(f"⚠️ {self._live_vad_disabled_reason}")
+            self.recorder.set_block_callback(None)
+            return
+
+        worker.start()
+        self.live_segmenter = worker
+        self.recorder.set_block_callback(worker.submit_audio_block)
+
+    def _stop_live_segmentation(self) -> None:
+        """Detach and stop the live segmentation worker."""
+        self.recorder.set_block_callback(None)
+
+        if self.live_segmenter is None:
+            return
+
+        self.live_segmenter.stop()
+        self.live_segmenter = None
+
+    def _build_live_segmenter(self, sample_rate: int) -> LiveVADSegmentationWorker:
+        """Create the live VAD worker using the current application config."""
+        return LiveVADSegmentationWorker(
+            settings=self._build_vad_settings(sample_rate),
+            on_segment=self._on_live_segment_ready,
+        )
+
+    def _build_vad_settings(self, sample_rate: int) -> VADSettings:
+        """Return the shared VAD runtime settings for this sample rate."""
+        return VADSettings.from_app_config(self.config, sample_rate=sample_rate)
+
+    def _on_live_segment_ready(self, segment: LiveSpeechSegment) -> None:
+        """Emit debug logging for sealed live segments."""
+        print(
+            "Live segment sealed: "
+            f"id={segment.segment_id} "
+            f"start={segment.start_sample} "
+            f"end={segment.end_sample} "
+            f"duration={segment.duration:.2f}s"
         )
 
     def _on_state_change(self, state: HotkeyState) -> None:
