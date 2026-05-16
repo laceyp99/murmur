@@ -28,6 +28,7 @@ class FakeTranscriber:
     def __init__(self):
         self.segment_calls = []
         self.audio_calls = []
+        self.live_segment_calls = []
 
     def transcribe_segments(self, segments, debug=False):
         self.segment_calls.append({"segments": list(segments), "debug": debug})
@@ -36,6 +37,10 @@ class FakeTranscriber:
     def transcribe(self, audio_data):
         self.audio_calls.append(audio_data)
         return "Fallback text."
+
+    def transcribe_segment(self, segment):
+        self.live_segment_calls.append(segment)
+        return f"live-{segment.segment_id}"
 
 
 class FakeConfig:
@@ -47,9 +52,13 @@ class FakeConfig:
 def make_app(segmenter, transcriber, config=None):
     app = MurmurApp.__new__(MurmurApp)
     app.segmenter = segmenter
+    app.live_segmenter = None
+    app.live_transcription_worker = None
+    app.live_transcript_accumulator = None
     app.transcriber = transcriber
     app.config = config or FakeConfig()
     app._vad_disabled_reason = None
+    app._live_vad_disabled_reason = None
     return app
 
 
@@ -152,3 +161,37 @@ def test_get_segmenter_builds_from_vad_config(monkeypatch):
         end_padding_ms=550,
         silence_duration_ms=650,
     )
+
+
+def test_on_live_segment_ready_queues_segment_for_background_transcription():
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app._start_live_transcription()
+    segment = SimpleNamespace(
+        segment_id=3,
+        start_sample=1600,
+        end_sample=3200,
+        duration=0.1,
+        audio=np.ones(1600, dtype=np.float32),
+        sample_rate=16000,
+    )
+
+    app._on_live_segment_ready(segment)
+    app._stop_live_transcription()
+
+    assert [queued_segment.segment_id for queued_segment in transcriber.live_segment_calls] == [3]
+    assert app.live_transcript_accumulator.get_text() == "live-3"
+
+
+def test_start_live_transcription_replaces_existing_worker():
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+
+    app._start_live_transcription()
+    first_worker = app.live_transcription_worker
+    first_accumulator = app.live_transcript_accumulator
+    app._start_live_transcription()
+
+    assert first_worker is not app.live_transcription_worker
+    assert first_accumulator is not app.live_transcript_accumulator
+    app._stop_live_transcription()

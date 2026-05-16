@@ -10,6 +10,7 @@ from typing import Optional
 from .config import get_config, Config
 from .audio import AudioRecorder, AudioData
 from .transcription import Transcriber
+from .transcription_live import LiveTranscriptionWorker, TranscriptAccumulator, TranscriptChunk
 from .vad import LiveSpeechSegment, LiveVADSegmentationWorker, VADSettings, WebRTCVADSegmenter
 from .clipboard import copy_to_clipboard
 from .hotkey import HotkeyManager, HotkeyState, wait_for_exit
@@ -44,6 +45,8 @@ class MurmurApp:
         self.transcriber = Transcriber()
         self.segmenter: Optional[WebRTCVADSegmenter] = None
         self.live_segmenter: Optional[LiveVADSegmentationWorker] = None
+        self.live_transcription_worker: Optional[LiveTranscriptionWorker] = None
+        self.live_transcript_accumulator: Optional[TranscriptAccumulator] = None
         self.hotkey_manager = HotkeyManager()
         self.notifications = get_notification_manager()
         self.logger = get_logger()
@@ -132,9 +135,11 @@ class MurmurApp:
                     )
 
         try:
+            self._start_live_transcription()
             self._start_live_segmentation()
             self.recorder.start_recording()
         except Exception as e:
+            self._stop_live_transcription()
             self._stop_live_segmentation()
             print(f"Error starting recording: {e}")
             self.notifications.notify_error(f"Recording failed: {e}")
@@ -152,6 +157,7 @@ class MurmurApp:
 
         audio_data = self.recorder.stop_recording()
         self._stop_live_segmentation()
+        self._stop_live_transcription()
 
         # Resume media if it was playing before recording
         if self._was_media_playing:
@@ -276,6 +282,29 @@ class MurmurApp:
         self.live_segmenter.stop()
         self.live_segmenter = None
 
+    def _start_live_transcription(self) -> None:
+        """Start the serial live transcription worker and transcript accumulator."""
+        self._stop_live_transcription()
+
+        self.live_transcript_accumulator = TranscriptAccumulator()
+        worker = LiveTranscriptionWorker(
+            transcriber=self.transcriber,
+            accumulator=self.live_transcript_accumulator,
+            on_segment_queued=self._on_live_segment_queued,
+            on_segment_transcribed=self._on_live_segment_transcribed,
+            on_chunk_appended=self._on_live_chunk_appended,
+        )
+        worker.start()
+        self.live_transcription_worker = worker
+
+    def _stop_live_transcription(self) -> None:
+        """Stop the background live transcription worker."""
+        if self.live_transcription_worker is None:
+            return
+
+        self.live_transcription_worker.stop()
+        self.live_transcription_worker = None
+
     def _build_live_segmenter(self, sample_rate: int) -> LiveVADSegmentationWorker:
         """Create the live VAD worker using the current application config."""
         return LiveVADSegmentationWorker(
@@ -288,13 +317,41 @@ class MurmurApp:
         return VADSettings.from_app_config(self.config, sample_rate=sample_rate)
 
     def _on_live_segment_ready(self, segment: LiveSpeechSegment) -> None:
-        """Emit debug logging for sealed live segments."""
+        """Emit debug logging and queue sealed live segments for transcription."""
         print(
             "Live segment sealed: "
             f"id={segment.segment_id} "
             f"start={segment.start_sample} "
             f"end={segment.end_sample} "
             f"duration={segment.duration:.2f}s"
+        )
+
+        if self.live_transcription_worker is not None:
+            self.live_transcription_worker.submit_segment(segment)
+
+    def _on_live_segment_queued(self, segment: LiveSpeechSegment) -> None:
+        """Emit debug logging when a live segment is queued for transcription."""
+        print(
+            "Live segment queued: "
+            f"id={segment.segment_id} "
+            f"duration={segment.duration:.2f}s"
+        )
+
+    def _on_live_segment_transcribed(self, chunk: TranscriptChunk) -> None:
+        """Emit debug logging when a live segment finishes transcribing."""
+        print(
+            "Live segment transcribed: "
+            f"id={chunk.segment_id} "
+            f"latency={chunk.latency_seconds:.2f}s "
+            f"text={chunk.text!r}"
+        )
+
+    def _on_live_chunk_appended(self, chunk: TranscriptChunk, current_text: str) -> None:
+        """Emit debug logging when transcript text is appended in segment order."""
+        print(
+            "Live transcript appended: "
+            f"id={chunk.segment_id} "
+            f"current_text={current_text!r}"
         )
 
     def _on_state_change(self, state: HotkeyState) -> None:

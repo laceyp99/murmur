@@ -130,6 +130,10 @@ class Transcriber:
 
         return TranscriptionResult(text=final_text, segments=segment_results)
 
+    def transcribe_segment(self, segment: AudioSegmentLike) -> str:
+        """Transcribe one segment without document-level cleanup."""
+        return self._transcribe_segment_audio(segment.audio)
+
     def _transcribe_segment_audio(self, audio: np.ndarray) -> str:
         """Transcribe one waveform segment without final document cleanup."""
         if self._model is None:

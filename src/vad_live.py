@@ -39,6 +39,7 @@ class LiveVADSegmentationWorker:
         self.start_padding_frames = self.settings.start_padding_frames
         self.end_padding_frames = self.settings.end_padding_frames
         self.silence_close_frames = self.settings.silence_close_frames
+        self.merge_gap_samples = self.settings.merge_gap_samples
         self.min_segment_samples = int(
             self.sample_rate * self.settings.min_segment_duration_ms / 1000
         )
@@ -53,6 +54,8 @@ class LiveVADSegmentationWorker:
         self._pending_block = np.array([], dtype=np.float32)
         self._pre_speech_frames: Deque[AudioFrame] = deque(maxlen=self.start_padding_frames)
         self._current_frames: List[AudioFrame] = []
+        self._pending_segment: Optional[LiveSpeechSegment] = None
+        self._pending_gap_frames: List[AudioFrame] = []
         self._last_speech_index: Optional[int] = None
         self._silence_run_frames = 0
 
@@ -76,7 +79,7 @@ class LiveVADSegmentationWorker:
         self._queue.put(np.asarray(audio_block, dtype=np.float32).reshape(-1).copy())
 
     def stop(self) -> None:
-        """Stop the worker without flushing partial speech."""
+        """Stop the worker and flush any pending speech segment."""
         if not self._running:
             return
 
@@ -96,9 +99,29 @@ class LiveVADSegmentationWorker:
                 break
 
             if audio_block is None:
+                self._flush_pending_audio()
                 break
 
             self._process_block(audio_block)
+
+    def _flush_pending_audio(self) -> None:
+        if self._pending_block.size > 0:
+            frame_audio = np.zeros(self.frame_samples, dtype=np.float32)
+            frame_audio[: self._pending_block.size] = self._pending_block
+            frame = AudioFrame(
+                start_sample=self._processed_samples,
+                end_sample=self._processed_samples + self._pending_block.size,
+                audio=frame_audio[: self._pending_block.size].copy(),
+                pcm16=float32_to_pcm16(frame_audio),
+            )
+            self._processed_samples += self._pending_block.size
+            self._pending_block = np.array([], dtype=np.float32)
+            self._process_frame(frame)
+
+        if self._current_frames and self._last_speech_index is not None:
+            self._seal_current_segment()
+
+        self._emit_pending_segment()
 
     def _process_block(self, audio_block: np.ndarray) -> None:
         if audio_block.size == 0:
@@ -130,6 +153,7 @@ class LiveVADSegmentationWorker:
 
         if not self._current_frames:
             if not is_speech:
+                self._track_pending_gap_frame(frame)
                 if self.start_padding_frames > 0:
                     self._pre_speech_frames.append(frame)
                 return
@@ -176,10 +200,56 @@ class LiveVADSegmentationWorker:
                 audio=segment_audio,
             )
             self._next_segment_id += 1
-            if self.on_segment is not None:
-                self.on_segment(segment)
+            self._queue_segment_for_emit(segment)
 
         self._reset_current_segment(overflow_frames)
+
+    def _queue_segment_for_emit(self, segment: LiveSpeechSegment) -> None:
+        if self._pending_segment is None:
+            self._pending_segment = segment
+            return
+
+        gap_samples = segment.start_sample - self._pending_segment.end_sample
+        if gap_samples <= self.merge_gap_samples:
+            bridge_audio = self._get_pending_gap_audio(gap_samples)
+            self._pending_segment = LiveSpeechSegment(
+                segment_id=self._pending_segment.segment_id,
+                start_sample=self._pending_segment.start_sample,
+                end_sample=max(self._pending_segment.end_sample, segment.end_sample),
+                sample_rate=self.sample_rate,
+                audio=np.concatenate((self._pending_segment.audio, bridge_audio, segment.audio)),
+            )
+            self._pending_gap_frames = []
+            return
+
+        self._emit_pending_segment()
+        self._pending_segment = segment
+
+    def _emit_pending_segment(self) -> None:
+        if self._pending_segment is None:
+            return
+
+        if self.on_segment is not None:
+            self.on_segment(self._pending_segment)
+
+        self._pending_segment = None
+        self._pending_gap_frames = []
+
+    def _track_pending_gap_frame(self, frame: AudioFrame) -> None:
+        if self._pending_segment is None:
+            return
+
+        self._pending_gap_frames.append(frame)
+        gap_samples = frame.end_sample - self._pending_segment.end_sample
+        if gap_samples > self.merge_gap_samples:
+            self._emit_pending_segment()
+
+    def _get_pending_gap_audio(self, gap_samples: int) -> np.ndarray:
+        if gap_samples <= 0 or not self._pending_gap_frames:
+            return np.array([], dtype=np.float32)
+
+        collected_audio = np.concatenate([frame.audio for frame in self._pending_gap_frames])
+        return collected_audio[:gap_samples].copy()
 
     def _reset_current_segment(self, overflow_frames: Sequence[AudioFrame]) -> None:
         self._current_frames = []

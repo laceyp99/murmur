@@ -201,11 +201,13 @@ def test_live_worker_emits_ordered_segments_for_queued_blocks():
         end_padding_ms=20,
         silence_duration_ms=40,
         min_segment_duration_ms=20,
+        merge_gap_ms=0,
         vad=FakeVad(
             [
                 False,
                 True,
                 True,
+                False,
                 False,
                 False,
                 True,
@@ -220,12 +222,12 @@ def test_live_worker_emits_ordered_segments_for_queued_blocks():
 
     worker.start()
     worker.submit_audio_block(np.ones(frame_samples * 5, dtype=np.float32))
-    worker.submit_audio_block(np.ones(frame_samples * 4, dtype=np.float32))
+    worker.submit_audio_block(np.ones(frame_samples * 5, dtype=np.float32))
     worker.stop()
 
     assert [segment.segment_id for segment in emitted_segments] == [0, 1]
-    assert [segment.start_sample for segment in emitted_segments] == [0, frame_samples * 4]
-    assert [segment.end_sample for segment in emitted_segments] == [frame_samples * 4, frame_samples * 8]
+    assert [segment.start_sample for segment in emitted_segments] == [0, frame_samples * 5]
+    assert [segment.end_sample for segment in emitted_segments] == [frame_samples * 4, frame_samples * 9]
     np.testing.assert_array_equal(
         emitted_segments[0].audio,
         np.ones(frame_samples * 4, dtype=np.float32),
@@ -257,3 +259,71 @@ def test_live_worker_retains_partial_frame_between_blocks():
     assert len(emitted_segments) == 1
     assert emitted_segments[0].start_sample == 0
     assert emitted_segments[0].end_sample == 320
+
+
+def test_live_worker_flushes_trailing_speech_on_stop():
+    frame_samples = 320
+    worker = LiveVADSegmentationWorker(
+        sample_rate=16000,
+        frame_duration_ms=20,
+        start_padding_ms=0,
+        end_padding_ms=20,
+        silence_duration_ms=40,
+        min_segment_duration_ms=20,
+        merge_gap_ms=0,
+        vad=FakeVad([False, True, True]),
+    )
+    emitted_segments = []
+    worker.on_segment = emitted_segments.append
+
+    worker.start()
+    worker.submit_audio_block(np.ones(frame_samples * 3, dtype=np.float32))
+    worker.stop()
+
+    assert len(emitted_segments) == 1
+    assert emitted_segments[0].segment_id == 0
+    assert emitted_segments[0].start_sample == frame_samples
+    assert emitted_segments[0].end_sample == frame_samples * 3
+
+
+def test_live_worker_merges_segments_across_short_gap_before_emitting():
+    frame_samples = 320
+    worker = LiveVADSegmentationWorker(
+        sample_rate=16000,
+        frame_duration_ms=20,
+        start_padding_ms=20,
+        end_padding_ms=20,
+        silence_duration_ms=40,
+        min_segment_duration_ms=20,
+        merge_gap_ms=40,
+        vad=FakeVad(
+            [
+                False,
+                True,
+                True,
+                False,
+                False,
+                False,
+                True,
+                True,
+                False,
+                False,
+                False,
+            ]
+        ),
+    )
+    emitted_segments = []
+    worker.on_segment = emitted_segments.append
+
+    worker.start()
+    worker.submit_audio_block(np.ones(frame_samples * 11, dtype=np.float32))
+    worker.stop()
+
+    assert len(emitted_segments) == 1
+    assert emitted_segments[0].segment_id == 0
+    assert emitted_segments[0].start_sample == 0
+    assert emitted_segments[0].end_sample == frame_samples * 9
+    np.testing.assert_array_equal(
+        emitted_segments[0].audio,
+        np.ones(frame_samples * 9, dtype=np.float32),
+    )
