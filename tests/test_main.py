@@ -37,10 +37,18 @@ class FakeTranscriber:
         return "Fallback text."
 
 
-def make_app(segmenter, transcriber):
+class FakeConfig:
+    vad_aggressiveness = 1
+    vad_padding_ms = 500
+    vad_silence_duration_ms = 400
+
+
+def make_app(segmenter, transcriber, config=None):
     app = MurmurApp.__new__(MurmurApp)
     app.segmenter = segmenter
     app.transcriber = transcriber
+    app.config = config or FakeConfig()
+    app._vad_disabled_reason = None
     return app
 
 
@@ -89,3 +97,56 @@ def test_transcribe_audio_falls_back_when_vad_raises():
     assert text == "Fallback text."
     assert len(transcriber.segment_calls) == 0
     assert transcriber.audio_calls == [audio_data]
+
+
+def test_transcribe_audio_disables_vad_when_segmenter_init_fails(monkeypatch):
+    init_attempts = []
+
+    def raising_segmenter(*args, **kwargs):
+        init_attempts.append(kwargs)
+        raise RuntimeError("missing webrtcvad")
+
+    monkeypatch.setattr(main_module, "WebRTCVADSegmenter", raising_segmenter)
+
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    audio_data = make_audio_data()
+
+    first_text = app._transcribe_audio(audio_data)
+    second_text = app._transcribe_audio(audio_data)
+
+    assert first_text == "Fallback text."
+    assert second_text == "Fallback text."
+    assert len(init_attempts) == 1
+    assert len(transcriber.segment_calls) == 0
+    assert transcriber.audio_calls == [audio_data, audio_data]
+    assert app._vad_disabled_reason == "VAD unavailable: missing webrtcvad"
+
+
+def test_get_segmenter_builds_from_vad_config(monkeypatch):
+    segmenter = FakeSegmenter(sample_rate=44100)
+    captured_kwargs = {}
+
+    def build_segmenter(**kwargs):
+        captured_kwargs.update(kwargs)
+        return segmenter
+
+    config = SimpleNamespace(
+        vad_aggressiveness=2,
+        vad_padding_ms=550,
+        vad_silence_duration_ms=650,
+    )
+    app = make_app(segmenter=None, transcriber=FakeTranscriber(), config=config)
+
+    monkeypatch.setattr(main_module, "WebRTCVADSegmenter", build_segmenter)
+
+    built_segmenter = app._get_segmenter(44100)
+
+    assert built_segmenter is segmenter
+    assert captured_kwargs == {
+        "sample_rate": 44100,
+        "aggressiveness": 2,
+        "start_padding_ms": 330,
+        "end_padding_ms": 550,
+        "silence_duration_ms": 650,
+    }

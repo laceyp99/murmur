@@ -17,6 +17,9 @@ DEFAULT_CONFIG = {
     "device": "cuda",
     "language": None,
     "sample_rate": 16000,
+    "vad_aggressiveness": 1,
+    "vad_padding_ms": 500,
+    "vad_silence_duration_ms": 400,
     "max_recording_duration": 300,
     "enable_logging": False,
     "enable_notifications": True,
@@ -109,6 +112,21 @@ class Config:
     def sample_rate(self) -> int:
         """Get the sample rate setting."""
         return self.get("sample_rate", 16000)
+
+    @property
+    def vad_aggressiveness(self) -> int:
+        """Get the WebRTC VAD aggressiveness setting."""
+        return self.get("vad_aggressiveness", 1)
+
+    @property
+    def vad_padding_ms(self) -> int:
+        """Get the user-facing VAD end-padding anchor in milliseconds."""
+        return self.get("vad_padding_ms", 500)
+
+    @property
+    def vad_silence_duration_ms(self) -> int:
+        """Get the silence duration required to close a VAD segment."""
+        return self.get("vad_silence_duration_ms", 400)
 
     @property
     def enable_notifications(self) -> bool:
