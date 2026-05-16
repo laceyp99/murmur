@@ -2,13 +2,15 @@
 
 ![header](murmur_pipeline.png "murmur pipeline")
 
-A lightweight Windows application that enables dictation anywhere on your system. Press a global hotkey to record your voice, and murmur will transcribe it using OpenAI's Whisper model running locally on your machine, then copy the text to your clipboard for instant pasting.
+A lightweight Windows application that enables dictation anywhere on your system. Press a global hotkey to record your voice, and murmur will segment speech in real time, transcribe sealed chunks with OpenAI's Whisper model running locally on your machine, and finalize the cleaned document to your clipboard when you stop.
 
 ## Features
 
 - 🎤 **Global Hotkey** - Works across all Windows applications
 - 🔒 **100% Local** - No internet required, all processing on your machine
 - 🚀 **GPU Accelerated** - Fast transcription with CUDA support
+- ✂️ **Live VAD Segmentation** - Detects speech chunks while you are still recording
+- ⏱️ **Lower Stop Latency** - Starts serial Whisper work before you release the hotkey
 - 📋 **Clipboard Integration** - Transcription copied automatically
 - 🔇 **Auto-Pause Media** - Automatically pauses playing media during recording
 - 🖥️ **System Tray** - Runs in the background with a status icon
@@ -86,7 +88,15 @@ Or double-click `run_background.vbs`.
 2. **Press `Ctrl+Shift+Space`** to start recording
 3. **Speak** your text
 4. **Press `Ctrl+Shift+Space`** again to stop recording
-5. **Paste** with `Ctrl+V` anywhere
+5. **Wait briefly while murmur finalizes** any last live segment and document cleanup
+6. **Paste** with `Ctrl+V` anywhere
+
+### How transcription works
+
+- murmur captures audio in lightweight 100 ms recorder blocks.
+- A background WebRTC VAD worker reframes those blocks into 20 ms speech frames.
+- Completed speech segments are transcribed serially in the background while you are still recording.
+- When you stop, murmur flushes any pending speech, drains the live transcription queue, applies one final document cleanup pass, and copies the final text to the clipboard.
 
 ### First Run
 
@@ -158,6 +168,11 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
 **"No speech detected"**
 - Check your microphone is working and selected as default
 - Check microphone permissions in Windows Settings
+
+**"There is a short pause after I stop before text appears"**
+- murmur now transcribes completed speech segments during recording, but it still performs a final drain on stop
+- The remaining delay is usually the last queued segment plus final text cleanup
+- If stop-time latency feels too high, reduce `vad_silence_duration_ms` carefully so segments close sooner
 
 **Slow transcription**
 - Ensure CUDA is properly installed if you have an NVIDIA GPU
