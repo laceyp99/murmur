@@ -422,17 +422,13 @@ class MurmurApp:
         )
 
     def _on_live_pipeline_degraded(self, message: str) -> None:
-        """Mark the live pipeline degraded and notify the user once per recording."""
+        """Mark the live pipeline degraded and record it once per recording."""
         if self._live_pipeline_degraded:
             return
 
         self._live_pipeline_degraded = True
         self._live_pipeline_degraded_reason = message
         print(f"⚠️ {message}")
-        self.notifications.notify(
-            "murmur",
-            "Live transcription paused. Final transcript will finish after recording.",
-        )
 
     def _on_live_block_callback_error(self, exc: Exception) -> None:
         """Handle a recorder block callback failure during live segmentation."""

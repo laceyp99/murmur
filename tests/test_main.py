@@ -338,7 +338,7 @@ def test_finalize_recording_falls_back_to_offline_processing_when_live_pipeline_
     assert transcriber.finalize_calls == []
 
 
-def test_on_live_pipeline_degraded_marks_app_once_and_notifies_once():
+def test_on_live_pipeline_degraded_marks_app_once_without_user_notification():
     transcriber = FakeTranscriber()
     app = make_app(segmenter=None, transcriber=transcriber)
     app.notifications = FakeNotifications()
@@ -348,12 +348,7 @@ def test_on_live_pipeline_degraded_marks_app_once_and_notifies_once():
 
     assert app._live_pipeline_degraded is True
     assert app._live_pipeline_degraded_reason == "worker failed"
-    assert app.notifications.messages == [
-        (
-            "murmur",
-            "Live transcription paused. Final transcript will finish after recording.",
-        )
-    ]
+    assert app.notifications.messages == []
 
 
 def test_start_live_segmentation_registers_recorder_callbacks():
@@ -408,12 +403,7 @@ def test_on_live_block_callback_error_marks_pipeline_degraded_once():
 
     assert app._live_pipeline_degraded is True
     assert app._live_pipeline_degraded_reason == "Live audio callback failed: queue submit failed"
-    assert app.notifications.messages == [
-        (
-            "murmur",
-            "Live transcription paused. Final transcript will finish after recording.",
-        )
-    ]
+    assert app.notifications.messages == []
 
 
 def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch):
