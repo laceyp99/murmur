@@ -167,6 +167,7 @@ def test_get_llm_post_processor_loads_user_vocab(monkeypatch):
         def __init__(self, client, user_vocab=None):
             captured["client"] = client
             captured["user_vocab"] = user_vocab
+            captured["processor_instance"] = self
 
     monkeypatch.setattr("src.transcription.OllamaClient", StubOllamaClient)
     monkeypatch.setattr("src.transcription.LLMPostProcessor", StubLLMPostProcessor)
@@ -178,8 +179,10 @@ def test_get_llm_post_processor_loads_user_vocab(monkeypatch):
     transcriber = Transcriber(config=config, model=FakeModel([]), device="cpu")
 
     processor = transcriber._get_llm_post_processor()
+    cached_processor = transcriber._get_llm_post_processor()
 
-    assert processor is captured["client"] or processor is not None
+    assert processor is captured["processor_instance"]
+    assert cached_processor is processor
     assert captured["client_args"] == {
         "endpoint": "http://localhost:11434",
         "model_name": "llama3.2:1b",

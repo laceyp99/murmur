@@ -182,7 +182,7 @@ class LLMPostProcessor:
         try:
             result = self.client.chat(
                 messages,
-                max_tokens=max(len(cleaned_input.split()) * 3, 64),
+                max_tokens=min(max(len(cleaned_input.split()) * 3, 64), 1024),
                 temperature=0.0,
             )
         except Exception as exc:

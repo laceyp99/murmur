@@ -172,7 +172,16 @@ class Config:
     @property
     def ollama_timeout_seconds(self) -> int:
         """Timeout in seconds for Ollama requests."""
-        return int(self.get("ollama_timeout_seconds", 15))
+        raw_timeout = self.get("ollama_timeout_seconds", 15)
+        try:
+            timeout_seconds = float(raw_timeout)
+        except (TypeError, ValueError):
+            return 15
+    
+        if timeout_seconds <= 0:
+            return 15
+        
+        return int(timeout_seconds)
 
     @property
     def ollama_preload_model(self) -> bool:
