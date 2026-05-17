@@ -27,6 +27,12 @@ DEFAULT_CONFIG = {
     "pause_media_while_recording": True,
     "logging_consent_updated_at": None,
     "logging_consent_source": None,
+    # Ollama LLM post-processor configuration
+    "ollama_enabled": False,
+    "ollama_endpoint": "http://localhost:11434",
+    "ollama_model_name": "qwen-3.5:2b",
+    "ollama_timeout_seconds": 5,
+    "ollama_preload_model": True,
 }
 
 # Global config instance
@@ -147,6 +153,31 @@ class Config:
     def enable_logging(self) -> bool:
         """Get the training-data logging setting."""
         return self.get("enable_logging", False)
+
+    @property
+    def ollama_enabled(self) -> bool:
+        """Whether the Ollama LLM post-processor is enabled."""
+        return self.get("ollama_enabled", False)
+
+    @property
+    def ollama_endpoint(self) -> str:
+        """URL of the Ollama endpoint to use for LLM requests."""
+        return self.get("ollama_endpoint", "http://localhost:11434")
+
+    @property
+    def ollama_model_name(self) -> str:
+        """Default Ollama model name to use for post-processing."""
+        return self.get("ollama_model_name", "qwen-3.5:2b")
+
+    @property
+    def ollama_timeout_seconds(self) -> int:
+        """Timeout in seconds for Ollama requests."""
+        return int(self.get("ollama_timeout_seconds", 5))
+
+    @property
+    def ollama_preload_model(self) -> bool:
+        """Whether to attempt to preload/warm the Ollama model on startup."""
+        return self.get("ollama_preload_model", True)
 
 
 def get_config() -> Config:
