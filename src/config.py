@@ -28,10 +28,10 @@ DEFAULT_CONFIG = {
     "logging_consent_updated_at": None,
     "logging_consent_source": None,
     # Ollama LLM post-processor configuration
-    "ollama_enabled": False,
+    "ollama_enabled": True,
     "ollama_endpoint": "http://localhost:11434",
-    "ollama_model_name": "qwen-3.5:2b",
-    "ollama_timeout_seconds": 5,
+    "ollama_model_name": "llama3.2:1b",
+    "ollama_timeout_seconds": 15,
     "ollama_preload_model": True,
 }
 
@@ -157,7 +157,7 @@ class Config:
     @property
     def ollama_enabled(self) -> bool:
         """Whether the Ollama LLM post-processor is enabled."""
-        return self.get("ollama_enabled", False)
+        return self.get("ollama_enabled", True)
 
     @property
     def ollama_endpoint(self) -> str:
@@ -167,12 +167,12 @@ class Config:
     @property
     def ollama_model_name(self) -> str:
         """Default Ollama model name to use for post-processing."""
-        return self.get("ollama_model_name", "qwen-3.5:2b")
+        return self.get("ollama_model_name", "llama3.2:1b")
 
     @property
     def ollama_timeout_seconds(self) -> int:
         """Timeout in seconds for Ollama requests."""
-        return int(self.get("ollama_timeout_seconds", 5))
+        return int(self.get("ollama_timeout_seconds", 15))
 
     @property
     def ollama_preload_model(self) -> bool:

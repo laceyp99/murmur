@@ -13,6 +13,10 @@ class FakeConfig:
     device = "cpu"
     model_name = "tiny"
     language = None
+    ollama_enabled = False
+    ollama_endpoint = "http://localhost:11434"
+    ollama_model_name = "llama3.2:1b"
+    ollama_timeout_seconds = 15
 
 
 class FakeModel:
@@ -30,6 +34,25 @@ class FakeModel:
             }
         )
         return {"text": self._responses.pop(0)}
+
+
+class FakeLLMPostProcessor:
+    def __init__(self, response=None, error=None):
+        self.response = response
+        self.error = error
+        self.calls = []
+        self.client = self
+
+    def process(self, text):
+        self.calls.append(text)
+        if self.error is not None:
+            raise self.error
+        return self.response
+
+    def warm(self):
+        if self.error is not None:
+            raise self.error
+        return True
 
 
 def test_transcribe_segments_returns_raw_segment_text_and_final_document_text():
@@ -63,3 +86,65 @@ def test_transcribe_single_clip_applies_final_document_cleanup_once():
 
     assert result == "Multiple spaces."
     assert len(fake_model.calls) == 1
+
+
+def test_finalize_text_uses_llm_post_processor_when_enabled():
+    config = FakeConfig()
+    config.ollama_enabled = True
+    fake_processor = FakeLLMPostProcessor(response="Hello, world!")
+    transcriber = Transcriber(
+        config=config,
+        model=FakeModel([]),
+        device="cpu",
+        llm_post_processor=fake_processor,
+    )
+
+    result = transcriber.finalize_text("hello world")
+
+    assert result == "Hello, world!"
+    assert fake_processor.calls == ["Hello world."]
+
+
+def test_finalize_text_falls_back_when_llm_post_processor_fails():
+    config = FakeConfig()
+    config.ollama_enabled = True
+    fake_processor = FakeLLMPostProcessor(error=RuntimeError("offline"))
+    transcriber = Transcriber(
+        config=config,
+        model=FakeModel([]),
+        device="cpu",
+        llm_post_processor=fake_processor,
+    )
+
+    result = transcriber.finalize_text("multiple   spaces")
+
+    assert result == "Multiple spaces."
+    assert fake_processor.calls == ["Multiple spaces."]
+
+
+def test_warm_llm_post_processor_returns_false_on_warm_failure():
+    config = FakeConfig()
+    config.ollama_enabled = True
+    fake_processor = FakeLLMPostProcessor(error=RuntimeError("offline"))
+    transcriber = Transcriber(
+        config=config,
+        model=FakeModel([]),
+        device="cpu",
+        llm_post_processor=fake_processor,
+    )
+
+    assert transcriber.warm_llm_post_processor() is False
+
+
+def test_warm_llm_post_processor_returns_true_when_enabled_and_available():
+    config = FakeConfig()
+    config.ollama_enabled = True
+    fake_processor = FakeLLMPostProcessor(response="unused")
+    transcriber = Transcriber(
+        config=config,
+        model=FakeModel([]),
+        device="cpu",
+        llm_post_processor=fake_processor,
+    )
+
+    assert transcriber.warm_llm_post_processor() is True

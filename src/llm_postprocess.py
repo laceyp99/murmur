@@ -62,9 +62,29 @@ class OllamaClient:
 
         return self._extract_text(response)
 
-    def warm(self) -> None:
-        """Issue a tiny request to encourage the model to load before first use."""
-        self.generate("Ready.", max_tokens=1, temperature=0.0, system="Reply with OK.")
+    def is_model_available(self) -> bool:
+        """Return whether the configured model is already available locally."""
+        models_response = self._client.list()
+        for model_name in self._extract_model_names(models_response):
+            if model_name == self.model_name:
+                return True
+        return False
+
+    def warm(self, keep_alive: str = "10m") -> bool:
+        """Load an already-installed model into memory without downloading it."""
+        if not self.is_model_available():
+            print(
+                f"⚠️ Ollama model '{self.model_name}' is not installed locally; skipping warmup."
+            )
+            return False
+
+        self._client.chat(
+            model=self.model_name,
+            messages=[],
+            stream=False,
+            keep_alive=keep_alive,
+        )
+        return True
 
     @staticmethod
     def _extract_text(response: Any) -> str:
@@ -72,6 +92,25 @@ class OllamaClient:
             return str(response.get("response", "")).strip()
 
         return str(getattr(response, "response", "")).strip()
+
+    @staticmethod
+    def _extract_model_names(response: Any) -> list[str]:
+        if isinstance(response, Mapping):
+            models = response.get("models", [])
+        else:
+            models = getattr(response, "models", [])
+
+        model_names = []
+        for model in models:
+            if isinstance(model, Mapping):
+                name = model.get("name") or model.get("model")
+            else:
+                name = getattr(model, "name", None) or getattr(model, "model", None)
+
+            if name:
+                model_names.append(str(name))
+
+        return model_names
 
 
 class LLMPostProcessor:

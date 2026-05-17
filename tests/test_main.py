@@ -30,6 +30,8 @@ class FakeTranscriber:
         self.audio_calls = []
         self.live_segment_calls = []
         self.finalize_calls = []
+        self.load_model_calls = 0
+        self.warm_llm_post_processor_calls = 0
 
     def transcribe_segments(self, segments, debug=False):
         self.segment_calls.append({"segments": list(segments), "debug": debug})
@@ -47,11 +49,21 @@ class FakeTranscriber:
         self.finalize_calls.append(text)
         return f"FINAL:{text}" if text else ""
 
+    def load_model(self):
+        self.load_model_calls += 1
+
+    def warm_llm_post_processor(self):
+        self.warm_llm_post_processor_calls += 1
+        return True
+
 
 class FakeConfig:
     vad_aggressiveness = 1
     vad_padding_ms = 500
     vad_silence_duration_ms = 400
+    ollama_enabled = False
+    ollama_preload_model = True
+    start_with_windows = False
 
 
 def make_app(segmenter, transcriber, config=None):
@@ -260,6 +272,52 @@ def test_on_live_segment_ready_queues_segment_for_background_transcription():
 
     assert [queued_segment.segment_id for queued_segment in transcriber.live_segment_calls] == [3]
     assert app.live_transcript_accumulator.get_text() == "live-3"
+
+
+def test_init_preloads_whisper_and_ollama_when_enabled(monkeypatch):
+    fake_transcriber = FakeTranscriber()
+    fake_config = SimpleNamespace(
+        ollama_enabled=True,
+        ollama_preload_model=True,
+        start_with_windows=False,
+    )
+
+    monkeypatch.setattr(main_module, "get_config", lambda: fake_config)
+    monkeypatch.setattr(main_module, "AudioRecorder", lambda: SimpleNamespace())
+    monkeypatch.setattr(main_module, "Transcriber", lambda: fake_transcriber)
+    monkeypatch.setattr(main_module, "HotkeyManager", lambda: SimpleNamespace())
+    monkeypatch.setattr(main_module, "get_notification_manager", lambda: SimpleNamespace())
+    monkeypatch.setattr(main_module, "get_logger", lambda: SimpleNamespace())
+    monkeypatch.setattr(main_module, "TrayManager", lambda on_exit_callback: SimpleNamespace())
+    monkeypatch.setattr(main_module, "get_media_controller", lambda: SimpleNamespace())
+
+    main_module.MurmurApp(preload_model=True)
+
+    assert fake_transcriber.load_model_calls == 1
+    assert fake_transcriber.warm_llm_post_processor_calls == 1
+
+
+def test_init_skips_ollama_warmup_when_disabled(monkeypatch):
+    fake_transcriber = FakeTranscriber()
+    fake_config = SimpleNamespace(
+        ollama_enabled=False,
+        ollama_preload_model=True,
+        start_with_windows=False,
+    )
+
+    monkeypatch.setattr(main_module, "get_config", lambda: fake_config)
+    monkeypatch.setattr(main_module, "AudioRecorder", lambda: SimpleNamespace())
+    monkeypatch.setattr(main_module, "Transcriber", lambda: fake_transcriber)
+    monkeypatch.setattr(main_module, "HotkeyManager", lambda: SimpleNamespace())
+    monkeypatch.setattr(main_module, "get_notification_manager", lambda: SimpleNamespace())
+    monkeypatch.setattr(main_module, "get_logger", lambda: SimpleNamespace())
+    monkeypatch.setattr(main_module, "TrayManager", lambda on_exit_callback: SimpleNamespace())
+    monkeypatch.setattr(main_module, "get_media_controller", lambda: SimpleNamespace())
+
+    main_module.MurmurApp(preload_model=True)
+
+    assert fake_transcriber.load_model_calls == 1
+    assert fake_transcriber.warm_llm_post_processor_calls == 0
 
 
 def test_start_live_transcription_replaces_existing_worker():
