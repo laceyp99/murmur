@@ -15,6 +15,7 @@ import whisper
 from .config import get_config
 from .audio import AudioData
 from .llm_postprocess import LLMPostProcessor, OllamaClient
+from .user_vocab import load_user_vocab
 
 
 class AudioSegmentLike(Protocol):
@@ -122,7 +123,8 @@ class Transcriber:
                     endpoint=self.config.ollama_endpoint,
                     model_name=self.config.ollama_model_name,
                     timeout=float(self.config.ollama_timeout_seconds),
-                )
+                ),
+                user_vocab=load_user_vocab(),
             )
         except Exception as exc:
             print(f"⚠️ Ollama post-processor unavailable: {exc}")

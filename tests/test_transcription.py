@@ -148,3 +148,41 @@ def test_warm_llm_post_processor_returns_true_when_enabled_and_available():
     )
 
     assert transcriber.warm_llm_post_processor() is True
+
+
+def test_get_llm_post_processor_loads_user_vocab(monkeypatch):
+    config = FakeConfig()
+    config.ollama_enabled = True
+    captured = {}
+
+    class StubOllamaClient:
+        def __init__(self, endpoint, model_name, timeout):
+            captured["client_args"] = {
+                "endpoint": endpoint,
+                "model_name": model_name,
+                "timeout": timeout,
+            }
+
+    class StubLLMPostProcessor:
+        def __init__(self, client, user_vocab=None):
+            captured["client"] = client
+            captured["user_vocab"] = user_vocab
+
+    monkeypatch.setattr("src.transcription.OllamaClient", StubOllamaClient)
+    monkeypatch.setattr("src.transcription.LLMPostProcessor", StubLLMPostProcessor)
+    monkeypatch.setattr(
+        "src.transcription.load_user_vocab",
+        lambda: {"brew ridge": "Blue Ridge Data"},
+    )
+
+    transcriber = Transcriber(config=config, model=FakeModel([]), device="cpu")
+
+    processor = transcriber._get_llm_post_processor()
+
+    assert processor is captured["client"] or processor is not None
+    assert captured["client_args"] == {
+        "endpoint": "http://localhost:11434",
+        "model_name": "llama3.2:1b",
+        "timeout": 15.0,
+    }
+    assert captured["user_vocab"] == {"brew ridge": "Blue Ridge Data"}
