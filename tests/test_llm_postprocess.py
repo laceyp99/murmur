@@ -133,6 +133,96 @@ def test_llm_post_processor_returns_original_text_on_failure():
     assert processor.process("keep this text") == "keep this text"
 
 
+def test_llm_post_processor_normalizes_wrapped_output_before_accepting():
+    fake_client = FakeOllamaPackageClient({"response": "ignored"})
+    fake_client.chat_response = {"message": {"content": "```text\n\"Hello, world.\"\n```"}}
+    processor = LLMPostProcessor(
+        client=OllamaClient(
+            endpoint="http://localhost:11434",
+            model_name="llama3.2:1b",
+            client=fake_client,
+        )
+    )
+
+    assert processor.process("hello world") == "Hello, world."
+
+
+def test_llm_post_processor_rejects_assistant_preamble_output():
+    fake_client = FakeOllamaPackageClient({"response": "ignored"})
+    fake_client.chat_response = {
+        "message": {
+            "content": "Here's the cleaned transcript: Hello, world.",
+        }
+    }
+    processor = LLMPostProcessor(
+        client=OllamaClient(
+            endpoint="http://localhost:11434",
+            model_name="llama3.2:1b",
+            client=fake_client,
+        )
+    )
+
+    assert processor.process("Hello world.") == "Hello world."
+
+
+def test_llm_post_processor_allows_transcript_text_with_meta_like_phrases():
+    fake_client = FakeOllamaPackageClient({"response": "ignored"})
+    fake_client.chat_response = {
+        "message": {
+            "content": "I corrected the deployment note as requested.",
+        }
+    }
+    processor = LLMPostProcessor(
+        client=OllamaClient(
+            endpoint="http://localhost:11434",
+            model_name="llama3.2:1b",
+            client=fake_client,
+        )
+    )
+
+    assert processor.process("I corrected the deployment note as requested.") == "I corrected the deployment note as requested."
+
+
+def test_llm_post_processor_rejects_length_explosion_output():
+    fake_client = FakeOllamaPackageClient({"response": "ignored"})
+    fake_client.chat_response = {
+        "message": {
+            "content": (
+                "Hello world. "
+                "This transcript has been expanded with a long explanation that should not be accepted "
+                "because it is much longer than the original text and clearly exceeds the allowed output size."
+            ),
+        }
+    }
+    processor = LLMPostProcessor(
+        client=OllamaClient(
+            endpoint="http://localhost:11434",
+            model_name="llama3.2:1b",
+            client=fake_client,
+        )
+    )
+
+    assert processor.process("Hello world.") == "Hello world."
+
+
+def test_llm_post_processor_rejects_chat_or_list_shaped_output():
+    fake_client = FakeOllamaPackageClient({"response": "ignored"})
+    fake_client.chat_response = {
+        "message": {
+            "content": "Assistant: Hello, world.\n- Fixed punctuation\n- Corrected capitalization",
+        }
+    }
+    processor = LLMPostProcessor(
+        client=OllamaClient(
+            endpoint="http://localhost:11434",
+            model_name="llama3.2:1b",
+            client=fake_client,
+        )
+    )
+
+    assert processor.process("Hello world.") == "Hello world."
+
+
 def test_ollama_client_warm_loads_existing_model_without_generation():
     fake_client = FakeOllamaPackageClient({"response": "ignored"})
     fake_client.list_response = {"models": [{"name": "llama3.2:1b"}]}

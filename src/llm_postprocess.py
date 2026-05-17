@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Mapping, Optional
 
@@ -16,6 +17,16 @@ DEFAULT_SYSTEM_PROMPT = (
     "Preserve meaning, preserve the speaker's wording when possible, and never invent facts. "
     "Fix punctuation, capitalization, spacing, and obvious recognition mistakes only when the context is clear. "
     "Return only the cleaned transcript text."
+)
+
+DISALLOWED_PREFIXES = (
+    "here's the cleaned transcript",
+    "here is the cleaned transcript",
+    "cleaned transcript:",
+    "corrected transcript:",
+    "certainly",
+    "sure",
+    "of course",
 )
 
 
@@ -179,12 +190,58 @@ class LLMPostProcessor:
             return cleaned_input
 
         elapsed = time.time() - start_time
-        if result:
+        normalized_result = self._normalize_output(result)
+        if self._is_acceptable_output(normalized_result, cleaned_input):
             print(f"LLM post-processing completed in {elapsed:.2f}s")
-            return result.strip()
+            return normalized_result
 
-        print("⚠️ Ollama post-processing returned empty output; using original transcript.")
+        print("⚠️ Ollama post-processing returned invalid output; using original transcript.")
         return cleaned_input
+
+    def _normalize_output(self, text: str) -> str:
+        """Strip common wrapper formatting from model output before validation."""
+        normalized_text = text.strip()
+
+        if normalized_text.startswith("```"):
+            normalized_text = re.sub(r"^```[^\n]*\n?", "", normalized_text)
+            normalized_text = re.sub(r"\n?```$", "", normalized_text)
+
+        normalized_text = re.sub(r"\n\s*\n+", "\n\n", normalized_text).strip()
+
+        quote_pairs = (("\"", "\""), ("'", "'"), ("“", "”"))
+        for opening_quote, closing_quote in quote_pairs:
+            if (
+                normalized_text.startswith(opening_quote)
+                and normalized_text.endswith(closing_quote)
+                and len(normalized_text) >= 2
+            ):
+                normalized_text = normalized_text[1:-1].strip()
+                break
+
+        return normalized_text
+
+    def _is_acceptable_output(self, output_text: str, input_text: str) -> bool:
+        """Accept only transcript-like model output and reject assistant/meta responses."""
+        if not output_text:
+            return False
+
+        lowered_output = output_text.casefold()
+        if lowered_output.startswith(DISALLOWED_PREFIXES):
+            return False
+
+        if len(output_text) > int(len(input_text) * 1.75) + 40:
+            return False
+
+        if re.search(r"(?m)^#{1,6}\s", output_text):
+            return False
+
+        if len(re.findall(r"(?m)^\s*(?:[-*]|\d+\.)\s+", output_text)) >= 2:
+            return False
+
+        if re.search(r"(?im)^\s*(user|assistant|system|transcript):", output_text):
+            return False
+
+        return True
 
     def build_messages(self, text: str) -> list[dict[str, str]]:
         """Build few-shot chat history for the final transcript cleanup pass."""
