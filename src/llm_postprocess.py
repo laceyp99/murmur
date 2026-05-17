@@ -62,6 +62,25 @@ class OllamaClient:
 
         return self._extract_text(response)
 
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int = 256,
+        temperature: float = 0.0,
+    ) -> str:
+        """Send a deterministic chat request to Ollama and extract assistant text."""
+        response = self._client.chat(
+            model=self.model_name,
+            messages=messages,
+            stream=False,
+            options={
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            },
+        )
+
+        return self._extract_chat_text(response)
+
     def is_model_available(self) -> bool:
         """Return whether the configured model is already available locally."""
         models_response = self._client.list()
@@ -92,6 +111,23 @@ class OllamaClient:
             return str(response.get("response", "")).strip()
 
         return str(getattr(response, "response", "")).strip()
+
+    @staticmethod
+    def _extract_chat_text(response: Any) -> str:
+        if isinstance(response, Mapping):
+            message = response.get("message", {})
+            if isinstance(message, Mapping):
+                return str(message.get("content", "")).strip()
+            return ""
+
+        message = getattr(response, "message", None)
+        if message is None:
+            return ""
+
+        if isinstance(message, Mapping):
+            return str(message.get("content", "")).strip()
+
+        return str(getattr(message, "content", "")).strip()
 
     @staticmethod
     def _extract_model_names(response: Any) -> list[str]:
@@ -130,14 +166,13 @@ class LLMPostProcessor:
         if not cleaned_input:
             return cleaned_input
 
-        prompt = self.build_prompt(cleaned_input)
+        messages = self.build_messages(cleaned_input)
         start_time = time.time()
         try:
-            result = self.client.generate(
-                prompt,
+            result = self.client.chat(
+                messages,
                 max_tokens=max(len(cleaned_input.split()) * 3, 64),
                 temperature=0.0,
-                system=DEFAULT_SYSTEM_PROMPT,
             )
         except Exception as exc:
             print(f"⚠️ Ollama post-processing failed: {exc}")
@@ -151,11 +186,35 @@ class LLMPostProcessor:
         print("⚠️ Ollama post-processing returned empty output; using original transcript.")
         return cleaned_input
 
-    def build_prompt(self, text: str) -> str:
-        """Build the prompt for the final transcript cleanup pass."""
+    def build_messages(self, text: str) -> list[dict[str, str]]:
+        """Build few-shot chat history for the final transcript cleanup pass."""
+        messages = [
+            {
+                "role": "system",
+                "content": DEFAULT_SYSTEM_PROMPT,
+            },
+            {
+                "role": "user",
+                "content": self._build_user_prompt("quick recap we met with jane from blue ridge data about the pilot the transcript may say brew ridge or blue rich but it should be blue ridge data jane asked if noah can send the intake link and the loom walkthrough by friday"),
+            },
+            {
+                "role": "assistant",
+                "content": "Quick recap: We met with Jane from Blue Ridge Data about the pilot. Jane asked if Noah can send the intake link and the Loom walkthrough by Friday.",
+            },
+            {
+                "role": "user",
+                "content": self._build_user_prompt(text),
+            },
+        ]
+
+        return messages
+
+    def _build_user_prompt(self, text: str) -> str:
+        """Build the user turn content for transcript cleanup."""
         sections = [
-            "Clean this transcript while preserving meaning and wording:",
-            text,
+            "Clean this transcript while preserving meaning and wording.",
+            "Return only the cleaned transcript text with no preamble or commentary.",
+            f"Transcript:\n{text}",
         ]
 
         if self.user_vocab:

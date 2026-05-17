@@ -58,8 +58,39 @@ def test_ollama_client_generate_extracts_object_response():
     assert client.generate("input text") == "Object response."
 
 
+def test_ollama_client_chat_uses_messages_and_options():
+    fake_client = FakeOllamaPackageClient({"response": "ignored"})
+    fake_client.chat_response = {"message": {"content": "Cleaned output."}}
+    client = OllamaClient(
+        endpoint="http://localhost:11434",
+        model_name="llama3.2:1b",
+        timeout=15.0,
+        client=fake_client,
+    )
+
+    result = client.chat(
+        [{"role": "user", "content": "input text"}],
+        max_tokens=42,
+        temperature=0.0,
+    )
+
+    assert result == "Cleaned output."
+    assert fake_client.calls == [
+        {
+            "model": "llama3.2:1b",
+            "messages": [{"role": "user", "content": "input text"}],
+            "stream": False,
+            "options": {
+                "temperature": 0.0,
+                "num_predict": 42,
+            },
+        }
+    ]
+
+
 def test_llm_post_processor_builds_prompt_with_vocab_and_returns_cleaned_text():
-    fake_client = FakeOllamaPackageClient({"response": "Hello, world."})
+    fake_client = FakeOllamaPackageClient({"response": "ignored"})
+    fake_client.chat_response = {"message": {"content": "Quick recap: We met with Jane from Blue Ridge Data about the pilot. Jane asked if Noah can send the intake link and the Loom walkthrough by Friday."}}
     processor = LLMPostProcessor(
         client=OllamaClient(
             endpoint="http://localhost:11434",
@@ -69,19 +100,26 @@ def test_llm_post_processor_builds_prompt_with_vocab_and_returns_cleaned_text():
         user_vocab={"q win": "Qwen", "murmer": "Murmur"},
     )
 
-    result = processor.process("hello world")
+    result = processor.process("quick recap we met with jane from blue ridge data about the pilot the transcript may say brew ridge or blue rich but it should be blue ridge data jane asked if noah can send the intake link and the loom walkthrough by friday")
 
-    assert result == "Hello, world."
-    prompt = fake_client.calls[0]["prompt"]
-    assert "hello world" in prompt
-    assert "Preferred vocabulary and corrections:" in prompt
-    assert "- q win -> Qwen" in prompt
-    assert "- murmer -> Murmur" in prompt
+    assert result == "Quick recap: We met with Jane from Blue Ridge Data about the pilot. Jane asked if Noah can send the intake link and the Loom walkthrough by Friday."
+    messages = fake_client.calls[0]["messages"]
+    assert messages[0]["role"] == "system"
+    assert "Return only the cleaned transcript text." in messages[0]["content"]
+    assert messages[1]["role"] == "user"
+    assert "Clean this transcript while preserving meaning and wording." in messages[1]["content"]
+    assert "Return only the cleaned transcript text with no preamble or commentary." in messages[1]["content"]
+    assert "Transcript:\nquick recap we met with jane from blue ridge data about the pilot the transcript may say brew ridge or blue rich but it should be blue ridge data jane asked if noah can send the intake link and the loom walkthrough by friday" in messages[1]["content"]
+    assert messages[2] == {"role": "assistant", "content": "Quick recap: We met with Jane from Blue Ridge Data about the pilot. Jane asked if Noah can send the intake link and the Loom walkthrough by Friday."}
+    assert messages[3]["role"] == "user"
+    assert "Preferred vocabulary and corrections:" in messages[3]["content"]
+    assert "- q win -> Qwen" in messages[3]["content"]
+    assert "- murmer -> Murmur" in messages[3]["content"]
 
 
 def test_llm_post_processor_returns_original_text_on_failure():
     class FailingClient:
-        def generate(self, **kwargs):
+        def chat(self, *args, **kwargs):
             raise RuntimeError("connection failed")
 
     processor = LLMPostProcessor(
