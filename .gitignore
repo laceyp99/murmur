@@ -40,5 +40,10 @@ Thumbs.db
 *.wav
 *.mp3
 training_data/
+user_vocab.json
+
+.ruff_cache/
+.pytest_cache/
+
 
 # Whisper models are cached in user directory, not in project
