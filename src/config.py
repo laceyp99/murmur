@@ -130,7 +130,7 @@ class Config:
     @property
     def vad_padding_ms(self) -> int:
         """Get the user-facing VAD end-padding anchor in milliseconds."""
-        return self.get("vad_padding_ms", 500)
+        return self.get("vad_padding_ms", 220)
 
     @property
     def vad_silence_duration_ms(self) -> int:
