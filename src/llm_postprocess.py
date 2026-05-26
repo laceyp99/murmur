@@ -270,8 +270,7 @@ class LLMPostProcessor:
         """Build the user turn content for transcript cleanup."""
         sections = [
             "Clean this transcript while preserving meaning and wording.",
-            "Return only the cleaned transcript text with no preamble or commentary.",
-            f"Transcript:\n{text}",
+            "Return only the cleaned transcript text with no preamble or commentary."
         ]
 
         if self.user_vocab:
@@ -280,4 +279,5 @@ class LLMPostProcessor:
                 vocab_lines.append(f"- {source} -> {target}")
             sections.append("\n".join(vocab_lines))
 
+        sections.append(f"Transcript to clean:\n{text.strip()}")
         return "\n\n".join(sections)
