@@ -14,6 +14,8 @@ import whisper
 
 from .config import get_config
 from .audio import AudioData
+from .llm_postprocess import LLMPostProcessor, OllamaClient
+from .user_vocab import load_user_vocab
 
 
 class AudioSegmentLike(Protocol):
@@ -53,10 +55,12 @@ class Transcriber:
         config=None,
         model: Optional[whisper.Whisper] = None,
         device: Optional[str] = None,
+        llm_post_processor: Optional[LLMPostProcessor] = None,
     ):
         self.config = config or get_config()
         self._model: Optional[whisper.Whisper] = model
         self._device: str = device or self._get_device()
+        self._llm_post_processor = llm_post_processor
     
     def _get_device(self) -> str:
         """Determine the best device to use for inference."""
@@ -94,7 +98,58 @@ class Transcriber:
 
     def finalize_text(self, text: str) -> str:
         """Apply document-level cleanup to pre-transcribed text."""
-        return self._post_process_document(text)
+        cleaned_text = self._post_process_document(text)
+        if not cleaned_text or not getattr(self.config, "ollama_enabled", False):
+            return cleaned_text
+
+        processor = self._get_llm_post_processor()
+        if processor is None:
+            return cleaned_text
+
+        try:
+            return processor.process(cleaned_text)
+        except Exception as exc:
+            print(f"⚠️ Ollama post-processing failed: {exc}")
+            return cleaned_text
+
+    def _get_llm_post_processor(self) -> Optional[LLMPostProcessor]:
+        """Build the optional final-pass LLM post-processor lazily."""
+        if self._llm_post_processor is not None:
+            return self._llm_post_processor
+
+        try:
+            self._llm_post_processor = LLMPostProcessor(
+                client=OllamaClient(
+                    endpoint=self.config.ollama_endpoint,
+                    model_name=self.config.ollama_model_name,
+                    timeout=float(self.config.ollama_timeout_seconds),
+                ),
+                user_vocab=load_user_vocab(),
+            )
+        except Exception as exc:
+            print(f"⚠️ Ollama post-processor unavailable: {exc}")
+            self._llm_post_processor = None
+
+        return self._llm_post_processor
+
+    def warm_llm_post_processor(self) -> bool:
+        """Warm the configured Ollama model without affecting transcription fallback."""
+        if not getattr(self.config, "ollama_enabled", False):
+            return False
+
+        processor = self._get_llm_post_processor()
+        if processor is None:
+            return False
+
+        client = getattr(processor, "client", None)
+        if client is None or not hasattr(client, "warm"):
+            return False
+
+        try:
+            return bool(client.warm())
+        except Exception as exc:
+            print(f"⚠️ Ollama model warmup failed: {exc}")
+            return False
 
     def transcribe_segments(
         self,

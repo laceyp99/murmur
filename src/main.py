@@ -64,6 +64,10 @@ class MurmurApp:
             print("Preloading Whisper model...")
             self.transcriber.load_model()
 
+        if self.config.ollama_enabled and self.config.ollama_preload_model:
+            print("Warming Ollama model...")
+            self.transcriber.warm_llm_post_processor()
+
         # Ensure autostart matches config
         if self.config.start_with_windows:
             set_autostart(True)

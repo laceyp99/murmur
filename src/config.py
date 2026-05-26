@@ -10,6 +10,9 @@ from typing import Any, Dict, Optional
 
 APP_DIR_NAME = "murmur"
 
+DEFAULT_OLLAMA_MODEL_NAME = "granite4.1:3b"
+DEFAULT_OLLAMA_TIMEOUT_SECONDS = 60
+
 
 DEFAULT_CONFIG = {
     "hotkey": "ctrl+shift+space",
@@ -27,6 +30,12 @@ DEFAULT_CONFIG = {
     "pause_media_while_recording": True,
     "logging_consent_updated_at": None,
     "logging_consent_source": None,
+    # Ollama LLM post-processor configuration
+    "ollama_enabled": True,
+    "ollama_endpoint": "http://localhost:11434",
+    "ollama_model_name": DEFAULT_OLLAMA_MODEL_NAME,
+    "ollama_timeout_seconds": DEFAULT_OLLAMA_TIMEOUT_SECONDS,
+    "ollama_preload_model": True,
 }
 
 # Global config instance
@@ -121,7 +130,7 @@ class Config:
     @property
     def vad_padding_ms(self) -> int:
         """Get the user-facing VAD end-padding anchor in milliseconds."""
-        return self.get("vad_padding_ms", 500)
+        return self.get("vad_padding_ms", 220)
 
     @property
     def vad_silence_duration_ms(self) -> int:
@@ -147,6 +156,42 @@ class Config:
     def enable_logging(self) -> bool:
         """Get the training-data logging setting."""
         return self.get("enable_logging", False)
+
+    @property
+    def ollama_enabled(self) -> bool:
+        """Whether the Ollama LLM post-processor is enabled."""
+        return self.get("ollama_enabled", True)
+
+    @property
+    def ollama_endpoint(self) -> str:
+        """URL of the Ollama endpoint to use for LLM requests."""
+        return self.get("ollama_endpoint", "http://localhost:11434")
+
+    @property
+    def ollama_model_name(self) -> str:
+        """Default Ollama model name to use for post-processing."""
+        return self.get("ollama_model_name", DEFAULT_OLLAMA_MODEL_NAME)
+
+    @property
+    def ollama_timeout_seconds(self) -> int:
+        """Timeout in seconds for Ollama requests; values below 60 are raised to 60."""
+        raw_timeout = self.get(
+            "ollama_timeout_seconds", DEFAULT_OLLAMA_TIMEOUT_SECONDS
+        )
+        try:
+            timeout_seconds = float(raw_timeout)
+        except (TypeError, ValueError):
+            return DEFAULT_OLLAMA_TIMEOUT_SECONDS
+    
+        if timeout_seconds <= 0:
+            return DEFAULT_OLLAMA_TIMEOUT_SECONDS
+        
+        return int(max(timeout_seconds, DEFAULT_OLLAMA_TIMEOUT_SECONDS))
+
+    @property
+    def ollama_preload_model(self) -> bool:
+        """Whether to attempt to preload/warm the Ollama model on startup."""
+        return self.get("ollama_preload_model", True)
 
 
 def get_config() -> Config:
