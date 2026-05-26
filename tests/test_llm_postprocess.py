@@ -228,6 +228,24 @@ def test_llm_post_processor_rejects_chat_or_list_shaped_output():
     assert processor.process("Hello world.") == "Hello world."
 
 
+def test_llm_post_processor_rejects_single_bullet_output():
+    fake_client = FakeOllamaPackageClient({"response": "ignored"})
+    fake_client.chat_response = {
+        "message": {
+            "content": "- Hello, world.",
+        }
+    }
+    processor = LLMPostProcessor(
+        client=OllamaClient(
+            endpoint="http://localhost:11434",
+            model_name=MODEL_NAME,
+            client=fake_client,
+        )
+    )
+
+    assert processor.process("Hello world.") == "Hello world."
+
+
 def test_ollama_client_warm_loads_existing_model_without_generation():
     fake_client = FakeOllamaPackageClient({"response": "ignored"})
     fake_client.list_response = {"models": [{"name": MODEL_NAME}]}

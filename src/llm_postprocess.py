@@ -235,7 +235,7 @@ class LLMPostProcessor:
         if re.search(r"(?m)^#{1,6}\s", output_text):
             return False
 
-        if len(re.findall(r"(?m)^\s*(?:[-*]|\d+\.)\s+", output_text)) >= 2:
+        if len(re.findall(r"(?m)^\s*(?:[-*]|\d+\.)\s+", output_text)) >= 1:
             return False
 
         if re.search(r"(?im)^\s*(user|assistant|system|transcript):", output_text):
