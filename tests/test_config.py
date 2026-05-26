@@ -1,6 +1,10 @@
 import pytest
 
-from src.config import Config
+from src.config import (
+    Config,
+    DEFAULT_OLLAMA_MODEL_NAME,
+    DEFAULT_OLLAMA_TIMEOUT_SECONDS,
+)
 
 
 def test_config_defaults(tmp_path, monkeypatch):
@@ -8,8 +12,8 @@ def test_config_defaults(tmp_path, monkeypatch):
     cfg = Config()
     assert cfg.ollama_enabled is True
     assert cfg.ollama_endpoint == "http://localhost:11434"
-    assert cfg.ollama_model_name == "llama3.2:1b"
-    assert cfg.ollama_timeout_seconds == 15
+    assert cfg.ollama_model_name == DEFAULT_OLLAMA_MODEL_NAME
+    assert cfg.ollama_timeout_seconds == DEFAULT_OLLAMA_TIMEOUT_SECONDS
     assert cfg.ollama_preload_model is True
 
 

@@ -162,8 +162,8 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
   "logging_consent_source": null,
   "ollama_enabled": true,
   "ollama_endpoint": "http://localhost:11434",
-  "ollama_model_name": "llama3.2:1b",
-  "ollama_timeout_seconds": 15,
+  "ollama_model_name": "granite4.1:3b",
+  "ollama_timeout_seconds": 60,
   "ollama_preload_model": true
 }
 ```
@@ -189,8 +189,8 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
 | `logging_consent_source` | Local source of the last logging consent change | `null` |
 | `ollama_enabled` | Enable the final-pass Ollama cleanup step | `true` |
 | `ollama_endpoint` | Ollama server endpoint | `http://localhost:11434` |
-| `ollama_model_name` | Ollama model used for final cleanup | `llama3.2:1b` |
-| `ollama_timeout_seconds` | Request timeout for Ollama calls | `15` |
+| `ollama_model_name` | Ollama model used for final cleanup | `granite4.1:3b` |
+| `ollama_timeout_seconds` | Request timeout for Ollama calls (minimum 60 seconds) | `60` |
 | `ollama_preload_model` | Warm the Ollama model on startup when enabled | `true` |
 
 ### Ollama setup
@@ -198,7 +198,7 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
 Install Ollama separately, start the server, and make sure the configured model exists locally before launching murmur. Example:
 
 ```powershell
-ollama pull llama3.2:1b
+ollama pull granite4.1:3b
 ollama serve
 ```
 

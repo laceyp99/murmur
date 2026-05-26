@@ -5,6 +5,7 @@ import pytest
 pytest.importorskip("torch")
 pytest.importorskip("whisper")
 
+from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
 from src.audio import AudioData
 from src.transcription import Transcriber
 
@@ -15,8 +16,8 @@ class FakeConfig:
     language = None
     ollama_enabled = False
     ollama_endpoint = "http://localhost:11434"
-    ollama_model_name = "llama3.2:1b"
-    ollama_timeout_seconds = 15
+    ollama_model_name = DEFAULT_OLLAMA_MODEL_NAME
+    ollama_timeout_seconds = DEFAULT_OLLAMA_TIMEOUT_SECONDS
 
 
 class FakeModel:
@@ -185,7 +186,7 @@ def test_get_llm_post_processor_loads_user_vocab(monkeypatch):
     assert cached_processor is processor
     assert captured["client_args"] == {
         "endpoint": "http://localhost:11434",
-        "model_name": "llama3.2:1b",
-        "timeout": 15.0,
+        "model_name": DEFAULT_OLLAMA_MODEL_NAME,
+        "timeout": float(DEFAULT_OLLAMA_TIMEOUT_SECONDS),
     }
     assert captured["user_vocab"] == {"brew ridge": "Blue Ridge Data"}

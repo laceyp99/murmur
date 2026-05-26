@@ -10,6 +10,9 @@ from typing import Any, Dict, Optional
 
 APP_DIR_NAME = "murmur"
 
+DEFAULT_OLLAMA_MODEL_NAME = "granite4.1:3b"
+DEFAULT_OLLAMA_TIMEOUT_SECONDS = 60
+
 
 DEFAULT_CONFIG = {
     "hotkey": "ctrl+shift+space",
@@ -30,8 +33,8 @@ DEFAULT_CONFIG = {
     # Ollama LLM post-processor configuration
     "ollama_enabled": True,
     "ollama_endpoint": "http://localhost:11434",
-    "ollama_model_name": "llama3.2:1b",
-    "ollama_timeout_seconds": 15,
+    "ollama_model_name": DEFAULT_OLLAMA_MODEL_NAME,
+    "ollama_timeout_seconds": DEFAULT_OLLAMA_TIMEOUT_SECONDS,
     "ollama_preload_model": True,
 }
 
@@ -167,21 +170,23 @@ class Config:
     @property
     def ollama_model_name(self) -> str:
         """Default Ollama model name to use for post-processing."""
-        return self.get("ollama_model_name", "llama3.2:1b")
+        return self.get("ollama_model_name", DEFAULT_OLLAMA_MODEL_NAME)
 
     @property
     def ollama_timeout_seconds(self) -> int:
-        """Timeout in seconds for Ollama requests."""
-        raw_timeout = self.get("ollama_timeout_seconds", 15)
+        """Timeout in seconds for Ollama requests; values below 60 are raised to 60."""
+        raw_timeout = self.get(
+            "ollama_timeout_seconds", DEFAULT_OLLAMA_TIMEOUT_SECONDS
+        )
         try:
             timeout_seconds = float(raw_timeout)
         except (TypeError, ValueError):
-            return 15
+            return DEFAULT_OLLAMA_TIMEOUT_SECONDS
     
         if timeout_seconds <= 0:
-            return 15
+            return DEFAULT_OLLAMA_TIMEOUT_SECONDS
         
-        return int(timeout_seconds)
+        return int(max(timeout_seconds, DEFAULT_OLLAMA_TIMEOUT_SECONDS))
 
     @property
     def ollama_preload_model(self) -> bool:
