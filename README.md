@@ -202,6 +202,8 @@ ollama pull granite4.1:3b
 ollama serve
 ```
 
+These Ollama controls are currently JSON-only; edit `%APPDATA%\murmur\config.json` to change them.
+
 If you want to disable the final LLM pass entirely, set `ollama_enabled` to `false` in `%APPDATA%\murmur\config.json`.
 
 ## Troubleshooting
