@@ -22,7 +22,7 @@ A lightweight Windows application that enables dictation anywhere on your system
 ## System Requirements
 
 - **OS**: Windows 10/11
-- **Python**: 3.10 or higher
+- **Python**: 3.12
 - **GPU**: NVIDIA GPU with CUDA support 
 - **CPU**: Works without GPU, but transcription will be slower
 
@@ -44,23 +44,23 @@ venv\Scripts\activate
 
 ### 3. Install PyTorch with CUDA Support
 
-For GPU acceleration, install PyTorch with CUDA:
+If you want CUDA acceleration, install PyTorch with CUDA first:
 
 ```bash
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
 
-For CPU-only installation:
+For CPU-only installation, skip this step and let the project dependencies install from PyPI.
+
+### 4. Install murmur and developer dependencies
+
+Use the editable install so local code changes are picked up immediately:
 
 ```bash
-pip install torch torchvision torchaudio
+pip install -e .[dev]
 ```
 
-### 4. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
+This installs murmur, the runtime dependencies, Ruff, and pytest.
 
 ### 5. Install FFmpeg (Required by Whisper)
 
