@@ -8,6 +8,7 @@ from typing import Optional
 
 try:
     from win10toast import ToastNotifier
+
     TOAST_AVAILABLE = True
 except ImportError:
     TOAST_AVAILABLE = False
@@ -18,30 +19,26 @@ from .config import get_config
 class NotificationManager:
     """
     Manages Windows toast notifications for user feedback.
-    
+
     Falls back to console output if toast notifications are not available.
     """
-    
+
     def __init__(self):
         self.config = get_config()
         self._toaster: Optional[ToastNotifier] = None
-        
+
         if TOAST_AVAILABLE:
             try:
                 self._toaster = ToastNotifier()
-            except:
+            except Exception:
                 pass
-    
+
     def notify(
-        self,
-        title: str,
-        message: str,
-        duration: int = 3,
-        threaded: bool = True
+        self, title: str, message: str, duration: int = 3, threaded: bool = True
     ) -> None:
         """
         Show a notification to the user.
-        
+
         Args:
             title: Notification title.
             message: Notification message.
@@ -50,43 +47,37 @@ class NotificationManager:
         """
         if not self.config.enable_notifications:
             return
-        
+
         if self._toaster is not None:
             try:
                 if threaded:
                     thread = threading.Thread(
-                        target=self._show_toast,
-                        args=(title, message, duration)
+                        target=self._show_toast, args=(title, message, duration)
                     )
                     thread.start()
                 else:
                     self._show_toast(title, message, duration)
-            except Exception as e:
+            except Exception:
                 print(f"[{title}] {message}")
         else:
             print(f"[{title}] {message}")
-    
+
     def _show_toast(self, title: str, message: str, duration: int) -> None:
         """Show a toast notification."""
         try:
-            self._toaster.show_toast(
-                title,
-                message,
-                duration=duration,
-                threaded=False
-            )
-        except:
+            self._toaster.show_toast(title, message, duration=duration, threaded=False)
+        except Exception:
             pass
-    
+
     def notify_recording_started(self) -> None:
         """Notify that recording has started."""
         self.notify("murmur", "Recording started... Speak now!")
-    
+
     def notify_transcription_complete(self, text: str) -> None:
         """Notify that transcription is complete."""
         preview = text[:50] + "..." if len(text) > 50 else text
         self.notify("murmur", f"Copied: {preview}")
-    
+
     def notify_error(self, error: str) -> None:
         """Notify about an error."""
         self.notify("murmur Error", error)

@@ -195,7 +195,9 @@ class LLMPostProcessor:
             print(f"LLM post-processing completed in {elapsed:.2f}s")
             return normalized_result
 
-        print("⚠️ Ollama post-processing returned invalid output; using original transcript.")
+        print(
+            "⚠️ Ollama post-processing returned invalid output; using original transcript."
+        )
         return cleaned_input
 
     def _normalize_output(self, text: str) -> str:
@@ -208,7 +210,7 @@ class LLMPostProcessor:
 
         normalized_text = re.sub(r"\n\s*\n+", "\n\n", normalized_text).strip()
 
-        quote_pairs = (("\"", "\""), ("'", "'"), ("“", "”"))
+        quote_pairs = (('"', '"'), ("'", "'"), ("“", "”"))
         for opening_quote, closing_quote in quote_pairs:
             if (
                 normalized_text.startswith(opening_quote)
@@ -252,7 +254,9 @@ class LLMPostProcessor:
             },
             {
                 "role": "user",
-                "content": self._build_user_prompt("quick recap we met with jane from blue ridge data about the pilot the transcript may say brew ridge or blue rich but it should be blue ridge data jane asked if noah can send the intake link and the loom walkthrough by friday"),
+                "content": self._build_user_prompt(
+                    "quick recap we met with jane from blue ridge data about the pilot the transcript may say brew ridge or blue rich but it should be blue ridge data jane asked if noah can send the intake link and the loom walkthrough by friday"
+                ),
             },
             {
                 "role": "assistant",
@@ -270,7 +274,7 @@ class LLMPostProcessor:
         """Build the user turn content for transcript cleanup."""
         sections = [
             "Clean this transcript while preserving meaning and wording.",
-            "Return only the cleaned transcript text with no preamble or commentary."
+            "Return only the cleaned transcript text with no preamble or commentary.",
         ]
 
         if self.user_vocab:

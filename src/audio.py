@@ -3,11 +3,15 @@ Audio recording functionality for Murmur.
 """
 
 import numpy as np
-import sounddevice as sd
 import threading
 import time
 from typing import Callable, Optional
 from dataclasses import dataclass
+
+try:
+    import sounddevice as sd
+except (ImportError, OSError):
+    sd = None
 
 from .config import Config, get_config
 
@@ -15,6 +19,7 @@ from .config import Config, get_config
 @dataclass
 class AudioData:
     """Container for recorded audio data."""
+
     audio: np.ndarray
     sample_rate: int
     duration: float
@@ -22,16 +27,18 @@ class AudioData:
 
 class AudioRecorder:
     """Records audio from the microphone."""
-    
+
     def __init__(self, config: Optional[Config] = None):
         self.config = config or get_config()
         self.sample_rate = self.config.get("sample_rate", 16000)
-        self.max_recording_duration = self.config.get("max_recording_duration", 300)  # 5 minutes max
-        
+        self.max_recording_duration = self.config.get(
+            "max_recording_duration", 300
+        )  # 5 minutes max
+
         self._recording = False
         self._audio_data = []
         self._lock = threading.RLock()
-        self._stream: Optional[sd.InputStream] = None
+        self._stream = None
         self._recording_start: Optional[float] = None
         self._block_callback: Optional[Callable[[np.ndarray], None]] = None
         self._on_block_callback_error: Optional[Callable[[Exception], None]] = None
@@ -52,31 +59,36 @@ class AudioRecorder:
         """Register a handler for the first per-block callback failure."""
         with self._lock:
             self._on_block_callback_error = handler
-    
+
     def start_recording(self):
         """Start recording audio."""
+        if sd is None:
+            raise RuntimeError(
+                "sounddevice/PortAudio is unavailable; install PortAudio before recording"
+            )
+
         with self._lock:
             if self._recording:
                 return
-            
+
             self._recording = True
             self._audio_data = []
             self._recording_start = time.time()
             self._block_callback_failed = False
-        
+
         self._stream = sd.InputStream(
             samplerate=self.sample_rate,
             channels=1,
             dtype=np.float32,
             callback=self._audio_callback,
-            blocksize=int(self.sample_rate * 0.1)  # 100ms blocks
+            blocksize=int(self.sample_rate * 0.1),  # 100ms blocks
         )
         self._stream.start()
-    
+
     def stop_recording(self) -> Optional[AudioData]:
         """
         Stop recording and return the audio data.
-        
+
         Returns:
             AudioData containing the recorded audio, or None if no data recorded
         """
@@ -84,39 +96,40 @@ class AudioRecorder:
             if not self._recording:
                 return None
             self._recording = False
-        
+
         if self._stream:
             self._stream.stop()
             self._stream.close()
             self._stream = None
-        
+
         with self._lock:
             if not self._audio_data:
                 return None
-            
+
             audio = np.concatenate(self._audio_data, axis=0).flatten()
             duration = len(audio) / self.sample_rate
             self._audio_data = []
-            return AudioData(audio=audio, sample_rate=self.sample_rate, duration=duration)
-    
+            return AudioData(
+                audio=audio, sample_rate=self.sample_rate, duration=duration
+            )
+
     def is_recording(self) -> bool:
         """Check if currently recording."""
         with self._lock:
             return self._recording
-    
-    def _audio_callback(self, indata: np.ndarray, frames: int, 
-                        time_info, status):
+
+    def _audio_callback(self, indata: np.ndarray, frames: int, time_info, status):
         """Callback for audio stream."""
         if status:
             pass  # Ignore status messages
-        
+
         audio_block: Optional[np.ndarray] = None
         block_callback: Optional[Callable[[np.ndarray], None]] = None
         error_handler: Optional[Callable[[Exception], None]] = None
         with self._lock:
             if not self._recording:
                 return
-            
+
             audio_block = indata.copy()
             self._audio_data.append(audio_block)
             block_callback = self._block_callback
@@ -136,7 +149,7 @@ class AudioRecorder:
                 print(f"⚠️ Audio block callback failed; disabling live callback: {exc}")
                 if should_report and error_handler is not None:
                     error_handler(exc)
-    
+
     def get_recording_duration(self) -> float:
         """Get current recording duration in seconds."""
         with self._lock:

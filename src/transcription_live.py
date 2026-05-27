@@ -19,8 +19,7 @@ class LiveSegmentLike(Protocol):
 class LiveTranscriberLike(Protocol):
     """Structural type for transcribers used by the live worker."""
 
-    def transcribe_segment(self, segment: LiveSegmentLike) -> str:
-        ...
+    def transcribe_segment(self, segment: LiveSegmentLike) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -66,7 +65,9 @@ class LiveTranscriptionWorker:
         transcriber: LiveTranscriberLike,
         accumulator: TranscriptAccumulator,
         on_segment_queued: Optional[Callable[[LiveSegmentLike], None]] = None,
-        on_segment_failed: Optional[Callable[[LiveSegmentLike, Exception, int], None]] = None,
+        on_segment_failed: Optional[
+            Callable[[LiveSegmentLike, Exception, int], None]
+        ] = None,
         on_segment_transcribed: Optional[Callable[[TranscriptChunk], None]] = None,
         on_chunk_appended: Optional[Callable[[TranscriptChunk, str], None]] = None,
         on_worker_degraded: Optional[Callable[[str], None]] = None,
@@ -147,7 +148,9 @@ class LiveTranscriptionWorker:
             self._invoke_callback("on_segment_transcribed", chunk)
 
             if self.accumulator.add_chunk(chunk):
-                self._invoke_callback("on_chunk_appended", chunk, self.accumulator.get_text())
+                self._invoke_callback(
+                    "on_chunk_appended", chunk, self.accumulator.get_text()
+                )
 
     def _transcribe_segment_with_retry(
         self,

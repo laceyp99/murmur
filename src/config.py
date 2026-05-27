@@ -175,17 +175,15 @@ class Config:
     @property
     def ollama_timeout_seconds(self) -> int:
         """Timeout in seconds for Ollama requests; values below 60 are raised to 60."""
-        raw_timeout = self.get(
-            "ollama_timeout_seconds", DEFAULT_OLLAMA_TIMEOUT_SECONDS
-        )
+        raw_timeout = self.get("ollama_timeout_seconds", DEFAULT_OLLAMA_TIMEOUT_SECONDS)
         try:
             timeout_seconds = float(raw_timeout)
         except (TypeError, ValueError):
             return DEFAULT_OLLAMA_TIMEOUT_SECONDS
-    
+
         if timeout_seconds <= 0:
             return DEFAULT_OLLAMA_TIMEOUT_SECONDS
-        
+
         return int(max(timeout_seconds, DEFAULT_OLLAMA_TIMEOUT_SECONDS))
 
     @property

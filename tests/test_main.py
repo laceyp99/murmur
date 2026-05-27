@@ -270,7 +270,9 @@ def test_on_live_segment_ready_queues_segment_for_background_transcription():
     app._on_live_segment_ready(segment)
     app._stop_live_transcription()
 
-    assert [queued_segment.segment_id for queued_segment in transcriber.live_segment_calls] == [3]
+    assert [
+        queued_segment.segment_id for queued_segment in transcriber.live_segment_calls
+    ] == [3]
     assert app.live_transcript_accumulator.get_text() == "live-3"
 
 
@@ -286,9 +288,13 @@ def test_init_preloads_whisper_and_ollama_when_enabled(monkeypatch):
     monkeypatch.setattr(main_module, "AudioRecorder", lambda: SimpleNamespace())
     monkeypatch.setattr(main_module, "Transcriber", lambda: fake_transcriber)
     monkeypatch.setattr(main_module, "HotkeyManager", lambda: SimpleNamespace())
-    monkeypatch.setattr(main_module, "get_notification_manager", lambda: SimpleNamespace())
+    monkeypatch.setattr(
+        main_module, "get_notification_manager", lambda: SimpleNamespace()
+    )
     monkeypatch.setattr(main_module, "get_logger", lambda: SimpleNamespace())
-    monkeypatch.setattr(main_module, "TrayManager", lambda on_exit_callback: SimpleNamespace())
+    monkeypatch.setattr(
+        main_module, "TrayManager", lambda on_exit_callback: SimpleNamespace()
+    )
     monkeypatch.setattr(main_module, "get_media_controller", lambda: SimpleNamespace())
 
     main_module.MurmurApp(preload_model=True)
@@ -309,9 +315,13 @@ def test_init_skips_ollama_warmup_when_disabled(monkeypatch):
     monkeypatch.setattr(main_module, "AudioRecorder", lambda: SimpleNamespace())
     monkeypatch.setattr(main_module, "Transcriber", lambda: fake_transcriber)
     monkeypatch.setattr(main_module, "HotkeyManager", lambda: SimpleNamespace())
-    monkeypatch.setattr(main_module, "get_notification_manager", lambda: SimpleNamespace())
+    monkeypatch.setattr(
+        main_module, "get_notification_manager", lambda: SimpleNamespace()
+    )
     monkeypatch.setattr(main_module, "get_logger", lambda: SimpleNamespace())
-    monkeypatch.setattr(main_module, "TrayManager", lambda on_exit_callback: SimpleNamespace())
+    monkeypatch.setattr(
+        main_module, "TrayManager", lambda on_exit_callback: SimpleNamespace()
+    )
     monkeypatch.setattr(main_module, "get_media_controller", lambda: SimpleNamespace())
 
     main_module.MurmurApp(preload_model=True)
@@ -347,7 +357,9 @@ def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeyp
     app.hotkey_manager = FakeHotkeyManager()
 
     copied_text = []
-    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: copied_text.append(text) or True)
+    monkeypatch.setattr(
+        main_module, "copy_to_clipboard", lambda text: copied_text.append(text) or True
+    )
 
     audio_data = make_audio_data()
     app._finalize_recording(audio_data)
@@ -363,20 +375,26 @@ def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeyp
     assert app.hotkey_manager.idle_calls == 1
 
 
-def test_finalize_recording_falls_back_to_offline_processing_when_live_text_missing(monkeypatch):
+def test_finalize_recording_falls_back_to_offline_processing_when_live_text_missing(
+    monkeypatch,
+):
     transcriber = FakeTranscriber()
     app = make_app(segmenter=None, transcriber=transcriber)
     called = []
     audio_data = make_audio_data()
 
-    monkeypatch.setattr(app, "_process_audio", lambda provided_audio: called.append(provided_audio))
+    monkeypatch.setattr(
+        app, "_process_audio", lambda provided_audio: called.append(provided_audio)
+    )
 
     app._finalize_recording(audio_data)
 
     assert called == [audio_data]
 
 
-def test_finalize_recording_falls_back_to_offline_processing_when_live_pipeline_degraded(monkeypatch):
+def test_finalize_recording_falls_back_to_offline_processing_when_live_pipeline_degraded(
+    monkeypatch,
+):
     transcriber = FakeTranscriber()
     app = make_app(segmenter=None, transcriber=transcriber)
     app.live_transcript_accumulator = main_module.TranscriptAccumulator()
@@ -388,7 +406,9 @@ def test_finalize_recording_falls_back_to_offline_processing_when_live_pipeline_
 
     called = []
     audio_data = make_audio_data()
-    monkeypatch.setattr(app, "_process_audio", lambda provided_audio: called.append(provided_audio))
+    monkeypatch.setattr(
+        app, "_process_audio", lambda provided_audio: called.append(provided_audio)
+    )
 
     app._finalize_recording(audio_data)
 
@@ -460,7 +480,10 @@ def test_on_live_block_callback_error_marks_pipeline_degraded_once():
     app._on_live_block_callback_error(RuntimeError("later failure"))
 
     assert app._live_pipeline_degraded is True
-    assert app._live_pipeline_degraded_reason == "Live audio callback failed: queue submit failed"
+    assert (
+        app._live_pipeline_degraded_reason
+        == "Live audio callback failed: queue submit failed"
+    )
     assert app.notifications.messages == []
 
 
@@ -483,9 +506,15 @@ def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch
     segmentation_stops = []
     transcription_stops = []
     copied_text = []
-    monkeypatch.setattr(app, "_stop_live_segmentation", lambda: segmentation_stops.append(True))
-    monkeypatch.setattr(app, "_stop_live_transcription", lambda: transcription_stops.append(True))
-    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: copied_text.append(text) or True)
+    monkeypatch.setattr(
+        app, "_stop_live_segmentation", lambda: segmentation_stops.append(True)
+    )
+    monkeypatch.setattr(
+        app, "_stop_live_transcription", lambda: transcription_stops.append(True)
+    )
+    monkeypatch.setattr(
+        main_module, "copy_to_clipboard", lambda text: copied_text.append(text) or True
+    )
 
     app._on_recording_stop()
 

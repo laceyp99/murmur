@@ -19,15 +19,23 @@ class FakeLiveTranscriber:
 
 
 def make_segment(segment_id, duration=0.5):
-    return SimpleNamespace(segment_id=segment_id, audio=[], sample_rate=16000, duration=duration)
+    return SimpleNamespace(
+        segment_id=segment_id, audio=[], sample_rate=16000, duration=duration
+    )
 
 
 def test_transcript_accumulator_returns_text_in_segment_order():
     accumulator = TranscriptAccumulator()
 
-    accumulator.add_chunk(SimpleNamespace(segment_id=2, text="third", latency_seconds=0.1))
-    accumulator.add_chunk(SimpleNamespace(segment_id=0, text="first", latency_seconds=0.1))
-    accumulator.add_chunk(SimpleNamespace(segment_id=1, text="second", latency_seconds=0.1))
+    accumulator.add_chunk(
+        SimpleNamespace(segment_id=2, text="third", latency_seconds=0.1)
+    )
+    accumulator.add_chunk(
+        SimpleNamespace(segment_id=0, text="first", latency_seconds=0.1)
+    )
+    accumulator.add_chunk(
+        SimpleNamespace(segment_id=1, text="second", latency_seconds=0.1)
+    )
 
     assert [chunk.segment_id for chunk in accumulator.ordered_chunks()] == [0, 1, 2]
     assert accumulator.get_text() == "first second third"
@@ -43,7 +51,9 @@ def test_live_transcription_worker_processes_segments_serially_and_appends_in_or
         accumulator=accumulator,
         on_segment_queued=lambda segment: queued_ids.append(segment.segment_id),
         on_segment_transcribed=lambda chunk: transcribed_ids.append(chunk.segment_id),
-        on_chunk_appended=lambda chunk, text: appended_text.append((chunk.segment_id, text)),
+        on_chunk_appended=lambda chunk, text: appended_text.append(
+            (chunk.segment_id, text)
+        ),
     )
 
     worker.start()
@@ -63,7 +73,9 @@ def test_live_transcription_worker_skips_empty_transcript_appends():
     worker = LiveTranscriptionWorker(
         transcriber=FakeLiveTranscriber({0: "", 1: "next"}),
         accumulator=accumulator,
-        on_chunk_appended=lambda chunk, text: appended_text.append((chunk.segment_id, text)),
+        on_chunk_appended=lambda chunk, text: appended_text.append(
+            (chunk.segment_id, text)
+        ),
     )
 
     worker.start()
