@@ -36,7 +36,9 @@ def test_ollama_client_generate_uses_model_and_options():
         client=fake_client,
     )
 
-    result = client.generate("input text", max_tokens=42, temperature=0.0, system="system")
+    result = client.generate(
+        "input text", max_tokens=42, temperature=0.0, system="system"
+    )
 
     assert result == "Cleaned output."
     assert fake_client.calls == [
@@ -95,7 +97,11 @@ def test_ollama_client_chat_uses_messages_and_options():
 
 def test_llm_post_processor_builds_prompt_with_vocab_and_returns_cleaned_text():
     fake_client = FakeOllamaPackageClient({"response": "ignored"})
-    fake_client.chat_response = {"message": {"content": "Quick recap: We met with Jane from Blue Ridge Data about the pilot. Jane asked if Noah can send the intake link and the Loom walkthrough by Friday."}}
+    fake_client.chat_response = {
+        "message": {
+            "content": "Quick recap: We met with Jane from Blue Ridge Data about the pilot. Jane asked if Noah can send the intake link and the Loom walkthrough by Friday."
+        }
+    }
     processor = LLMPostProcessor(
         client=OllamaClient(
             endpoint="http://localhost:11434",
@@ -105,17 +111,34 @@ def test_llm_post_processor_builds_prompt_with_vocab_and_returns_cleaned_text():
         user_vocab={"q win": "Qwen", "murmer": "Murmur"},
     )
 
-    result = processor.process("quick recap we met with jane from blue ridge data about the pilot the transcript may say brew ridge or blue rich but it should be blue ridge data jane asked if noah can send the intake link and the loom walkthrough by friday")
+    result = processor.process(
+        "quick recap we met with jane from blue ridge data about the pilot the transcript may say brew ridge or blue rich but it should be blue ridge data jane asked if noah can send the intake link and the loom walkthrough by friday"
+    )
 
-    assert result == "Quick recap: We met with Jane from Blue Ridge Data about the pilot. Jane asked if Noah can send the intake link and the Loom walkthrough by Friday."
+    assert (
+        result
+        == "Quick recap: We met with Jane from Blue Ridge Data about the pilot. Jane asked if Noah can send the intake link and the Loom walkthrough by Friday."
+    )
     messages = fake_client.calls[0]["messages"]
     assert messages[0]["role"] == "system"
     assert "Return only the cleaned transcript text." in messages[0]["content"]
     assert messages[1]["role"] == "user"
-    assert "Clean this transcript while preserving meaning and wording." in messages[1]["content"]
-    assert "Return only the cleaned transcript text with no preamble or commentary." in messages[1]["content"]
-    assert "Transcript to clean:\nquick recap we met with jane from blue ridge data about the pilot the transcript may say brew ridge or blue rich but it should be blue ridge data jane asked if noah can send the intake link and the loom walkthrough by friday" in messages[1]["content"]
-    assert messages[2] == {"role": "assistant", "content": "Quick recap: We met with Jane from Blue Ridge Data about the pilot. Jane asked if Noah can send the intake link and the Loom walkthrough by Friday."}
+    assert (
+        "Clean this transcript while preserving meaning and wording."
+        in messages[1]["content"]
+    )
+    assert (
+        "Return only the cleaned transcript text with no preamble or commentary."
+        in messages[1]["content"]
+    )
+    assert (
+        "Transcript to clean:\nquick recap we met with jane from blue ridge data about the pilot the transcript may say brew ridge or blue rich but it should be blue ridge data jane asked if noah can send the intake link and the loom walkthrough by friday"
+        in messages[1]["content"]
+    )
+    assert messages[2] == {
+        "role": "assistant",
+        "content": "Quick recap: We met with Jane from Blue Ridge Data about the pilot. Jane asked if Noah can send the intake link and the Loom walkthrough by Friday.",
+    }
     assert messages[3]["role"] == "user"
     assert "Preferred vocabulary and corrections:" in messages[3]["content"]
     assert "- q win -> Qwen" in messages[3]["content"]
@@ -140,7 +163,9 @@ def test_llm_post_processor_returns_original_text_on_failure():
 
 def test_llm_post_processor_normalizes_wrapped_output_before_accepting():
     fake_client = FakeOllamaPackageClient({"response": "ignored"})
-    fake_client.chat_response = {"message": {"content": "```text\n\"Hello, world.\"\n```"}}
+    fake_client.chat_response = {
+        "message": {"content": '```text\n"Hello, world."\n```'}
+    }
     processor = LLMPostProcessor(
         client=OllamaClient(
             endpoint="http://localhost:11434",
@@ -185,7 +210,10 @@ def test_llm_post_processor_allows_transcript_text_with_meta_like_phrases():
         )
     )
 
-    assert processor.process("I corrected the deployment note as requested.") == "I corrected the deployment note as requested."
+    assert (
+        processor.process("I corrected the deployment note as requested.")
+        == "I corrected the deployment note as requested."
+    )
 
 
 def test_llm_post_processor_rejects_length_explosion_output():

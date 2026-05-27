@@ -19,6 +19,7 @@ from .audio import AudioData
 @dataclass
 class TranscriptionLog:
     """Log entry for a transcription."""
+
     timestamp: str
     audio_file: str
     transcription: str
@@ -49,19 +50,16 @@ class DataLogger:
         self._enabled = self.config.enable_logging
 
     def log(
-        self,
-        audio_data: AudioData,
-        transcription: str,
-        processing_time: float
+        self, audio_data: AudioData, transcription: str, processing_time: float
     ) -> Optional[TranscriptionLog]:
         """
         Log an audio recording and its transcription.
-        
+
         Args:
             audio_data: The recorded audio data
             transcription: The transcription text
             processing_time: Time taken to transcribe in seconds
-        
+
         Returns:
             TranscriptionLog entry if successful, None otherwise
         """
@@ -89,7 +87,7 @@ class DataLogger:
                 transcription=transcription,
                 duration=audio_data.duration,
                 model=self.config.get("model", "small"),
-                processing_time=processing_time
+                processing_time=processing_time,
             )
 
             # Append to JSONL file
@@ -131,7 +129,9 @@ class DataLogger:
         removed_files = 0
 
         if self.audio_dir.exists():
-            removed_files += sum(1 for path in self.audio_dir.rglob("*") if path.is_file())
+            removed_files += sum(
+                1 for path in self.audio_dir.rglob("*") if path.is_file()
+            )
             shutil.rmtree(self.audio_dir)
 
         if self.metadata_file.exists():

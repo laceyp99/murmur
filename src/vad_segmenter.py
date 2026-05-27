@@ -24,9 +24,16 @@ def _create_vad(aggressiveness: int) -> object:
 class WebRTCVADSegmenter:
     """Split a waveform into speech segments using WebRTC VAD decisions."""
 
-    def __init__(self, settings: Optional[VADSettings] = None, vad: Optional[object] = None, **kwargs):
+    def __init__(
+        self,
+        settings: Optional[VADSettings] = None,
+        vad: Optional[object] = None,
+        **kwargs,
+    ):
         if settings is not None and kwargs:
-            raise ValueError("Provide either settings or keyword VAD parameters, not both")
+            raise ValueError(
+                "Provide either settings or keyword VAD parameters, not both"
+            )
 
         self.settings = settings or VADSettings(**kwargs)
         self.sample_rate = self.settings.sample_rate
@@ -71,10 +78,11 @@ class WebRTCVADSegmenter:
                 start_sample=segment.start_sample,
                 end_sample=segment.end_sample,
                 sample_rate=self.sample_rate,
-                audio=mono_audio[segment.start_sample:segment.end_sample].copy(),
+                audio=mono_audio[segment.start_sample : segment.end_sample].copy(),
             )
             for segment in output_segments
-            if segment.end_sample - segment.start_sample >= self.min_output_segment_samples
+            if segment.end_sample - segment.start_sample
+            >= self.min_output_segment_samples
         ]
 
     def _prepare_vad_audio(self, audio: np.ndarray) -> np.ndarray:
@@ -102,7 +110,9 @@ class WebRTCVADSegmenter:
         mapped_segments: List[_SegmentBounds] = []
         for segment in segments:
             start_sample = max(0, int(np.floor(segment.start_sample * sample_ratio)))
-            end_sample = min(total_samples, int(np.ceil(segment.end_sample * sample_ratio)))
+            end_sample = min(
+                total_samples, int(np.ceil(segment.end_sample * sample_ratio))
+            )
             mapped_segments.append(
                 _SegmentBounds(
                     start_sample=start_sample,
@@ -128,7 +138,9 @@ class WebRTCVADSegmenter:
 
             if is_speech:
                 if current_start is None:
-                    current_start = max(0, frame.start_sample - self.start_padding_samples)
+                    current_start = max(
+                        0, frame.start_sample - self.start_padding_samples
+                    )
                 last_speech_end = frame.end_sample
                 silence_run_samples = 0
                 continue
@@ -140,7 +152,10 @@ class WebRTCVADSegmenter:
             if silence_run_samples < self.silence_samples:
                 continue
 
-            segment_end = min(total_samples, (last_speech_end or frame.end_sample) + self.end_padding_samples)
+            segment_end = min(
+                total_samples,
+                (last_speech_end or frame.end_sample) + self.end_padding_samples,
+            )
             segments.append(
                 _SegmentBounds(
                     start_sample=current_start,
@@ -155,13 +170,17 @@ class WebRTCVADSegmenter:
             segments.append(
                 _SegmentBounds(
                     start_sample=current_start,
-                    end_sample=min(total_samples, last_speech_end + self.end_padding_samples),
+                    end_sample=min(
+                        total_samples, last_speech_end + self.end_padding_samples
+                    ),
                 )
             )
 
         return segments
 
-    def _merge_segments(self, segments: Sequence[_SegmentBounds]) -> List[_SegmentBounds]:
+    def _merge_segments(
+        self, segments: Sequence[_SegmentBounds]
+    ) -> List[_SegmentBounds]:
         """Merge padded segments whose remaining gap is still small."""
         if not segments:
             return []

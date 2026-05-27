@@ -1,5 +1,3 @@
-import pytest
-
 from src.config import (
     Config,
     DEFAULT_OLLAMA_MODEL_NAME,

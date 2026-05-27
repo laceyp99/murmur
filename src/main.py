@@ -7,13 +7,22 @@ import sys
 import time
 from typing import Optional
 
-from .config import get_config, Config
+from .config import get_config
 from .audio import AudioRecorder, AudioData
 from .transcription import Transcriber
-from .transcription_live import LiveTranscriptionWorker, TranscriptAccumulator, TranscriptChunk
-from .vad import LiveSpeechSegment, LiveVADSegmentationWorker, VADSettings, WebRTCVADSegmenter
+from .transcription_live import (
+    LiveTranscriptionWorker,
+    TranscriptAccumulator,
+    TranscriptChunk,
+)
+from .vad import (
+    LiveSpeechSegment,
+    LiveVADSegmentationWorker,
+    VADSettings,
+    WebRTCVADSegmenter,
+)
 from .clipboard import copy_to_clipboard
-from .hotkey import HotkeyManager, HotkeyState, wait_for_exit
+from .hotkey import HotkeyManager, HotkeyState
 from .notifications import get_notification_manager
 from .logger import get_logger
 from .tray import TrayManager
@@ -184,7 +193,9 @@ class MurmurApp:
     def _finalize_recording(self, audio_data: AudioData) -> None:
         """Finalize stop-time output from the live transcript, or fall back offline."""
         if self._live_pipeline_degraded:
-            reason = self._live_pipeline_degraded_reason or "Live transcription degraded"
+            reason = (
+                self._live_pipeline_degraded_reason or "Live transcription degraded"
+            )
             print(f"⚠️ {reason}. Recomputing final transcript from the full recording.")
             self._process_audio(audio_data)
             return
@@ -317,7 +328,9 @@ class MurmurApp:
 
         worker.start()
         self.live_segmenter = worker
-        self.recorder.set_block_callback_error_handler(self._on_live_block_callback_error)
+        self.recorder.set_block_callback_error_handler(
+            self._on_live_block_callback_error
+        )
         self.recorder.set_block_callback(worker.submit_audio_block)
 
     def _stop_live_segmentation(self) -> None:
@@ -403,7 +416,9 @@ class MurmurApp:
             f"text={chunk.text!r}"
         )
 
-    def _on_live_chunk_appended(self, chunk: TranscriptChunk, current_text: str) -> None:
+    def _on_live_chunk_appended(
+        self, chunk: TranscriptChunk, current_text: str
+    ) -> None:
         """Emit debug logging when transcript text is appended in segment order."""
         print(
             "Live transcript appended: "
@@ -437,9 +452,7 @@ class MurmurApp:
     def _on_live_block_callback_error(self, exc: Exception) -> None:
         """Handle a recorder block callback failure during live segmentation."""
         print(f"⚠️ Live audio callback failed: {exc}")
-        self._on_live_pipeline_degraded(
-            f"Live audio callback failed: {exc}"
-        )
+        self._on_live_pipeline_degraded(f"Live audio callback failed: {exc}")
 
     def _on_state_change(self, state: HotkeyState) -> None:
         """Handle state changes."""

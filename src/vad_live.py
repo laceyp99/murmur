@@ -25,7 +25,9 @@ class LiveVADSegmentationWorker:
         **kwargs,
     ):
         if settings is not None and kwargs:
-            raise ValueError("Provide either settings or keyword VAD parameters, not both")
+            raise ValueError(
+                "Provide either settings or keyword VAD parameters, not both"
+            )
 
         self.settings = settings or VADSettings(**kwargs)
         if self.settings.sample_rate not in SUPPORTED_VAD_SAMPLE_RATES:
@@ -52,7 +54,9 @@ class LiveVADSegmentationWorker:
         self._next_segment_id = 0
         self._processed_samples = 0
         self._pending_block = np.array([], dtype=np.float32)
-        self._pre_speech_frames: Deque[AudioFrame] = deque(maxlen=self.start_padding_frames)
+        self._pre_speech_frames: Deque[AudioFrame] = deque(
+            maxlen=self.start_padding_frames
+        )
         self._current_frames: List[AudioFrame] = []
         self._pending_segment: Optional[LiveSpeechSegment] = None
         self._pending_gap_frames: List[AudioFrame] = []
@@ -145,7 +149,9 @@ class LiveVADSegmentationWorker:
 
         for frame_index in range(frame_count):
             frame_start = frame_index * self.frame_samples
-            frame_audio = buffered_audio[frame_start:frame_start + self.frame_samples].copy()
+            frame_audio = buffered_audio[
+                frame_start : frame_start + self.frame_samples
+            ].copy()
             frame = AudioFrame(
                 start_sample=self._processed_samples,
                 end_sample=self._processed_samples + self.frame_samples,
@@ -224,7 +230,9 @@ class LiveVADSegmentationWorker:
                 start_sample=self._pending_segment.start_sample,
                 end_sample=max(self._pending_segment.end_sample, segment.end_sample),
                 sample_rate=self.sample_rate,
-                audio=np.concatenate((self._pending_segment.audio, bridge_audio, segment.audio)),
+                audio=np.concatenate(
+                    (self._pending_segment.audio, bridge_audio, segment.audio)
+                ),
             )
             self._pending_gap_frames = []
             return
@@ -255,7 +263,9 @@ class LiveVADSegmentationWorker:
         if gap_samples <= 0 or not self._pending_gap_frames:
             return np.array([], dtype=np.float32)
 
-        collected_audio = np.concatenate([frame.audio for frame in self._pending_gap_frames])
+        collected_audio = np.concatenate(
+            [frame.audio for frame in self._pending_gap_frames]
+        )
         return collected_audio[:gap_samples].copy()
 
     def _reset_current_segment(self, overflow_frames: Sequence[AudioFrame]) -> None:
@@ -270,5 +280,5 @@ class LiveVADSegmentationWorker:
         if self.start_padding_frames <= 0:
             return
 
-        for frame in overflow_frames[-self.start_padding_frames:]:
+        for frame in overflow_frames[-self.start_padding_frames :]:
             self._pre_speech_frames.append(frame)

@@ -81,21 +81,42 @@ class VADSettings:
     def start_padding_frames(self) -> int:
         return max(
             0,
-            int(np.ceil(self.vad_sample_rate * self.start_padding_ms / 1000 / self.frame_samples)),
+            int(
+                np.ceil(
+                    self.vad_sample_rate
+                    * self.start_padding_ms
+                    / 1000
+                    / self.frame_samples
+                )
+            ),
         )
 
     @property
     def end_padding_frames(self) -> int:
         return max(
             0,
-            int(np.ceil(self.vad_sample_rate * self.end_padding_ms / 1000 / self.frame_samples)),
+            int(
+                np.ceil(
+                    self.vad_sample_rate
+                    * self.end_padding_ms
+                    / 1000
+                    / self.frame_samples
+                )
+            ),
         )
 
     @property
     def silence_close_frames(self) -> int:
         return max(
             1,
-            int(np.ceil(self.vad_sample_rate * self.silence_duration_ms / 1000 / self.frame_samples)),
+            int(
+                np.ceil(
+                    self.vad_sample_rate
+                    * self.silence_duration_ms
+                    / 1000
+                    / self.frame_samples
+                )
+            ),
         )
 
     @classmethod

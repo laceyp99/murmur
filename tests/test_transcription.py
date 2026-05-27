@@ -60,8 +60,16 @@ def test_transcribe_segments_returns_raw_segment_text_and_final_document_text():
     fake_model = FakeModel([" hello   ", "world"])
     transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
     segments = [
-        AudioData(audio=np.array([0.25, -0.5], dtype=np.float32), sample_rate=16000, duration=0.1),
-        AudioData(audio=np.array([0.5, 0.25], dtype=np.float32), sample_rate=16000, duration=0.1),
+        AudioData(
+            audio=np.array([0.25, -0.5], dtype=np.float32),
+            sample_rate=16000,
+            duration=0.1,
+        ),
+        AudioData(
+            audio=np.array([0.5, 0.25], dtype=np.float32),
+            sample_rate=16000,
+            duration=0.1,
+        ),
     ]
 
     result = transcriber.transcribe_segments(segments)

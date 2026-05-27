@@ -5,6 +5,7 @@ Allows pausing/resuming system media (Spotify, YouTube, VLC, etc.) during record
 
 import asyncio
 import threading
+from importlib.util import find_spec
 from typing import Optional
 
 
@@ -30,14 +31,10 @@ class MediaController:
             return self._available
 
         try:
-            # Try importing all required modules
-            from winrt.windows.media.control import (
-                GlobalSystemMediaTransportControlsSessionManager,
-                GlobalSystemMediaTransportControlsSessionPlaybackStatus,
-            )
-
-            self._available = True
-        except (ImportError, ModuleNotFoundError) as e:
+            self._available = find_spec("winrt.windows.media.control") is not None
+            if not self._available:
+                print("[MediaControl] WinRT not available")
+        except Exception as e:
             print(f"[MediaControl] WinRT not available: {e}")
             self._available = False
 

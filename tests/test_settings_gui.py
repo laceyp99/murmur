@@ -60,7 +60,9 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     monkeypatch.setattr(
         settings_module,
         "datetime",
-        SimpleNamespace(now=lambda: SimpleNamespace(isoformat=lambda: "2026-05-25T12:00:00")),
+        SimpleNamespace(
+            now=lambda: SimpleNamespace(isoformat=lambda: "2026-05-25T12:00:00")
+        ),
     )
 
     window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)

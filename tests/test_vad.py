@@ -226,8 +226,14 @@ def test_live_worker_emits_ordered_segments_for_queued_blocks():
     worker.stop()
 
     assert [segment.segment_id for segment in emitted_segments] == [0, 1]
-    assert [segment.start_sample for segment in emitted_segments] == [0, frame_samples * 5]
-    assert [segment.end_sample for segment in emitted_segments] == [frame_samples * 4, frame_samples * 9]
+    assert [segment.start_sample for segment in emitted_segments] == [
+        0,
+        frame_samples * 5,
+    ]
+    assert [segment.end_sample for segment in emitted_segments] == [
+        frame_samples * 4,
+        frame_samples * 9,
+    ]
     np.testing.assert_array_equal(
         emitted_segments[0].audio,
         np.ones(frame_samples * 4, dtype=np.float32),
