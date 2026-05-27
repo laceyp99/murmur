@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "murmur"
+version = "0.1.0"
+description = "Local speech-to-text hotkey app"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.0.0",
+    "openai-whisper>=20231117",
+    "numpy>=1.24.0",
+    "sounddevice>=0.4.6",
+    "webrtcvad-wheels>=2.0.14",
+    "keyboard>=0.13.5",
+    "pyperclip>=1.8.2",
+    "ollama>=0.6.2",
+    "pystray>=0.19.5",
+    "Pillow>=10.0.0",
+    'win10toast>=0.9; platform_system == "Windows"',
+    'winrt-runtime>=3.0.0; platform_system == "Windows"',
+    'winrt-Windows.Foundation>=3.0.0; platform_system == "Windows"',
+    'winrt-Windows.Foundation.Collections>=3.0.0; platform_system == "Windows"',
+    'winrt-Windows.Media.Control>=3.0.0; platform_system == "Windows"',
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
+]
+
+[project.scripts]
+murmur = "src.main:main"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
