@@ -4,7 +4,11 @@ Auto-start management for Murmur on Windows.
 
 import os
 import sys
-import winreg
+
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 
 def set_autostart(enabled: bool):
@@ -12,6 +16,9 @@ def set_autostart(enabled: bool):
     Enable or disable auto-start with Windows.
     Uses sys.executable to ensure it uses the same environment that launched the app.
     """
+    if winreg is None:
+        return
+
     app_name = "Murmur"
 
     # sys.executable points to the current python.exe or pythonw.exe
@@ -48,6 +55,9 @@ def set_autostart(enabled: bool):
 
 def is_autostart_enabled() -> bool:
     """Check if auto-start is currently enabled in the registry."""
+    if winreg is None:
+        return False
+
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     app_name = "Murmur"
 
