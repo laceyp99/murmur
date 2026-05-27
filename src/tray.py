@@ -5,11 +5,8 @@ System tray management for Murmur.
 import threading
 import os
 from PIL import Image
-import pystray
-from pystray import MenuItem as item
 
 from .config import get_config
-from .settings_gui import show_settings
 
 
 class TrayManager:
@@ -59,6 +56,8 @@ class TrayManager:
     def _on_settings(self):
         """Open the settings window."""
         # Run in a separate thread to avoid blocking the tray
+        from .settings_gui import show_settings
+
         threading.Thread(target=show_settings, daemon=True).start()
 
     def _on_exit(self, icon, item):
@@ -69,18 +68,31 @@ class TrayManager:
 
     def run(self):
         """Start the system tray icon loop."""
-        menu = pystray.Menu(
-            item(
-                lambda text: f"Status: {self._status_text}", lambda: None, enabled=False
-            ),
-            pystray.Menu.SEPARATOR,
-            item("Settings", self._on_settings),
-            item("Exit", self._on_exit),
-        )
+        try:
+            import pystray
+            from pystray import MenuItem as item
+        except Exception as exc:
+            print(f"Tray unavailable: {exc}")
+            self.icon = None
+            return
 
-        self.icon = pystray.Icon("murmur", self._create_image(), "murmur", menu)
+        try:
+            menu = pystray.Menu(
+                item(
+                    lambda text: f"Status: {self._status_text}",
+                    lambda: None,
+                    enabled=False,
+                ),
+                pystray.Menu.SEPARATOR,
+                item("Settings", self._on_settings),
+                item("Exit", self._on_exit),
+            )
 
-        self.icon.run()
+            self.icon = pystray.Icon("murmur", self._create_image(), "murmur", menu)
+            self.icon.run()
+        except Exception as exc:
+            print(f"Tray unavailable: {exc}")
+            self.icon = None
 
     def stop(self):
         """Stop the tray icon."""
