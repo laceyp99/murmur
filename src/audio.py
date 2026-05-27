@@ -3,11 +3,15 @@ Audio recording functionality for Murmur.
 """
 
 import numpy as np
-import sounddevice as sd
 import threading
 import time
 from typing import Callable, Optional
 from dataclasses import dataclass
+
+try:
+    import sounddevice as sd
+except (ImportError, OSError):
+    sd = None
 
 from .config import Config, get_config
 
@@ -34,7 +38,7 @@ class AudioRecorder:
         self._recording = False
         self._audio_data = []
         self._lock = threading.RLock()
-        self._stream: Optional[sd.InputStream] = None
+        self._stream = None
         self._recording_start: Optional[float] = None
         self._block_callback: Optional[Callable[[np.ndarray], None]] = None
         self._on_block_callback_error: Optional[Callable[[Exception], None]] = None
@@ -58,6 +62,11 @@ class AudioRecorder:
 
     def start_recording(self):
         """Start recording audio."""
+        if sd is None:
+            raise RuntimeError(
+                "sounddevice/PortAudio is unavailable; install PortAudio before recording"
+            )
+
         with self._lock:
             if self._recording:
                 return

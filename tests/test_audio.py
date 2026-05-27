@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from src.audio import AudioRecorder
 
@@ -56,3 +57,15 @@ def test_audio_callback_logs_error_once_disables_callback_and_keeps_recording():
     assert [str(error) for error in callback_errors] == ["vad callback broke"]
     assert recorder._block_callback is None
     assert recorder._block_callback_failed is True
+
+
+def test_start_recording_requires_sounddevice(monkeypatch):
+    class FakeConfig:
+        def get(self, key, default=None):
+            return default
+
+    recorder = AudioRecorder(config=FakeConfig())
+    monkeypatch.setattr("src.audio.sd", None)
+
+    with pytest.raises(RuntimeError, match="PortAudio"):
+        recorder.start_recording()
