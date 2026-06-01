@@ -274,6 +274,7 @@ class LLMPostProcessor:
         """Build the user turn content for transcript cleanup."""
         sections = [
             "Clean this transcript while preserving meaning and wording.",
+            "Ignore stray ellipses or repeated trailing periods from transcription artifacts when deciding punctuation and capitalization.",
             "Return only the cleaned transcript text with no preamble or commentary.",
         ]
 

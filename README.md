@@ -107,6 +107,7 @@ Or double-click `run_background.vbs`.
 - The Ollama pass is enabled by default and runs only once per completed recording, not on every live chunk.
 - On startup, murmur attempts to warm the configured Ollama model when `ollama_preload_model` is true.
 - If Ollama is unavailable, times out, or returns invalid-looking output, murmur falls back to the pre-LLM cleaned transcript instead of failing the recording.
+- When Ollama is disabled or unavailable, murmur applies only minimal local cleanup, so fallback transcript punctuation and capitalization may be rougher than the final LLM-cleaned output.
 - The acceptance gate is intentionally conservative: murmur rejects empty output, obvious assistant preambles, length explosions, and chat/list-shaped responses.
 
 ### Personalized vocabulary
