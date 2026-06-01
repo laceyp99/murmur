@@ -226,7 +226,7 @@ class Transcriber:
             return ""
 
         cleaned_text = self._fix_common_issues(text.strip())
-        cleaned_text = re.sub(r"[.]+$", "", cleaned_text).strip()
+        cleaned_text = re.sub(r"(?:\.\.\.)+$", "", cleaned_text).strip()
         return cleaned_text
 
     def _post_process_document(self, text: str) -> str:
