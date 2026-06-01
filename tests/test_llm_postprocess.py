@@ -128,6 +128,10 @@ def test_llm_post_processor_builds_prompt_with_vocab_and_returns_cleaned_text():
         in messages[1]["content"]
     )
     assert (
+        "Ignore stray ellipses or repeated trailing periods from transcription artifacts when deciding punctuation and capitalization."
+        in messages[1]["content"]
+    )
+    assert (
         "Return only the cleaned transcript text with no preamble or commentary."
         in messages[1]["content"]
     )
