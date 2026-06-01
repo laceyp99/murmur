@@ -225,7 +225,9 @@ class Transcriber:
         if not text:
             return ""
 
-        return self._fix_common_issues(text.strip())
+        cleaned_text = self._fix_common_issues(text.strip())
+        cleaned_text = re.sub(r"[.]+$", "", cleaned_text).strip()
+        return cleaned_text
 
     def _post_process_document(self, text: str) -> str:
         """
@@ -263,11 +265,6 @@ class Transcriber:
 
         # Fix spacing around punctuation
         text = re.sub(r"\s+([.,!?;:])", r"\1", text)
-
-        # Fix capitalization after sentence endings
-        text = re.sub(
-            r"([.!?])\s+([a-z])", lambda m: m.group(1) + " " + m.group(2).upper(), text
-        )
 
         return text.strip()
 

@@ -82,6 +82,28 @@ def test_transcribe_segments_returns_raw_segment_text_and_final_document_text():
     assert np.isclose(np.max(np.abs(fake_model.calls[0]["audio"])), 1.0)
 
 
+def test_transcribe_segments_strips_trailing_dot_runs_from_segment_text():
+    fake_model = FakeModel([" hello... ", "world."])
+    transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
+    segments = [
+        AudioData(
+            audio=np.array([0.25, -0.5], dtype=np.float32),
+            sample_rate=16000,
+            duration=0.1,
+        ),
+        AudioData(
+            audio=np.array([0.5, 0.25], dtype=np.float32),
+            sample_rate=16000,
+            duration=0.1,
+        ),
+    ]
+
+    result = transcriber.transcribe_segments(segments)
+
+    assert [segment.text for segment in result.segments] == ["hello", "world"]
+    assert result.text == "Hello world."
+
+
 def test_transcribe_single_clip_applies_final_document_cleanup_once():
     fake_model = FakeModel(["multiple   spaces"])
     transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
@@ -95,6 +117,14 @@ def test_transcribe_single_clip_applies_final_document_cleanup_once():
 
     assert result == "Multiple spaces."
     assert len(fake_model.calls) == 1
+
+
+def test_finalize_text_does_not_force_mid_sentence_capitalization():
+    transcriber = Transcriber(config=FakeConfig(), model=FakeModel([]), device="cpu")
+
+    result = transcriber.finalize_text("hello. there is more")
+
+    assert result == "Hello. there is more."
 
 
 def test_finalize_text_uses_llm_post_processor_when_enabled():
