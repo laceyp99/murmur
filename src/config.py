@@ -4,6 +4,8 @@ Configuration management for Murmur.
 
 import json
 import os
+from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -42,6 +44,10 @@ DEFAULT_CONFIG = {
 _config_instance = None
 
 
+class ConfigError(RuntimeError):
+    """Raised when Murmur cannot read or write its config safely."""
+
+
 def get_app_data_dir() -> Path:
     """Get the canonical Murmur AppData directory."""
     return Path(os.environ.get("APPDATA", ".")) / APP_DIR_NAME
@@ -59,30 +65,79 @@ class Config:
         self.config_dir = get_app_data_dir()
         self.config_file = self.config_dir / "config.json"
         self._config: Dict[str, Any] = {}
+        self._startup_notice: Optional[str] = None
         self._load()
+
+    def _make_corrupt_backup_path(self) -> Path:
+        """Build a unique backup path for an invalid config file."""
+        while True:
+            suffix = datetime.now().strftime("%Y%m%d%H%M%S%f")
+            backup_file = self.config_dir / f"config.corrupt-{suffix}.json"
+            if not backup_file.exists():
+                return backup_file
+
+    def _recover_from_invalid_file(self) -> None:
+        """Preserve the invalid config file and replace it with defaults."""
+        backup_file = self._make_corrupt_backup_path()
+
+        try:
+            os.replace(self.config_file, backup_file)
+        except OSError as exc:
+            raise ConfigError("Failed to preserve corrupt config file") from exc
+
+        self._config = DEFAULT_CONFIG.copy()
+        self._save_config(self._config)
+        self._startup_notice = (
+            "Config file was unreadable and has been reset to defaults. "
+            f"The original file was backed up to '{backup_file.name}'."
+        )
+
+    def _save_config(self, config_data: Dict[str, Any]) -> None:
+        """Write config data atomically to disk."""
+        temp_file = self.config_dir / f"config.{os.getpid()}.tmp"
+
+        try:
+            with open(temp_file, "w", encoding="utf-8") as file_handle:
+                json.dump(config_data, file_handle, indent=2)
+            os.replace(temp_file, self.config_file)
+        except OSError as exc:
+            try:
+                temp_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise ConfigError("Failed to write config file") from exc
 
     def _load(self):
         """Load configuration from file or create default."""
-        self.config_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.config_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ConfigError("Failed to create config directory") from exc
 
-        if self.config_file.exists():
-            try:
-                with open(self.config_file, "r") as f:
-                    self._config = {**DEFAULT_CONFIG, **json.load(f)}
-            except (json.JSONDecodeError, IOError):
-                self._config = DEFAULT_CONFIG.copy()
-                self._save()
-        else:
+        if not self.config_file.exists():
             self._config = DEFAULT_CONFIG.copy()
-            self._save()
+            self._save_config(self._config)
+            return
+
+        try:
+            with open(self.config_file, "r", encoding="utf-8") as file_handle:
+                loaded_config = json.load(file_handle)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._recover_from_invalid_file()
+            return
+        except OSError as exc:
+            raise ConfigError("Failed to read config file") from exc
+
+        if not isinstance(loaded_config, Mapping):
+            self._recover_from_invalid_file()
+            return
+
+        self._config = DEFAULT_CONFIG.copy()
+        self._config.update(dict(loaded_config))
 
     def _save(self):
         """Save configuration to file."""
-        try:
-            with open(self.config_file, "w") as f:
-                json.dump(self._config, f, indent=2)
-        except IOError:
-            pass
+        self._save_config(self._config)
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a configuration value."""
@@ -90,12 +145,24 @@ class Config:
 
     def set(self, key: str, value: Any):
         """Set a configuration value and save."""
-        self._config[key] = value
-        self._save()
+        self.update({key: value})
+
+    def update(self, values: Mapping[str, Any]) -> None:
+        """Update multiple configuration values and save them atomically."""
+        updated_config = self._config.copy()
+        updated_config.update(dict(values))
+        self._save_config(updated_config)
+        self._config = updated_config
 
     def get_all(self) -> Dict[str, Any]:
         """Get all configuration values."""
         return self._config.copy()
+
+    def consume_startup_notice(self) -> Optional[str]:
+        """Return and clear any startup notice generated during config load."""
+        notice = self._startup_notice
+        self._startup_notice = None
+        return notice
 
     @property
     def hotkey(self) -> str:

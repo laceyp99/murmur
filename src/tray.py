@@ -19,6 +19,8 @@ class TrayManager:
         self.on_exit_callback = on_exit_callback
         self.icon = None
         self._status_text = "Ready"
+        self._settings_thread = None
+        self._settings_lock = threading.Lock()
 
     def _create_image(self):
         """Load and prepare the tray icon image."""
@@ -55,10 +57,15 @@ class TrayManager:
 
     def _on_settings(self):
         """Open the settings window."""
-        # Run in a separate thread to avoid blocking the tray
-        from .settings_gui import show_settings
+        with self._settings_lock:
+            if self._settings_thread is not None and self._settings_thread.is_alive():
+                return
 
-        threading.Thread(target=show_settings, daemon=True).start()
+            # Run in a separate thread to avoid blocking the tray
+            from .settings_gui import show_settings
+
+            self._settings_thread = threading.Thread(target=show_settings, daemon=True)
+            self._settings_thread.start()
 
     def _on_exit(self, icon, item):
         """Handle exit from tray menu."""

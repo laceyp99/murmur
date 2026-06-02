@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from src.config import DEFAULT_CONFIG
+
 
 main_module = pytest.importorskip("src.main")
 AudioData = main_module.AudioData
@@ -55,6 +57,9 @@ class FakeTranscriber:
     def warm_llm_post_processor(self):
         self.warm_llm_post_processor_calls += 1
         return True
+
+    def get_device_info(self):
+        return {"device": "cpu"}
 
 
 class FakeConfig:
@@ -131,6 +136,18 @@ class FakeLogger:
     def log(self, audio_data, text, elapsed):
         self.entries.append((audio_data, text, elapsed))
 
+    def is_enabled(self):
+        return False
+
+    def get_log_directory(self):
+        return "C:/murmur/training_data"
+
+    def get_entry_count(self):
+        return 0
+
+    def get_total_duration(self):
+        return 0.0
+
 
 class FakeHotkeyManager:
     def __init__(self):
@@ -142,6 +159,50 @@ class FakeHotkeyManager:
 
     def set_idle(self):
         self.idle_calls += 1
+
+
+class FakeStartupConfig:
+    def __init__(self, hotkey, startup_notice=None):
+        self.hotkey = hotkey
+        self.model_name = "small"
+        self.start_with_windows = False
+        self.set_calls = []
+        self._startup_notice = startup_notice
+
+    def set(self, key, value):
+        self.set_calls.append((key, value))
+        setattr(self, key, value)
+
+    def consume_startup_notice(self):
+        notice = self._startup_notice
+        self._startup_notice = None
+        return notice
+
+
+class FakeStartupHotkeyManager:
+    def __init__(self, config, should_succeed, error_by_hotkey=None):
+        self.config = config
+        self.should_succeed = should_succeed
+        self.register_calls = []
+        self.error_by_hotkey = error_by_hotkey or {}
+        self.last_registration_error = None
+
+    def register(self, on_start=None, on_stop=None, on_state_change=None):
+        self.register_calls.append(self.config.hotkey)
+        success = self.should_succeed(self.config.hotkey)
+        if success:
+            self.last_registration_error = None
+        else:
+            self.last_registration_error = self.error_by_hotkey.get(
+                self.config.hotkey, "keyboard backend unavailable"
+            )
+        return success
+
+    def unregister(self):
+        return None
+
+    def get_last_registration_error(self):
+        return self.last_registration_error
 
 
 class FakeMediaController:
@@ -156,6 +217,20 @@ class FakeMediaController:
 def make_audio_data():
     audio = np.array([0.1, -0.3, 0.2], dtype=np.float32)
     return AudioData(audio=audio, sample_rate=16000, duration=len(audio) / 16000)
+
+
+def make_start_app(config, hotkey_manager):
+    app = MurmurApp.__new__(MurmurApp)
+    app.config = config
+    app.hotkey_manager = hotkey_manager
+    app.transcriber = FakeTranscriber()
+    app.logger = FakeLogger()
+    app.notifications = FakeNotifications()
+    app._running = False
+    app._on_recording_start = lambda: None
+    app._on_recording_stop = lambda: None
+    app._on_state_change = lambda state: None
+    return app
 
 
 def test_transcribe_audio_uses_vad_segments_when_available():
@@ -342,6 +417,115 @@ def test_start_live_transcription_replaces_existing_worker():
     assert first_worker is not app.live_transcription_worker
     assert first_accumulator is not app.live_transcript_accumulator
     app._stop_live_transcription()
+
+
+def test_start_recovers_from_invalid_configured_hotkey(monkeypatch):
+    config = FakeStartupConfig("not-a-real-key")
+    hotkey_manager = FakeStartupHotkeyManager(
+        config, lambda hotkey: hotkey == DEFAULT_CONFIG["hotkey"]
+    )
+    app = make_start_app(config, hotkey_manager)
+
+    monkeypatch.setattr(
+        main_module,
+        "is_hotkey_valid",
+        lambda hotkey: hotkey == DEFAULT_CONFIG["hotkey"],
+    )
+
+    app.start()
+
+    assert hotkey_manager.register_calls == [
+        "not-a-real-key",
+        DEFAULT_CONFIG["hotkey"],
+    ]
+    assert config.set_calls == [("hotkey", DEFAULT_CONFIG["hotkey"])]
+    assert app.notifications.messages == [
+        (
+            "murmur",
+            "Configured hotkey 'not-a-real-key' was invalid and has been reset to 'ctrl+shift+space'.",
+        ),
+        ("murmur", "Ready! Press hotkey to start recording."),
+    ]
+
+
+def test_start_exits_when_valid_hotkey_registration_still_fails(monkeypatch):
+    config = FakeStartupConfig(DEFAULT_CONFIG["hotkey"])
+    hotkey_manager = FakeStartupHotkeyManager(
+        config,
+        lambda hotkey: False,
+        {DEFAULT_CONFIG["hotkey"]: "keyboard hook unavailable"},
+    )
+    app = make_start_app(config, hotkey_manager)
+
+    monkeypatch.setattr(main_module, "is_hotkey_valid", lambda hotkey: True)
+    monkeypatch.setattr(
+        main_module.sys,
+        "exit",
+        lambda code: (_ for _ in ()).throw(SystemExit(code)),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        app.start()
+
+    assert exc_info.value.code == 1
+    assert hotkey_manager.register_calls == [DEFAULT_CONFIG["hotkey"]]
+    assert config.set_calls == []
+    assert app.notifications.messages == [
+        (
+            "murmur",
+            "Default hotkey 'ctrl+shift+space' could not be registered (keyboard hook unavailable). Check permissions or whether another application is using it.",
+        )
+    ]
+
+
+def test_start_notifies_when_config_recovery_happened():
+    config = FakeStartupConfig(
+        DEFAULT_CONFIG["hotkey"],
+        startup_notice=(
+            "Config file was unreadable and has been reset to defaults. "
+            "The original file was backed up to 'config.corrupt-20260601010101000000.json'."
+        ),
+    )
+    hotkey_manager = FakeStartupHotkeyManager(config, lambda hotkey: True)
+    app = make_start_app(config, hotkey_manager)
+
+    app.start()
+
+    assert hotkey_manager.register_calls == [DEFAULT_CONFIG["hotkey"]]
+    assert app.notifications.messages == [
+        (
+            "murmur",
+            "Config file was unreadable and has been reset to defaults. The original file was backed up to 'config.corrupt-20260601010101000000.json'.",
+        ),
+        ("murmur", "Ready! Press hotkey to start recording."),
+    ]
+
+
+def test_start_recovers_from_runtime_hotkey_registration_failure(monkeypatch):
+    config = FakeStartupConfig("ctrl+alt+space")
+    hotkey_manager = FakeStartupHotkeyManager(
+        config,
+        lambda hotkey: hotkey == DEFAULT_CONFIG["hotkey"],
+        {"ctrl+alt+space": "keyboard hook unavailable"},
+    )
+    app = make_start_app(config, hotkey_manager)
+
+    monkeypatch.setattr(main_module, "is_hotkey_valid", lambda hotkey: True)
+
+    app.start()
+
+    assert hotkey_manager.register_calls == [
+        "ctrl+alt+space",
+        DEFAULT_CONFIG["hotkey"],
+    ]
+    assert config.set_calls == [("hotkey", DEFAULT_CONFIG["hotkey"])]
+    assert app.notifications.messages == [
+        (
+            "murmur",
+            "Configured hotkey 'ctrl+alt+space' could not be registered (keyboard hook unavailable) and has been reset to 'ctrl+shift+space'.",
+        ),
+        ("murmur", "Ready! Press hotkey to start recording."),
+    ]
 
 
 def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeypatch):

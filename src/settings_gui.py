@@ -5,8 +5,9 @@ Settings GUI for Murmur using tkinter.
 import tkinter as tk
 from datetime import datetime
 from tkinter import ttk, messagebox
-from .config import get_config, get_training_data_dir
+from .config import ConfigError, get_config, get_training_data_dir
 from .autostart import set_autostart
+from .hotkey import is_hotkey_valid
 from .logger import get_logger
 
 
@@ -156,6 +157,13 @@ class SettingsWindow:
             messagebox.showinfo("Murmur", "No logged training data was found.")
 
     def _save(self):
+        new_hotkey = self.hotkey_var.get().strip()
+        if not is_hotkey_valid(new_hotkey):
+            messagebox.showerror(
+                "Murmur", "Please enter a valid hotkey before saving settings."
+            )
+            return
+
         previous_logging = self.config.enable_logging
         new_logging = self.logging_var.get()
 
@@ -168,27 +176,32 @@ class SettingsWindow:
                 self.logging_var.set(False)
                 return
 
-        # Update config
-        self.config.set("hotkey", self.hotkey_var.get())
-        self.config.set("model", self.model_var.get())
-        self.config.set("device", self.device_var.get())
-
         lang = self.lang_var.get().strip()
-        self.config.set("language", lang if lang and lang.lower() != "none" else None)
-
-        self.config.set("enable_notifications", self.notify_var.get())
-        self.config.set("enable_logging", new_logging)
-        self.config.set("pause_media_while_recording", self.pause_media_var.get())
-
-        if previous_logging != new_logging:
-            self.config.set("logging_consent_updated_at", datetime.now().isoformat())
-            self.config.set("logging_consent_source", "settings")
-
-        self.logger.set_enabled(new_logging)
-
         old_autostart = self.config.start_with_windows
         new_autostart = self.autostart_var.get()
-        self.config.set("start_with_windows", new_autostart)
+        updated_values = {
+            "hotkey": new_hotkey,
+            "model": self.model_var.get(),
+            "device": self.device_var.get(),
+            "language": lang if lang and lang.lower() != "none" else None,
+            "enable_notifications": self.notify_var.get(),
+            "enable_logging": new_logging,
+            "pause_media_while_recording": self.pause_media_var.get(),
+        }
+
+        if previous_logging != new_logging:
+            updated_values["logging_consent_updated_at"] = datetime.now().isoformat()
+            updated_values["logging_consent_source"] = "settings"
+
+        updated_values["start_with_windows"] = new_autostart
+
+        try:
+            self.config.update(updated_values)
+        except ConfigError as exc:
+            messagebox.showerror("Murmur", f"Failed to save settings: {exc}")
+            return
+
+        self.logger.set_enabled(new_logging)
 
         # Update registry if autostart changed
         if old_autostart != new_autostart:

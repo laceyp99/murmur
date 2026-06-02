@@ -7,7 +7,7 @@ import sys
 import time
 from typing import Optional
 
-from .config import get_config
+from .config import ConfigError, DEFAULT_CONFIG, get_config
 from .audio import AudioRecorder, AudioData
 from .transcription import Transcriber
 from .transcription_live import (
@@ -22,7 +22,7 @@ from .vad import (
     WebRTCVADSegmenter,
 )
 from .clipboard import copy_to_clipboard
-from .hotkey import HotkeyManager, HotkeyState
+from .hotkey import HotkeyManager, HotkeyState, is_hotkey_valid
 from .notifications import get_notification_manager
 from .logger import get_logger
 from .tray import TrayManager
@@ -87,6 +87,8 @@ class MurmurApp:
             return
 
         self._running = True
+        recovery_message = None
+        should_retry_registration = False
 
         # Register hotkey
         success = self.hotkey_manager.register(
@@ -96,8 +98,29 @@ class MurmurApp:
         )
 
         if not success:
+            recovery_message, should_retry_registration = (
+                self._recover_failed_hotkey_registration()
+            )
+            if should_retry_registration:
+                success = self.hotkey_manager.register(
+                    on_start=self._on_recording_start,
+                    on_stop=self._on_recording_stop,
+                    on_state_change=self._on_state_change,
+                )
+
+        if recovery_message:
+            print(f"⚠️ {recovery_message}")
+            self.notifications.notify("murmur", recovery_message)
+
+        if not success:
+            self._running = False
             print("Failed to register hotkey. Exiting.")
             sys.exit(1)
+
+        config_notice = self.config.consume_startup_notice()
+        if config_notice:
+            print(f"⚠️ {config_notice}")
+            self.notifications.notify("murmur", config_notice)
 
         print(f"\n{'=' * 50}")
         print("murmur - Local Speech-to-Text")
@@ -118,6 +141,56 @@ class MurmurApp:
         print(f"{'=' * 50}\n")
 
         self.notifications.notify("murmur", "Ready! Press hotkey to start recording.")
+
+    def _recover_failed_hotkey_registration(self) -> tuple[Optional[str], bool]:
+        """Recover from invalid or unregistrable configured hotkeys."""
+        configured_hotkey = self.config.hotkey
+        fallback_hotkey = DEFAULT_CONFIG["hotkey"]
+        last_error = None
+        if hasattr(self.hotkey_manager, "get_last_registration_error"):
+            last_error = self.hotkey_manager.get_last_registration_error()
+        error_suffix = f" ({last_error})" if last_error else ""
+
+        if configured_hotkey != fallback_hotkey and not is_hotkey_valid(
+            configured_hotkey
+        ):
+            try:
+                self.config.set("hotkey", fallback_hotkey)
+            except ConfigError as exc:
+                print(f"Failed to reset invalid hotkey '{configured_hotkey}': {exc}")
+                return None, False
+
+            return (
+                f"Configured hotkey '{configured_hotkey}' was invalid and has been reset "
+                f"to '{fallback_hotkey}'.",
+                True,
+            )
+
+        if configured_hotkey == fallback_hotkey:
+            return (
+                f"Default hotkey '{fallback_hotkey}' could not be registered{error_suffix}. "
+                "Check permissions or whether another application is using it.",
+                False,
+            )
+
+        try:
+            self.config.set("hotkey", fallback_hotkey)
+        except ConfigError as exc:
+            print(
+                f"Failed to reset unregistrable hotkey '{configured_hotkey}' to "
+                f"'{fallback_hotkey}': {exc}"
+            )
+            return (
+                f"Configured hotkey '{configured_hotkey}' could not be registered"
+                f"{error_suffix}.",
+                False,
+            )
+
+        return (
+            f"Configured hotkey '{configured_hotkey}' could not be registered"
+            f"{error_suffix} and has been reset to '{fallback_hotkey}'.",
+            True,
+        )
 
     def stop(self) -> None:
         """Stop the application."""

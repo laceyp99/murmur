@@ -9,7 +9,24 @@ from typing import Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from .config import get_config
+from .config import ConfigError, get_config
+
+
+def is_hotkey_valid(hotkey: str) -> bool:
+    """Return whether the keyboard library can parse the supplied hotkey."""
+    if not isinstance(hotkey, str):
+        return False
+
+    normalized_hotkey = hotkey.strip()
+    if not normalized_hotkey:
+        return False
+
+    try:
+        keyboard.parse_hotkey_combinations(normalized_hotkey)
+    except Exception:
+        return False
+
+    return True
 
 
 class HotkeyState(Enum):
@@ -43,6 +60,7 @@ class HotkeyManager:
         self._on_stop: Optional[Callable[[], None]] = None
         self._on_state_change: Optional[Callable[[HotkeyState], None]] = None
         self._hotkey_registered: bool = False
+        self._last_registration_error: Optional[str] = None
         self._lock = threading.Lock()
 
     def register(
@@ -74,9 +92,11 @@ class HotkeyManager:
                 self.config.hotkey, self._on_hotkey_pressed, suppress=True
             )
             self._hotkey_registered = True
+            self._last_registration_error = None
             print(f"Hotkey '{self.config.hotkey}' registered successfully.")
             return True
         except Exception as e:
+            self._last_registration_error = str(e)
             print(f"Failed to register hotkey: {e}")
             return False
 
@@ -88,6 +108,11 @@ class HotkeyManager:
             except Exception:
                 pass
             self._hotkey_registered = False
+        self._last_registration_error = None
+
+    def get_last_registration_error(self) -> Optional[str]:
+        """Return the last registration failure message, if any."""
+        return self._last_registration_error
 
     def _on_hotkey_pressed(self) -> None:
         """Handle hotkey press event."""
@@ -141,12 +166,20 @@ class HotkeyManager:
         on_start = self._on_start
         on_stop = self._on_stop
         on_state_change = self._on_state_change
+        normalized_hotkey = new_hotkey.strip()
+
+        if not is_hotkey_valid(normalized_hotkey):
+            return False
 
         # Unregister old hotkey
         self.unregister()
 
         # Update config
-        self.config.hotkey = new_hotkey
+        try:
+            self.config.set("hotkey", normalized_hotkey)
+        except ConfigError as exc:
+            print(f"Failed to update hotkey: {exc}")
+            return False
 
         # Re-register with new hotkey
         return self.register(on_start, on_stop, on_state_change)
