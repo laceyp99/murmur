@@ -49,6 +49,9 @@ def test_config_recovers_from_malformed_json_without_overwriting_backup(
     assert len(backup_files) == 1
     assert backup_files[0].read_text(encoding="utf-8") == '{"hotkey": '
     assert json.loads(config_file.read_text(encoding="utf-8")) == DEFAULT_CONFIG
+    notice = cfg.consume_startup_notice()
+    assert backup_files[0].name in notice
+    assert cfg.consume_startup_notice() is None
 
 
 def test_config_recovers_from_wrong_shaped_json_payload(tmp_path, monkeypatch):
@@ -65,6 +68,7 @@ def test_config_recovers_from_wrong_shaped_json_payload(tmp_path, monkeypatch):
     assert len(backup_files) == 1
     assert json.loads(backup_files[0].read_text(encoding="utf-8")) == ["ctrl+alt+space"]
     assert json.loads(config_file.read_text(encoding="utf-8")) == DEFAULT_CONFIG
+    assert backup_files[0].name in cfg.consume_startup_notice()
 
 
 def test_config_recovers_from_invalid_utf8_bytes(tmp_path, monkeypatch):
@@ -82,6 +86,7 @@ def test_config_recovers_from_invalid_utf8_bytes(tmp_path, monkeypatch):
     assert len(backup_files) == 1
     assert backup_files[0].read_bytes() == invalid_bytes
     assert json.loads(config_file.read_text(encoding="utf-8")) == DEFAULT_CONFIG
+    assert backup_files[0].name in cfg.consume_startup_notice()
 
 
 def test_config_set_raises_when_atomic_save_fails(tmp_path, monkeypatch):

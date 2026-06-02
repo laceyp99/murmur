@@ -65,6 +65,7 @@ class Config:
         self.config_dir = get_app_data_dir()
         self.config_file = self.config_dir / "config.json"
         self._config: Dict[str, Any] = {}
+        self._startup_notice: Optional[str] = None
         self._load()
 
     def _make_corrupt_backup_path(self) -> Path:
@@ -86,6 +87,10 @@ class Config:
 
         self._config = DEFAULT_CONFIG.copy()
         self._save_config(self._config)
+        self._startup_notice = (
+            "Config file was unreadable and has been reset to defaults. "
+            f"The original file was backed up to '{backup_file.name}'."
+        )
 
     def _save_config(self, config_data: Dict[str, Any]) -> None:
         """Write config data atomically to disk."""
@@ -152,6 +157,12 @@ class Config:
     def get_all(self) -> Dict[str, Any]:
         """Get all configuration values."""
         return self._config.copy()
+
+    def consume_startup_notice(self) -> Optional[str]:
+        """Return and clear any startup notice generated during config load."""
+        notice = self._startup_notice
+        self._startup_notice = None
+        return notice
 
     @property
     def hotkey(self) -> str:

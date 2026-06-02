@@ -110,6 +110,11 @@ class MurmurApp:
             print("Failed to register hotkey. Exiting.")
             sys.exit(1)
 
+        config_notice = self.config.consume_startup_notice()
+        if config_notice:
+            print(f"⚠️ {config_notice}")
+            self.notifications.notify("murmur", config_notice)
+
         if recovery_message:
             print(f"⚠️ {recovery_message}")
             self.notifications.notify("murmur", recovery_message)

@@ -162,15 +162,21 @@ class FakeHotkeyManager:
 
 
 class FakeStartupConfig:
-    def __init__(self, hotkey):
+    def __init__(self, hotkey, startup_notice=None):
         self.hotkey = hotkey
         self.model_name = "small"
         self.start_with_windows = False
         self.set_calls = []
+        self._startup_notice = startup_notice
 
     def set(self, key, value):
         self.set_calls.append((key, value))
         setattr(self, key, value)
+
+    def consume_startup_notice(self):
+        notice = self._startup_notice
+        self._startup_notice = None
+        return notice
 
 
 class FakeStartupHotkeyManager:
@@ -448,6 +454,29 @@ def test_start_exits_when_valid_hotkey_registration_still_fails(monkeypatch):
     assert exc_info.value.code == 1
     assert hotkey_manager.register_calls == [DEFAULT_CONFIG["hotkey"]]
     assert config.set_calls == []
+
+
+def test_start_notifies_when_config_recovery_happened():
+    config = FakeStartupConfig(
+        DEFAULT_CONFIG["hotkey"],
+        startup_notice=(
+            "Config file was unreadable and has been reset to defaults. "
+            "The original file was backed up to 'config.corrupt-20260601010101000000.json'."
+        ),
+    )
+    hotkey_manager = FakeStartupHotkeyManager(config, lambda hotkey: True)
+    app = make_start_app(config, hotkey_manager)
+
+    app.start()
+
+    assert hotkey_manager.register_calls == [DEFAULT_CONFIG["hotkey"]]
+    assert app.notifications.messages == [
+        (
+            "murmur",
+            "Config file was unreadable and has been reset to defaults. The original file was backed up to 'config.corrupt-20260601010101000000.json'.",
+        ),
+        ("murmur", "Ready! Press hotkey to start recording."),
+    ]
 
 
 def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeypatch):
