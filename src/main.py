@@ -151,7 +151,9 @@ class MurmurApp:
             last_error = self.hotkey_manager.get_last_registration_error()
         error_suffix = f" ({last_error})" if last_error else ""
 
-        if configured_hotkey != fallback_hotkey and not is_hotkey_valid(configured_hotkey):
+        if configured_hotkey != fallback_hotkey and not is_hotkey_valid(
+            configured_hotkey
+        ):
             try:
                 self.config.set("hotkey", fallback_hotkey)
             except ConfigError as exc:
