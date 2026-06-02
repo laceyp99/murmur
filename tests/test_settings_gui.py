@@ -48,6 +48,7 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
 
     monkeypatch.setattr(settings_module, "get_config", lambda: config)
     monkeypatch.setattr(settings_module, "get_logger", lambda: logger)
+    monkeypatch.setattr(settings_module, "is_hotkey_valid", lambda value: True)
     monkeypatch.setattr(
         settings_module,
         "set_autostart",
@@ -59,6 +60,7 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
         SimpleNamespace(
             askyesno=lambda *args, **kwargs: True,
             showinfo=lambda *args, **kwargs: info_calls.append((args, kwargs)),
+            showerror=lambda *args, **kwargs: None,
         ),
     )
     monkeypatch.setattr(
