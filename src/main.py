@@ -7,7 +7,7 @@ import sys
 import time
 from typing import Optional
 
-from .config import get_config
+from .config import ConfigError, DEFAULT_CONFIG, get_config
 from .audio import AudioRecorder, AudioData
 from .transcription import Transcriber
 from .transcription_live import (
@@ -22,7 +22,7 @@ from .vad import (
     WebRTCVADSegmenter,
 )
 from .clipboard import copy_to_clipboard
-from .hotkey import HotkeyManager, HotkeyState
+from .hotkey import HotkeyManager, HotkeyState, is_hotkey_valid
 from .notifications import get_notification_manager
 from .logger import get_logger
 from .tray import TrayManager
@@ -87,6 +87,7 @@ class MurmurApp:
             return
 
         self._running = True
+        recovery_message = None
 
         # Register hotkey
         success = self.hotkey_manager.register(
@@ -96,8 +97,22 @@ class MurmurApp:
         )
 
         if not success:
+            recovery_message = self._recover_invalid_hotkey()
+            if recovery_message:
+                success = self.hotkey_manager.register(
+                    on_start=self._on_recording_start,
+                    on_stop=self._on_recording_stop,
+                    on_state_change=self._on_state_change,
+                )
+
+        if not success:
+            self._running = False
             print("Failed to register hotkey. Exiting.")
             sys.exit(1)
+
+        if recovery_message:
+            print(f"⚠️ {recovery_message}")
+            self.notifications.notify("murmur", recovery_message)
 
         print(f"\n{'=' * 50}")
         print("murmur - Local Speech-to-Text")
@@ -118,6 +133,25 @@ class MurmurApp:
         print(f"{'=' * 50}\n")
 
         self.notifications.notify("murmur", "Ready! Press hotkey to start recording.")
+
+    def _recover_invalid_hotkey(self) -> Optional[str]:
+        """Reset an invalid configured hotkey to the default shortcut."""
+        configured_hotkey = self.config.hotkey
+        fallback_hotkey = DEFAULT_CONFIG["hotkey"]
+
+        if configured_hotkey == fallback_hotkey or is_hotkey_valid(configured_hotkey):
+            return None
+
+        try:
+            self.config.set("hotkey", fallback_hotkey)
+        except ConfigError as exc:
+            print(f"Failed to reset invalid hotkey '{configured_hotkey}': {exc}")
+            return None
+
+        return (
+            f"Configured hotkey '{configured_hotkey}' was invalid and has been reset "
+            f"to '{fallback_hotkey}'."
+        )
 
     def stop(self) -> None:
         """Stop the application."""
