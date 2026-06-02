@@ -88,6 +88,7 @@ class MurmurApp:
 
         self._running = True
         recovery_message = None
+        should_retry_registration = False
 
         # Register hotkey
         success = self.hotkey_manager.register(
@@ -97,13 +98,19 @@ class MurmurApp:
         )
 
         if not success:
-            recovery_message = self._recover_invalid_hotkey()
-            if recovery_message:
+            recovery_message, should_retry_registration = (
+                self._recover_failed_hotkey_registration()
+            )
+            if should_retry_registration:
                 success = self.hotkey_manager.register(
                     on_start=self._on_recording_start,
                     on_stop=self._on_recording_stop,
                     on_state_change=self._on_state_change,
                 )
+
+        if recovery_message:
+            print(f"⚠️ {recovery_message}")
+            self.notifications.notify("murmur", recovery_message)
 
         if not success:
             self._running = False
@@ -114,10 +121,6 @@ class MurmurApp:
         if config_notice:
             print(f"⚠️ {config_notice}")
             self.notifications.notify("murmur", config_notice)
-
-        if recovery_message:
-            print(f"⚠️ {recovery_message}")
-            self.notifications.notify("murmur", recovery_message)
 
         print(f"\n{'=' * 50}")
         print("murmur - Local Speech-to-Text")
@@ -139,23 +142,52 @@ class MurmurApp:
 
         self.notifications.notify("murmur", "Ready! Press hotkey to start recording.")
 
-    def _recover_invalid_hotkey(self) -> Optional[str]:
-        """Reset an invalid configured hotkey to the default shortcut."""
+    def _recover_failed_hotkey_registration(self) -> tuple[Optional[str], bool]:
+        """Recover from invalid or unregistrable configured hotkeys."""
         configured_hotkey = self.config.hotkey
         fallback_hotkey = DEFAULT_CONFIG["hotkey"]
+        last_error = None
+        if hasattr(self.hotkey_manager, "get_last_registration_error"):
+            last_error = self.hotkey_manager.get_last_registration_error()
+        error_suffix = f" ({last_error})" if last_error else ""
 
-        if configured_hotkey == fallback_hotkey or is_hotkey_valid(configured_hotkey):
-            return None
+        if configured_hotkey != fallback_hotkey and not is_hotkey_valid(configured_hotkey):
+            try:
+                self.config.set("hotkey", fallback_hotkey)
+            except ConfigError as exc:
+                print(f"Failed to reset invalid hotkey '{configured_hotkey}': {exc}")
+                return None, False
+
+            return (
+                f"Configured hotkey '{configured_hotkey}' was invalid and has been reset "
+                f"to '{fallback_hotkey}'.",
+                True,
+            )
+
+        if configured_hotkey == fallback_hotkey:
+            return (
+                f"Default hotkey '{fallback_hotkey}' could not be registered{error_suffix}. "
+                "Check permissions or whether another application is using it.",
+                False,
+            )
 
         try:
             self.config.set("hotkey", fallback_hotkey)
         except ConfigError as exc:
-            print(f"Failed to reset invalid hotkey '{configured_hotkey}': {exc}")
-            return None
+            print(
+                f"Failed to reset unregistrable hotkey '{configured_hotkey}' to "
+                f"'{fallback_hotkey}': {exc}"
+            )
+            return (
+                f"Configured hotkey '{configured_hotkey}' could not be registered"
+                f"{error_suffix}.",
+                False,
+            )
 
         return (
-            f"Configured hotkey '{configured_hotkey}' was invalid and has been reset "
-            f"to '{fallback_hotkey}'."
+            f"Configured hotkey '{configured_hotkey}' could not be registered"
+            f"{error_suffix} and has been reset to '{fallback_hotkey}'.",
+            True,
         )
 
     def stop(self) -> None:

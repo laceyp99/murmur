@@ -60,6 +60,7 @@ class HotkeyManager:
         self._on_stop: Optional[Callable[[], None]] = None
         self._on_state_change: Optional[Callable[[HotkeyState], None]] = None
         self._hotkey_registered: bool = False
+        self._last_registration_error: Optional[str] = None
         self._lock = threading.Lock()
 
     def register(
@@ -91,9 +92,11 @@ class HotkeyManager:
                 self.config.hotkey, self._on_hotkey_pressed, suppress=True
             )
             self._hotkey_registered = True
+            self._last_registration_error = None
             print(f"Hotkey '{self.config.hotkey}' registered successfully.")
             return True
         except Exception as e:
+            self._last_registration_error = str(e)
             print(f"Failed to register hotkey: {e}")
             return False
 
@@ -105,6 +108,11 @@ class HotkeyManager:
             except Exception:
                 pass
             self._hotkey_registered = False
+        self._last_registration_error = None
+
+    def get_last_registration_error(self) -> Optional[str]:
+        """Return the last registration failure message, if any."""
+        return self._last_registration_error
 
     def _on_hotkey_pressed(self) -> None:
         """Handle hotkey press event."""

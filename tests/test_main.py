@@ -180,17 +180,29 @@ class FakeStartupConfig:
 
 
 class FakeStartupHotkeyManager:
-    def __init__(self, config, should_succeed):
+    def __init__(self, config, should_succeed, error_by_hotkey=None):
         self.config = config
         self.should_succeed = should_succeed
         self.register_calls = []
+        self.error_by_hotkey = error_by_hotkey or {}
+        self.last_registration_error = None
 
     def register(self, on_start=None, on_stop=None, on_state_change=None):
         self.register_calls.append(self.config.hotkey)
-        return self.should_succeed(self.config.hotkey)
+        success = self.should_succeed(self.config.hotkey)
+        if success:
+            self.last_registration_error = None
+        else:
+            self.last_registration_error = self.error_by_hotkey.get(
+                self.config.hotkey, "keyboard backend unavailable"
+            )
+        return success
 
     def unregister(self):
         return None
+
+    def get_last_registration_error(self):
+        return self.last_registration_error
 
 
 class FakeMediaController:
@@ -438,7 +450,11 @@ def test_start_recovers_from_invalid_configured_hotkey(monkeypatch):
 
 def test_start_exits_when_valid_hotkey_registration_still_fails(monkeypatch):
     config = FakeStartupConfig(DEFAULT_CONFIG["hotkey"])
-    hotkey_manager = FakeStartupHotkeyManager(config, lambda hotkey: False)
+    hotkey_manager = FakeStartupHotkeyManager(
+        config,
+        lambda hotkey: False,
+        {DEFAULT_CONFIG["hotkey"]: "keyboard hook unavailable"},
+    )
     app = make_start_app(config, hotkey_manager)
 
     monkeypatch.setattr(main_module, "is_hotkey_valid", lambda hotkey: True)
@@ -454,6 +470,12 @@ def test_start_exits_when_valid_hotkey_registration_still_fails(monkeypatch):
     assert exc_info.value.code == 1
     assert hotkey_manager.register_calls == [DEFAULT_CONFIG["hotkey"]]
     assert config.set_calls == []
+    assert app.notifications.messages == [
+        (
+            "murmur",
+            "Default hotkey 'ctrl+shift+space' could not be registered (keyboard hook unavailable). Check permissions or whether another application is using it.",
+        )
+    ]
 
 
 def test_start_notifies_when_config_recovery_happened():
@@ -474,6 +496,33 @@ def test_start_notifies_when_config_recovery_happened():
         (
             "murmur",
             "Config file was unreadable and has been reset to defaults. The original file was backed up to 'config.corrupt-20260601010101000000.json'.",
+        ),
+        ("murmur", "Ready! Press hotkey to start recording."),
+    ]
+
+
+def test_start_recovers_from_runtime_hotkey_registration_failure(monkeypatch):
+    config = FakeStartupConfig("ctrl+alt+space")
+    hotkey_manager = FakeStartupHotkeyManager(
+        config,
+        lambda hotkey: hotkey == DEFAULT_CONFIG["hotkey"],
+        {"ctrl+alt+space": "keyboard hook unavailable"},
+    )
+    app = make_start_app(config, hotkey_manager)
+
+    monkeypatch.setattr(main_module, "is_hotkey_valid", lambda hotkey: True)
+
+    app.start()
+
+    assert hotkey_manager.register_calls == [
+        "ctrl+alt+space",
+        DEFAULT_CONFIG["hotkey"],
+    ]
+    assert config.set_calls == [("hotkey", DEFAULT_CONFIG["hotkey"])]
+    assert app.notifications.messages == [
+        (
+            "murmur",
+            "Configured hotkey 'ctrl+alt+space' could not be registered (keyboard hook unavailable) and has been reset to 'ctrl+shift+space'.",
         ),
         ("murmur", "Ready! Press hotkey to start recording."),
     ]
