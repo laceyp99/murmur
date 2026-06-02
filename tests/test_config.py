@@ -63,9 +63,7 @@ def test_config_recovers_from_wrong_shaped_json_payload(tmp_path, monkeypatch):
     assert cfg.get_all() == DEFAULT_CONFIG
     backup_files = list(config_dir.glob("config.corrupt*.json"))
     assert len(backup_files) == 1
-    assert json.loads(backup_files[0].read_text(encoding="utf-8")) == [
-        "ctrl+alt+space"
-    ]
+    assert json.loads(backup_files[0].read_text(encoding="utf-8")) == ["ctrl+alt+space"]
     assert json.loads(config_file.read_text(encoding="utf-8")) == DEFAULT_CONFIG
 
 
