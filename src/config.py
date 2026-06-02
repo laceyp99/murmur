@@ -140,8 +140,12 @@ class Config:
 
     def set(self, key: str, value: Any):
         """Set a configuration value and save."""
+        self.update({key: value})
+
+    def update(self, values: Mapping[str, Any]) -> None:
+        """Update multiple configuration values and save them atomically."""
         updated_config = self._config.copy()
-        updated_config[key] = value
+        updated_config.update(dict(values))
         self._save_config(updated_config)
         self._config = updated_config
 

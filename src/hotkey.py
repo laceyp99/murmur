@@ -9,7 +9,24 @@ from typing import Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from .config import get_config
+from .config import ConfigError, get_config
+
+
+def is_hotkey_valid(hotkey: str) -> bool:
+    """Return whether the keyboard library can parse the supplied hotkey."""
+    if not isinstance(hotkey, str):
+        return False
+
+    normalized_hotkey = hotkey.strip()
+    if not normalized_hotkey:
+        return False
+
+    try:
+        keyboard.parse_hotkey_combinations(normalized_hotkey)
+    except Exception:
+        return False
+
+    return True
 
 
 class HotkeyState(Enum):
@@ -141,12 +158,20 @@ class HotkeyManager:
         on_start = self._on_start
         on_stop = self._on_stop
         on_state_change = self._on_state_change
+        normalized_hotkey = new_hotkey.strip()
+
+        if not is_hotkey_valid(normalized_hotkey):
+            return False
 
         # Unregister old hotkey
         self.unregister()
 
         # Update config
-        self.config.hotkey = new_hotkey
+        try:
+            self.config.set("hotkey", normalized_hotkey)
+        except ConfigError as exc:
+            print(f"Failed to update hotkey: {exc}")
+            return False
 
         # Re-register with new hotkey
         return self.register(on_start, on_stop, on_state_change)

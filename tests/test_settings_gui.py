@@ -27,6 +27,10 @@ class FakeConfig:
         self.set_calls.append((key, value))
         setattr(self, key, value)
 
+    def update(self, values):
+        for key, value in values.items():
+            self.set(key, value)
+
 
 class FakeLogger:
     def __init__(self):
@@ -95,3 +99,52 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     assert logger.enabled_calls == [True]
     assert set_autostart_calls == [True]
     assert len(info_calls) == 1
+
+
+def test_save_rejects_invalid_hotkey_without_persisting_changes(monkeypatch):
+    config = FakeConfig()
+    logger = FakeLogger()
+    error_calls = []
+    info_calls = []
+    set_autostart_calls = []
+    destroy_calls = []
+
+    monkeypatch.setattr(settings_module, "get_config", lambda: config)
+    monkeypatch.setattr(settings_module, "get_logger", lambda: logger)
+    monkeypatch.setattr(settings_module, "is_hotkey_valid", lambda value: False)
+    monkeypatch.setattr(
+        settings_module,
+        "set_autostart",
+        lambda enabled: set_autostart_calls.append(enabled),
+    )
+    monkeypatch.setattr(
+        settings_module,
+        "messagebox",
+        SimpleNamespace(
+            askyesno=lambda *args, **kwargs: True,
+            showinfo=lambda *args, **kwargs: info_calls.append((args, kwargs)),
+            showerror=lambda *args, **kwargs: error_calls.append((args, kwargs)),
+        ),
+    )
+
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.config = config
+    window.logger = logger
+    window.hotkey_var = FakeValue("not-a-real-key")
+    window.model_var = FakeValue("small")
+    window.device_var = FakeValue("cpu")
+    window.lang_var = FakeValue("")
+    window.notify_var = FakeValue(True)
+    window.logging_var = FakeValue(False)
+    window.pause_media_var = FakeValue(True)
+    window.autostart_var = FakeValue(False)
+    window.root = SimpleNamespace(destroy=lambda: destroy_calls.append(True))
+
+    window._save()
+
+    assert config.set_calls == []
+    assert logger.enabled_calls == []
+    assert set_autostart_calls == []
+    assert destroy_calls == []
+    assert len(info_calls) == 0
+    assert len(error_calls) == 1
