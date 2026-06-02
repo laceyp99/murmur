@@ -117,7 +117,7 @@ class Config:
         try:
             with open(self.config_file, "r", encoding="utf-8") as file_handle:
                 loaded_config = json.load(file_handle)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             self._recover_from_invalid_file()
             return
         except OSError as exc:

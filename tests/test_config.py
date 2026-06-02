@@ -67,6 +67,23 @@ def test_config_recovers_from_wrong_shaped_json_payload(tmp_path, monkeypatch):
     assert json.loads(config_file.read_text(encoding="utf-8")) == DEFAULT_CONFIG
 
 
+def test_config_recovers_from_invalid_utf8_bytes(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    config_dir = tmp_path / "murmur"
+    config_dir.mkdir()
+    config_file = config_dir / "config.json"
+    invalid_bytes = b'{"hotkey": "\x80"}'
+    config_file.write_bytes(invalid_bytes)
+
+    cfg = Config()
+
+    assert cfg.get_all() == DEFAULT_CONFIG
+    backup_files = list(config_dir.glob("config.corrupt*.json"))
+    assert len(backup_files) == 1
+    assert backup_files[0].read_bytes() == invalid_bytes
+    assert json.loads(config_file.read_text(encoding="utf-8")) == DEFAULT_CONFIG
+
+
 def test_config_set_raises_when_atomic_save_fails(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     cfg = Config()
