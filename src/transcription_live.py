@@ -211,7 +211,6 @@ class LiveTranscriptionWorker:
             callback(*args)
         except Exception as exc:
             print(f"⚠️ Live transcription callback '{attr_name}' failed: {exc}")
-            setattr(self, attr_name, None)
 
     def is_degraded(self) -> bool:
         with self._state_lock:
