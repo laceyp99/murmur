@@ -124,18 +124,21 @@ def test_live_transcription_worker_retries_failed_segment_and_continues_processi
     ]
 
 
-def test_live_transcription_worker_disables_failing_chunk_callback_and_keeps_running():
+def test_live_transcription_worker_recovers_from_temporary_chunk_callback_failure():
     appended_chunk_ids = []
+    appended_text = []
     accumulator = TranscriptAccumulator()
 
-    def failing_chunk_callback(chunk, text):
+    def temporarily_failing_chunk_callback(chunk, text):
         appended_chunk_ids.append(chunk.segment_id)
-        raise RuntimeError("chunk callback broke")
+        if chunk.segment_id == 0:
+            raise RuntimeError("chunk callback broke")
+        appended_text.append(text)
 
     worker = LiveTranscriptionWorker(
         transcriber=FakeLiveTranscriber({0: "first", 1: "second"}),
         accumulator=accumulator,
-        on_chunk_appended=failing_chunk_callback,
+        on_chunk_appended=temporarily_failing_chunk_callback,
     )
 
     worker.start()
@@ -145,4 +148,5 @@ def test_live_transcription_worker_disables_failing_chunk_callback_and_keeps_run
 
     assert worker.is_degraded() is False
     assert accumulator.get_text() == "first second"
-    assert appended_chunk_ids == [0]
+    assert appended_chunk_ids == [0, 1]
+    assert appended_text == ["first second"]
