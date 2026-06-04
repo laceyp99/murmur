@@ -16,6 +16,9 @@ except (ImportError, OSError):
 from .config import Config, get_config
 
 
+DEFAULT_MAX_RECORDING_DURATION = 300
+
+
 @dataclass
 class AudioData:
     """Container for recorded audio data."""
@@ -31,9 +34,12 @@ class AudioRecorder:
     def __init__(self, config: Optional[Config] = None):
         self.config = config or get_config()
         self.sample_rate = self.config.get("sample_rate", 16000)
-        self.max_recording_duration = self.config.get(
-            "max_recording_duration", 300
-        )  # 5 minutes max
+        self.max_recording_duration = self._parse_max_recording_duration(
+            self.config.get("max_recording_duration", DEFAULT_MAX_RECORDING_DURATION)
+        )
+        self._max_recording_samples = max(
+            1, int(self.sample_rate * self.max_recording_duration)
+        )
 
         self._recording = False
         self._audio_data = []
@@ -42,7 +48,21 @@ class AudioRecorder:
         self._recording_start: Optional[float] = None
         self._block_callback: Optional[Callable[[np.ndarray], None]] = None
         self._on_block_callback_error: Optional[Callable[[Exception], None]] = None
+        self._on_recording_limit: Optional[Callable[[float], None]] = None
         self._block_callback_failed = False
+        self._recording_limit_reached = False
+
+    def _parse_max_recording_duration(self, raw_duration) -> float:
+        """Return a positive recording limit, falling back to the default."""
+        try:
+            duration = float(raw_duration)
+        except (TypeError, ValueError):
+            return DEFAULT_MAX_RECORDING_DURATION
+
+        if duration <= 0:
+            return DEFAULT_MAX_RECORDING_DURATION
+
+        return duration
 
     def set_block_callback(
         self,
@@ -60,6 +80,14 @@ class AudioRecorder:
         with self._lock:
             self._on_block_callback_error = handler
 
+    def set_recording_limit_callback(
+        self,
+        callback: Optional[Callable[[float], None]],
+    ) -> None:
+        """Register a callback fired when max recording duration is reached."""
+        with self._lock:
+            self._on_recording_limit = callback
+
     def start_recording(self):
         """Start recording audio."""
         if sd is None:
@@ -75,6 +103,7 @@ class AudioRecorder:
             self._audio_data = []
             self._recording_start = time.time()
             self._block_callback_failed = False
+            self._recording_limit_reached = False
 
         self._stream = sd.InputStream(
             samplerate=self.sample_rate,
@@ -93,7 +122,7 @@ class AudioRecorder:
             AudioData containing the recorded audio, or None if no data recorded
         """
         with self._lock:
-            if not self._recording:
+            if not self._recording and not self._audio_data:
                 return None
             self._recording = False
 
@@ -126,12 +155,41 @@ class AudioRecorder:
         audio_block: Optional[np.ndarray] = None
         block_callback: Optional[Callable[[np.ndarray], None]] = None
         error_handler: Optional[Callable[[Exception], None]] = None
+        recording_limit_callback: Optional[Callable[[float], None]] = None
+        recording_limit_duration: Optional[float] = None
         with self._lock:
             if not self._recording:
                 return
 
-            audio_block = indata.copy()
-            self._audio_data.append(audio_block)
+            samples_recorded = sum(block.shape[0] for block in self._audio_data)
+            max_samples = getattr(self, "_max_recording_samples", None)
+            available_samples = (
+                indata.shape[0]
+                if max_samples is None
+                else max_samples - samples_recorded
+            )
+
+            if available_samples <= 0:
+                self._recording = False
+            else:
+                samples_to_append = min(indata.shape[0], available_samples)
+                audio_block = indata[:samples_to_append].copy()
+                self._audio_data.append(audio_block)
+
+                reached_limit = (
+                    max_samples is not None
+                    and samples_recorded + samples_to_append >= max_samples
+                )
+                if reached_limit:
+                    self._recording = False
+
+            if not self._recording and not getattr(
+                self, "_recording_limit_reached", False
+            ):
+                self._recording_limit_reached = True
+                recording_limit_callback = getattr(self, "_on_recording_limit", None)
+                recording_limit_duration = self.max_recording_duration
+
             block_callback = self._block_callback
             error_handler = self._on_block_callback_error
 
@@ -149,6 +207,12 @@ class AudioRecorder:
                 print(f"⚠️ Audio block callback failed; disabling live callback: {exc}")
                 if should_report and error_handler is not None:
                     error_handler(exc)
+
+        if (
+            recording_limit_callback is not None
+            and recording_limit_duration is not None
+        ):
+            recording_limit_callback(recording_limit_duration)
 
     def get_recording_duration(self) -> float:
         """Get current recording duration in seconds."""
