@@ -4,6 +4,7 @@ Orchestrates audio recording, transcription, and clipboard operations.
 """
 
 import sys
+import threading
 import time
 from typing import Optional
 
@@ -51,6 +52,7 @@ class MurmurApp:
         """
         self.config = get_config()
         self.recorder = AudioRecorder()
+        self._set_recording_limit_callback()
         self.transcriber = Transcriber()
         self.segmenter: Optional[WebRTCVADSegmenter] = None
         self.live_segmenter: Optional[LiveVADSegmentationWorker] = None
@@ -68,6 +70,8 @@ class MurmurApp:
         self._live_vad_disabled_reason: Optional[str] = None
         self._live_pipeline_degraded = False
         self._live_pipeline_degraded_reason: Optional[str] = None
+        self._recording_limit_stop_started = False
+        self._recording_limit_stop_lock = threading.Lock()
 
         if preload_model:
             print("Preloading Whisper model...")
@@ -80,6 +84,12 @@ class MurmurApp:
         # Ensure autostart matches config
         if self.config.start_with_windows:
             set_autostart(True)
+
+    def _set_recording_limit_callback(self) -> None:
+        """Register app handling for recorder duration-limit events."""
+        setter = getattr(self.recorder, "set_recording_limit_callback", None)
+        if setter is not None:
+            setter(self._on_recording_limit_reached)
 
     def start(self) -> None:
         """Start the application and begin listening for hotkeys."""
@@ -211,6 +221,7 @@ class MurmurApp:
         print("🎤 Recording started...")
         self._live_pipeline_degraded = False
         self._live_pipeline_degraded_reason = None
+        self._recording_limit_stop_started = False
         self.notifications.notify_recording_started()
         self.tray.set_status("Recording...")
 
@@ -262,6 +273,30 @@ class MurmurApp:
             print("⚠️ No audio data captured.")
             self.tray.set_status("Ready")
             self.hotkey_manager.set_idle()
+
+    def _on_recording_limit_reached(self, duration_seconds: float) -> None:
+        """Handle the recorder reaching max duration from the audio callback."""
+        with self._recording_limit_stop_lock:
+            if self._recording_limit_stop_started:
+                return
+            self._recording_limit_stop_started = True
+
+        thread = threading.Thread(
+            target=self._handle_recording_limit_reached,
+            args=(duration_seconds,),
+            daemon=True,
+        )
+        thread.start()
+
+    def _handle_recording_limit_reached(self, duration_seconds: float) -> None:
+        """Notify the user and finalize a recording stopped by the duration cap."""
+        print(
+            "Maximum recording duration reached "
+            f"({duration_seconds:g}s). Finalizing recording."
+        )
+        self.notifications.notify_recording_limit_reached(duration_seconds)
+        self.hotkey_manager.set_processing()
+        self._on_recording_stop()
 
     def _finalize_recording(self, audio_data: AudioData) -> None:
         """Finalize stop-time output from the live transcript, or fall back offline."""
