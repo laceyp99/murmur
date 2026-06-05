@@ -615,8 +615,13 @@ def test_complete_transcription_stdout_omits_transcript_on_success(
     monkeypatch.setattr(
         main_module, "copy_to_clipboard", lambda text: copied_text.append(text) or True
     )
+    monkeypatch.setattr(main_module.time, "perf_counter", lambda: 2.2)
 
-    app._complete_transcription(make_audio_data(), "private dictated text", elapsed=1.2)
+    app._complete_transcription(
+        make_audio_data(),
+        "private dictated text",
+        finalization_started_at=1.0,
+    )
 
     stdout = capsys.readouterr().out
     assert "Transcribed in 1.2s; copied to clipboard." in stdout
@@ -636,7 +641,11 @@ def test_complete_transcription_stdout_omits_transcript_on_clipboard_failure(
 
     monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: False)
 
-    app._complete_transcription(make_audio_data(), "private dictated text", elapsed=1.2)
+    app._complete_transcription(
+        make_audio_data(),
+        "private dictated text",
+        finalization_started_at=1.0,
+    )
 
     stdout = capsys.readouterr().out
     assert "Transcribed successfully, but failed to copy to clipboard." in stdout
@@ -657,7 +666,7 @@ def test_process_audio_error_stdout_omits_exception_text(monkeypatch, capsys):
 
     monkeypatch.setattr(app, "_transcribe_audio", fail_transcription)
 
-    app._process_audio(make_audio_data())
+    app._process_audio(make_audio_data(), finalization_started_at=10.0)
 
     stdout = capsys.readouterr().out
     assert "Transcription failed." in stdout
@@ -675,12 +684,16 @@ def test_finalize_recording_falls_back_to_offline_processing_when_live_text_miss
     audio_data = make_audio_data()
 
     monkeypatch.setattr(
-        app, "_process_audio", lambda provided_audio: called.append(provided_audio)
+        app,
+        "_process_audio",
+        lambda provided_audio, *, finalization_started_at: called.append(
+            (provided_audio, finalization_started_at)
+        ),
     )
 
-    app._finalize_recording(audio_data)
+    app._finalize_recording(audio_data, finalization_started_at=10.0)
 
-    assert called == [audio_data]
+    assert called == [(audio_data, 10.0)]
 
 
 def test_finalize_recording_falls_back_to_offline_processing_when_live_pipeline_degraded(
@@ -698,12 +711,16 @@ def test_finalize_recording_falls_back_to_offline_processing_when_live_pipeline_
     called = []
     audio_data = make_audio_data()
     monkeypatch.setattr(
-        app, "_process_audio", lambda provided_audio: called.append(provided_audio)
+        app,
+        "_process_audio",
+        lambda provided_audio, *, finalization_started_at: called.append(
+            (provided_audio, finalization_started_at)
+        ),
     )
 
-    app._finalize_recording(audio_data)
+    app._finalize_recording(audio_data, finalization_started_at=10.0)
 
-    assert called == [audio_data]
+    assert called == [(audio_data, 10.0)]
     assert transcriber.finalize_calls == []
 
 
