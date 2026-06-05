@@ -416,7 +416,7 @@ class MurmurApp:
 
         if copy_to_clipboard(text):
             runtime = time.perf_counter() - finalization_started_at
-            print(f"Transcribed in {runtime:.1f}s; copied to clipboard.")
+            print(f"Finalized in {runtime:.1f}s; copied to clipboard.")
             self.notifications.notify_transcription_complete(text)
             self.logger.log(audio_data, text, runtime)
             return

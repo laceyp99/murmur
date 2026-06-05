@@ -257,6 +257,10 @@ Each JSONL entry:
 {"timestamp": "2024-12-06T14:30:22", "audio_file": "20241206_143022_123456.wav", "transcription": "Your text", "duration": 3.5, "model": "small", "processing_time": 0.8}
 ```
 
+`duration` is the recorded audio length in seconds. `processing_time` is the
+finalization latency after recording stops, measured until the transcript is
+copied/logged.
+
 Privacy notes:
 
 - Raw WAV audio and transcript text are only stored after you opt in.

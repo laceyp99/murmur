@@ -624,7 +624,7 @@ def test_complete_transcription_stdout_omits_transcript_on_success(
     )
 
     stdout = capsys.readouterr().out
-    assert "Transcribed in 1.2s; copied to clipboard." in stdout
+    assert "Finalized in 1.2s; copied to clipboard." in stdout
     assert "private dictated text" not in stdout
     assert copied_text == ["private dictated text"]
     assert app.notifications.completed == ["private dictated text"]
