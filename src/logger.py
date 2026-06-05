@@ -58,7 +58,7 @@ class DataLogger:
         Args:
             audio_data: The recorded audio data
             transcription: The transcription text
-            processing_time: Time taken to transcribe in seconds
+            processing_time: Finalization latency after recording stops, in seconds
 
         Returns:
             TranscriptionLog entry if successful, None otherwise

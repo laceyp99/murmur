@@ -255,6 +255,7 @@ class MurmurApp:
         """Handle recording stop via hotkey."""
         print("⏹️ Recording stopped.")
         self.tray.set_status("Finalizing...")
+        finalization_started_at = time.perf_counter()
 
         audio_data = self.recorder.stop_recording()
         self._stop_live_segmentation()
@@ -268,7 +269,10 @@ class MurmurApp:
             self._was_media_playing = False
 
         if audio_data is not None:
-            self._finalize_recording(audio_data)
+            self._finalize_recording(
+                audio_data,
+                finalization_started_at=finalization_started_at,
+            )
         else:
             print("⚠️ No audio data captured.")
             self.tray.set_status("Ready")
@@ -298,38 +302,61 @@ class MurmurApp:
         self.hotkey_manager.set_processing()
         self._on_recording_stop()
 
-    def _finalize_recording(self, audio_data: AudioData) -> None:
+    def _finalize_recording(
+        self,
+        audio_data: AudioData,
+        *,
+        finalization_started_at: float,
+    ) -> None:
         """Finalize stop-time output from the live transcript, or fall back offline."""
         if self._live_pipeline_degraded:
             reason = (
                 self._live_pipeline_degraded_reason or "Live transcription degraded"
             )
             print(f"⚠️ {reason}. Recomputing final transcript from the full recording.")
-            self._process_audio(audio_data)
+            self._process_audio(
+                audio_data,
+                finalization_started_at=finalization_started_at,
+            )
             return
 
         live_text = self._get_live_transcript_text()
         if not live_text:
-            self._process_audio(audio_data)
+            self._process_audio(
+                audio_data,
+                finalization_started_at=finalization_started_at,
+            )
             return
 
         self.hotkey_manager.set_processing()
         try:
-            self._complete_transcription(audio_data, live_text)
+            self._complete_transcription(
+                audio_data,
+                live_text,
+                finalization_started_at=finalization_started_at,
+            )
         finally:
             self.tray.set_status("Ready")
             self.hotkey_manager.set_idle()
 
-    def _process_audio(self, audio_data: AudioData) -> None:
+    def _process_audio(
+        self,
+        audio_data: AudioData,
+        *,
+        finalization_started_at: float,
+    ) -> None:
         """Process recorded audio through transcription."""
         self.hotkey_manager.set_processing()
 
         print(f"📝 Processing {audio_data.duration:.1f}s of audio...")
 
         try:
-            start_time = time.time()
             text = self._transcribe_audio(audio_data)
-            self._complete_transcription(audio_data, text, time.time() - start_time)
+            self._complete_transcription(
+                audio_data,
+                text,
+                finalization_started_at=finalization_started_at,
+            )
 
         except Exception:
             print("Transcription failed.")
@@ -378,7 +405,8 @@ class MurmurApp:
         self,
         audio_data: AudioData,
         text: str,
-        elapsed: Optional[float] = None,
+        *,
+        finalization_started_at: float,
     ) -> None:
         """Finish clipboard, notification, and logging for a completed transcript."""
         if not text:
@@ -386,9 +414,9 @@ class MurmurApp:
             self.notifications.notify("Murmur", "No speech detected.")
             return
 
-        runtime = 0.0 if elapsed is None else elapsed
         if copy_to_clipboard(text):
-            print(f"Transcribed in {runtime:.1f}s; copied to clipboard.")
+            runtime = time.perf_counter() - finalization_started_at
+            print(f"Finalized in {runtime:.1f}s; copied to clipboard.")
             self.notifications.notify_transcription_complete(text)
             self.logger.log(audio_data, text, runtime)
             return
