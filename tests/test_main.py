@@ -93,6 +93,7 @@ class FakeRecorder:
         self.sample_rate = 16000
         self.block_callback = None
         self.block_callback_error_handler = None
+        self.recording_limit_callback = None
 
     def stop_recording(self):
         self.stop_calls += 1
@@ -103,6 +104,9 @@ class FakeRecorder:
 
     def set_block_callback_error_handler(self, handler):
         self.block_callback_error_handler = handler
+
+    def set_recording_limit_callback(self, callback):
+        self.recording_limit_callback = callback
 
 
 class FakeTray:
@@ -118,6 +122,7 @@ class FakeNotifications:
         self.completed = []
         self.messages = []
         self.errors = []
+        self.recording_limits = []
 
     def notify_transcription_complete(self, text):
         self.completed.append(text)
@@ -127,6 +132,9 @@ class FakeNotifications:
 
     def notify_error(self, message):
         self.errors.append(message)
+
+    def notify_recording_limit_reached(self, duration_seconds):
+        self.recording_limits.append(duration_seconds)
 
 
 class FakeLogger:
@@ -353,6 +361,7 @@ def test_on_live_segment_ready_queues_segment_for_background_transcription():
 
 def test_init_preloads_whisper_and_ollama_when_enabled(monkeypatch):
     fake_transcriber = FakeTranscriber()
+    fake_recorder = FakeRecorder(audio_data=None)
     fake_config = SimpleNamespace(
         ollama_enabled=True,
         ollama_preload_model=True,
@@ -360,7 +369,7 @@ def test_init_preloads_whisper_and_ollama_when_enabled(monkeypatch):
     )
 
     monkeypatch.setattr(main_module, "get_config", lambda: fake_config)
-    monkeypatch.setattr(main_module, "AudioRecorder", lambda: SimpleNamespace())
+    monkeypatch.setattr(main_module, "AudioRecorder", lambda: fake_recorder)
     monkeypatch.setattr(main_module, "Transcriber", lambda: fake_transcriber)
     monkeypatch.setattr(main_module, "HotkeyManager", lambda: SimpleNamespace())
     monkeypatch.setattr(
@@ -372,10 +381,15 @@ def test_init_preloads_whisper_and_ollama_when_enabled(monkeypatch):
     )
     monkeypatch.setattr(main_module, "get_media_controller", lambda: SimpleNamespace())
 
-    main_module.MurmurApp(preload_model=True)
+    app = main_module.MurmurApp(preload_model=True)
 
     assert fake_transcriber.load_model_calls == 1
     assert fake_transcriber.warm_llm_post_processor_calls == 1
+    assert fake_recorder.recording_limit_callback.__self__ is app
+    assert (
+        fake_recorder.recording_limit_callback.__func__
+        is main_module.MurmurApp._on_recording_limit_reached
+    )
 
 
 def test_init_skips_ollama_warmup_when_disabled(monkeypatch):
@@ -669,6 +683,21 @@ def test_on_live_block_callback_error_marks_pipeline_degraded_once():
         == "Live audio callback failed: queue submit failed"
     )
     assert app.notifications.messages == []
+
+
+def test_recording_limit_handler_notifies_and_uses_stop_flow():
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.notifications = FakeNotifications()
+    app.hotkey_manager = FakeHotkeyManager()
+    stop_calls = []
+    app._on_recording_stop = lambda: stop_calls.append(True)
+
+    app._handle_recording_limit_reached(300)
+
+    assert app.notifications.recording_limits == [300]
+    assert app.hotkey_manager.processing_calls == 1
+    assert stop_calls == [True]
 
 
 def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch):

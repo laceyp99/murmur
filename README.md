@@ -89,7 +89,7 @@ Or double-click `run_background.vbs`.
 1. **System Tray**: Look for the murmur icon in your system tray (bottom right). Right-click it to access **Settings** or **Exit**.
 2. **Press `Ctrl+Shift+Space`** to start recording
 3. **Speak** your text
-4. **Press `Ctrl+Shift+Space`** again to stop recording
+4. **Press `Ctrl+Shift+Space`** again to stop recording, or let murmur auto-stop at `max_recording_duration`
 5. **Wait briefly while murmur finalizes** any last live segment and document cleanup
 6. **Paste** with `Ctrl+V` anywhere
 
@@ -100,6 +100,7 @@ Or double-click `run_background.vbs`.
 - Completed speech segments are transcribed serially in the background while you are still recording.
 - If the live VAD or live transcription path fails mid-recording, murmur logs the failure and falls back to finalizing from the full recorded audio when you stop.
 - When you stop, murmur flushes any pending speech, drains the live transcription queue, applies one final document cleanup pass, and copies the final text to the clipboard.
+- If a recording reaches `max_recording_duration`, murmur stops capture automatically, shows a notification, then finalizes the captured audio.
 
 ### Final cleanup with Ollama
 
@@ -181,7 +182,7 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
 | `vad_aggressiveness` | WebRTC VAD aggressiveness level | `1` |
 | `vad_padding_ms` | Speech end padding in ms; start padding is derived asymmetrically from this value | `220` |
 | `vad_silence_duration_ms` | Silence duration in ms required to close a speech segment | `400` |
-| `max_recording_duration` | Maximum recording length in seconds | `300` |
+| `max_recording_duration` | Maximum recording length in seconds before murmur auto-stops, notifies, and finalizes | `300` |
 | `enable_logging` | Save raw audio/transcriptions for training after explicit opt-in | `false` |
 | `enable_notifications` | Show Windows toast notifications | `true` |
 | `start_with_windows` | Automatically start on login | `true` |
