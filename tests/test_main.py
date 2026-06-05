@@ -574,6 +574,9 @@ def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeyp
     app.live_transcript_accumulator.add_chunk(
         SimpleNamespace(segment_id=0, text="hello world", latency_seconds=0.1)
     )
+    app.live_transcript_accumulator.add_chunk(
+        SimpleNamespace(segment_id=1, text="again", latency_seconds=99.0)
+    )
     app.tray = FakeTray()
     app.notifications = FakeNotifications()
     app.logger = FakeLogger()
@@ -583,16 +586,17 @@ def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeyp
     monkeypatch.setattr(
         main_module, "copy_to_clipboard", lambda text: copied_text.append(text) or True
     )
+    monkeypatch.setattr(main_module.time, "perf_counter", lambda: 11.25)
 
     audio_data = make_audio_data()
-    app._finalize_recording(audio_data)
+    app._finalize_recording(audio_data, finalization_started_at=10.0)
 
-    assert copied_text == ["FINAL:hello world"]
+    assert copied_text == ["FINAL:hello world again"]
     assert transcriber.audio_calls == []
     assert transcriber.segment_calls == []
-    assert transcriber.finalize_calls == ["hello world"]
-    assert app.notifications.completed == ["FINAL:hello world"]
-    assert app.logger.entries == [(audio_data, "FINAL:hello world", 0.0)]
+    assert transcriber.finalize_calls == ["hello world again"]
+    assert app.notifications.completed == ["FINAL:hello world again"]
+    assert app.logger.entries == [(audio_data, "FINAL:hello world again", 1.25)]
     assert app.tray.statuses == ["Ready"]
     assert app.hotkey_manager.processing_calls == 1
     assert app.hotkey_manager.idle_calls == 1
@@ -814,6 +818,10 @@ def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch
     monkeypatch.setattr(
         main_module, "copy_to_clipboard", lambda text: copied_text.append(text) or True
     )
+    perf_counter_values = iter([20.0, 20.75])
+    monkeypatch.setattr(
+        main_module.time, "perf_counter", lambda: next(perf_counter_values)
+    )
 
     app._on_recording_stop()
 
@@ -821,6 +829,7 @@ def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch
     assert segmentation_stops == [True]
     assert transcription_stops == [True]
     assert copied_text == ["FINAL:tail kept"]
+    assert app.logger.entries == [(audio_data, "FINAL:tail kept", 0.75)]
     assert app.media_controller.play_calls == 1
     assert app.hotkey_manager.processing_calls == 1
     assert app.hotkey_manager.idle_calls == 1
