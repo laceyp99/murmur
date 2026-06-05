@@ -169,7 +169,7 @@ class LiveTranscriptionWorker:
 
                 message = (
                     "Live transcription failed for "
-                    f"segment {segment.segment_id} after {attempt_count} attempts: {exc}"
+                    f"segment {segment.segment_id} after {attempt_count} attempts."
                 )
                 self._record_failure(message)
                 self._invoke_callback("on_segment_failed", segment, exc, attempt_count)
@@ -184,8 +184,7 @@ class LiveTranscriptionWorker:
 
         if last_error is not None:
             self._record_failure(
-                "Live transcription failed for "
-                f"segment {segment.segment_id}: {last_error}"
+                f"Live transcription failed for segment {segment.segment_id}."
             )
         return None
 
@@ -209,8 +208,8 @@ class LiveTranscriptionWorker:
 
         try:
             callback(*args)
-        except Exception as exc:
-            print(f"⚠️ Live transcription callback '{attr_name}' failed: {exc}")
+        except Exception:
+            print(f"Live transcription callback '{attr_name}' failed.")
 
     def is_degraded(self) -> bool:
         with self._state_lock:

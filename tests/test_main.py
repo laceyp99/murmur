@@ -433,6 +433,31 @@ def test_start_live_transcription_replaces_existing_worker():
     app._stop_live_transcription()
 
 
+def test_live_transcription_callback_stdout_omits_transcript_text(capsys):
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    chunk = main_module.TranscriptChunk(
+        segment_id=7,
+        text="private live chunk",
+        latency_seconds=0.42,
+    )
+
+    app._on_live_segment_transcribed(chunk)
+    app._on_live_chunk_appended(chunk, "private live chunk accumulated")
+    app._on_live_segment_failed(
+        SimpleNamespace(segment_id=7),
+        RuntimeError("private live chunk leaked in exception"),
+        2,
+    )
+
+    stdout = capsys.readouterr().out
+    assert "Live segment transcribed: id=7 latency=0.42s text_length=18" in stdout
+    assert "Live transcript appended: id=7 current_text_length=30" in stdout
+    assert "Live segment failed: id=7 attempts=2" in stdout
+    assert "private live chunk" not in stdout
+    assert "leaked in exception" not in stdout
+
+
 def test_start_recovers_from_invalid_configured_hotkey(monkeypatch):
     config = FakeStartupConfig("not-a-real-key")
     hotkey_manager = FakeStartupHotkeyManager(
@@ -573,6 +598,70 @@ def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeyp
     assert app.hotkey_manager.idle_calls == 1
 
 
+def test_complete_transcription_stdout_omits_transcript_on_success(
+    monkeypatch,
+    capsys,
+):
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.notifications = FakeNotifications()
+    app.logger = FakeLogger()
+
+    copied_text = []
+    monkeypatch.setattr(
+        main_module, "copy_to_clipboard", lambda text: copied_text.append(text) or True
+    )
+
+    app._complete_transcription(make_audio_data(), "private dictated text", elapsed=1.2)
+
+    stdout = capsys.readouterr().out
+    assert "Transcribed in 1.2s; copied to clipboard." in stdout
+    assert "private dictated text" not in stdout
+    assert copied_text == ["private dictated text"]
+    assert app.notifications.completed == ["private dictated text"]
+
+
+def test_complete_transcription_stdout_omits_transcript_on_clipboard_failure(
+    monkeypatch,
+    capsys,
+):
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.notifications = FakeNotifications()
+    app.logger = FakeLogger()
+
+    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: False)
+
+    app._complete_transcription(make_audio_data(), "private dictated text", elapsed=1.2)
+
+    stdout = capsys.readouterr().out
+    assert "Transcribed successfully, but failed to copy to clipboard." in stdout
+    assert "private dictated text" not in stdout
+    assert app.notifications.errors == ["Failed to copy to clipboard"]
+    assert app.logger.entries == []
+
+
+def test_process_audio_error_stdout_omits_exception_text(monkeypatch, capsys):
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.notifications = FakeNotifications()
+    app.tray = FakeTray()
+    app.hotkey_manager = FakeHotkeyManager()
+
+    def fail_transcription(audio_data):
+        raise RuntimeError("private dictated text leaked in exception")
+
+    monkeypatch.setattr(app, "_transcribe_audio", fail_transcription)
+
+    app._process_audio(make_audio_data())
+
+    stdout = capsys.readouterr().out
+    assert "Transcription failed." in stdout
+    assert "private dictated text" not in stdout
+    assert "leaked in exception" not in stdout
+    assert app.notifications.errors == ["Transcription failed."]
+
+
 def test_finalize_recording_falls_back_to_offline_processing_when_live_text_missing(
     monkeypatch,
 ):
@@ -678,10 +767,7 @@ def test_on_live_block_callback_error_marks_pipeline_degraded_once():
     app._on_live_block_callback_error(RuntimeError("later failure"))
 
     assert app._live_pipeline_degraded is True
-    assert (
-        app._live_pipeline_degraded_reason
-        == "Live audio callback failed: queue submit failed"
-    )
+    assert app._live_pipeline_degraded_reason == "Live audio callback failed."
     assert app.notifications.messages == []
 
 

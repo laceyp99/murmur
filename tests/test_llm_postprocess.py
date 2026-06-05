@@ -165,6 +165,26 @@ def test_llm_post_processor_returns_original_text_on_failure():
     assert processor.process("keep this text") == "keep this text"
 
 
+def test_llm_post_processor_failure_output_is_content_safe(capsys):
+    class FailingClient:
+        def chat(self, *args, **kwargs):
+            raise RuntimeError("private dictated text leaked in exception")
+
+    processor = LLMPostProcessor(
+        client=OllamaClient(
+            endpoint="http://localhost:11434",
+            model_name=MODEL_NAME,
+            client=FailingClient(),
+        )
+    )
+
+    assert processor.process("private dictated text") == "private dictated text"
+    stdout = capsys.readouterr().out
+    assert "Ollama post-processing failed" in stdout
+    assert "private dictated text" not in stdout
+    assert "leaked in exception" not in stdout
+
+
 def test_llm_post_processor_normalizes_wrapped_output_before_accepting():
     fake_client = FakeOllamaPackageClient({"response": "ignored"})
     fake_client.chat_response = {

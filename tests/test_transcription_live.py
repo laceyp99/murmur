@@ -87,7 +87,9 @@ def test_live_transcription_worker_skips_empty_transcript_appends():
     assert appended_text == [(1, "next")]
 
 
-def test_live_transcription_worker_retries_failed_segment_and_continues_processing():
+def test_live_transcription_worker_retries_failed_segment_and_continues_processing(
+    capsys,
+):
     failed_segments = []
     degraded_messages = []
     accumulator = TranscriptAccumulator()
@@ -114,17 +116,22 @@ def test_live_transcription_worker_retries_failed_segment_and_continues_processi
     assert worker.is_degraded() is True
     assert worker.failure_count == 1
     assert worker.get_last_error() == (
-        "Live transcription failed for segment 0 after 2 attempts: boom again"
+        "Live transcription failed for segment 0 after 2 attempts."
     )
     assert accumulator.get_text() == "next"
     assert worker.transcriber.calls == [0, 0, 1]
     assert failed_segments == [(0, "boom again", 2)]
     assert degraded_messages == [
-        "Live transcription failed for segment 0 after 2 attempts: boom again"
+        "Live transcription failed for segment 0 after 2 attempts."
     ]
+    stdout = capsys.readouterr().out
+    assert "boom" not in stdout
+    assert "boom again" not in stdout
 
 
-def test_live_transcription_worker_recovers_from_temporary_chunk_callback_failure():
+def test_live_transcription_worker_recovers_from_temporary_chunk_callback_failure(
+    capsys,
+):
     appended_chunk_ids = []
     appended_text = []
     accumulator = TranscriptAccumulator()
@@ -150,3 +157,5 @@ def test_live_transcription_worker_recovers_from_temporary_chunk_callback_failur
     assert accumulator.get_text() == "first second"
     assert appended_chunk_ids == [0, 1]
     assert appended_text == ["first second"]
+    stdout = capsys.readouterr().out
+    assert "chunk callback broke" not in stdout

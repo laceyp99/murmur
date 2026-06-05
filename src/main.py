@@ -331,9 +331,9 @@ class MurmurApp:
             text = self._transcribe_audio(audio_data)
             self._complete_transcription(audio_data, text, time.time() - start_time)
 
-        except Exception as e:
-            print(f"❌ Transcription error: {e}")
-            self.notifications.notify_error(f"Transcription failed: {e}")
+        except Exception:
+            print("Transcription failed.")
+            self.notifications.notify_error("Transcription failed.")
 
         finally:
             self.tray.set_status("Ready")
@@ -388,12 +388,12 @@ class MurmurApp:
 
         runtime = 0.0 if elapsed is None else elapsed
         if copy_to_clipboard(text):
-            print(f'✅ Transcribed in {runtime:.1f}s: "{text}"')
+            print(f"Transcribed in {runtime:.1f}s; copied to clipboard.")
             self.notifications.notify_transcription_complete(text)
             self.logger.log(audio_data, text, runtime)
             return
 
-        print(f'⚠️ Transcribed but failed to copy: "{text}"')
+        print("Transcribed successfully, but failed to copy to clipboard.")
         self.notifications.notify_error("Failed to copy to clipboard")
 
     def _get_segmenter(self, sample_rate: int) -> Optional[WebRTCVADSegmenter]:
@@ -521,7 +521,7 @@ class MurmurApp:
             "Live segment transcribed: "
             f"id={chunk.segment_id} "
             f"latency={chunk.latency_seconds:.2f}s "
-            f"text={chunk.text!r}"
+            f"text_length={len(chunk.text)}"
         )
 
     def _on_live_chunk_appended(
@@ -531,7 +531,7 @@ class MurmurApp:
         print(
             "Live transcript appended: "
             f"id={chunk.segment_id} "
-            f"current_text={current_text!r}"
+            f"current_text_length={len(current_text)}"
         )
 
     def _on_live_segment_failed(
@@ -541,12 +541,7 @@ class MurmurApp:
         attempt_count: int,
     ) -> None:
         """Emit debug logging when live transcription permanently fails for a segment."""
-        print(
-            "⚠️ Live segment failed: "
-            f"id={segment.segment_id} "
-            f"attempts={attempt_count} "
-            f"error={exc}"
-        )
+        print(f"Live segment failed: id={segment.segment_id} attempts={attempt_count}")
 
     def _on_live_pipeline_degraded(self, message: str) -> None:
         """Mark the live pipeline degraded and record it once per recording."""
@@ -559,8 +554,8 @@ class MurmurApp:
 
     def _on_live_block_callback_error(self, exc: Exception) -> None:
         """Handle a recorder block callback failure during live segmentation."""
-        print(f"⚠️ Live audio callback failed: {exc}")
-        self._on_live_pipeline_degraded(f"Live audio callback failed: {exc}")
+        print("Live audio callback failed.")
+        self._on_live_pipeline_degraded("Live audio callback failed.")
 
     def _on_state_change(self, state: HotkeyState) -> None:
         """Handle state changes."""

@@ -260,6 +260,7 @@ Each JSONL entry:
 Privacy notes:
 
 - Raw WAV audio and transcript text are only stored after you opt in.
+- Normal console status output does not include transcript text.
 - You can disable logging at any time from Settings.
 - You can delete existing logged data from Settings with **Delete Logged Data**.
 - Ollama defaults to `http://localhost:11434`; if you point it at a remote endpoint, your transcripts leave the local machine for that final cleanup step.
