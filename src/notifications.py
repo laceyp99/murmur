@@ -58,9 +58,13 @@ class NotificationManager:
                 else:
                     self._show_toast(title, message, duration)
             except Exception:
-                print(f"[{title}] {message}")
+                self._print_fallback()
         else:
-            print(f"[{title}] {message}")
+            self._print_fallback()
+
+    def _print_fallback(self) -> None:
+        """Emit content-safe console fallback status."""
+        print("Notification unavailable; message suppressed.")
 
     def _show_toast(self, title: str, message: str, duration: int) -> None:
         """Show a toast notification."""
@@ -83,8 +87,7 @@ class NotificationManager:
 
     def notify_transcription_complete(self, text: str) -> None:
         """Notify that transcription is complete."""
-        preview = text[:50] + "..." if len(text) > 50 else text
-        self.notify("murmur", f"Copied: {preview}")
+        self.notify("murmur", "Transcription copied to clipboard.")
 
     def notify_error(self, error: str) -> None:
         """Notify about an error."""

@@ -204,7 +204,7 @@ class AudioRecorder:
                         should_report = True
                     self._block_callback = None
 
-                print(f"⚠️ Audio block callback failed; disabling live callback: {exc}")
+                print("Audio block callback failed; disabling live callback.")
                 if should_report and error_handler is not None:
                     error_handler(exc)
 

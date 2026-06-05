@@ -331,9 +331,9 @@ class MurmurApp:
             text = self._transcribe_audio(audio_data)
             self._complete_transcription(audio_data, text, time.time() - start_time)
 
-        except Exception as e:
-            print(f"❌ Transcription error: {e}")
-            self.notifications.notify_error(f"Transcription failed: {e}")
+        except Exception:
+            print("Transcription failed.")
+            self.notifications.notify_error("Transcription failed.")
 
         finally:
             self.tray.set_status("Ready")
@@ -558,8 +558,8 @@ class MurmurApp:
 
     def _on_live_block_callback_error(self, exc: Exception) -> None:
         """Handle a recorder block callback failure during live segmentation."""
-        print(f"⚠️ Live audio callback failed: {exc}")
-        self._on_live_pipeline_degraded(f"Live audio callback failed: {exc}")
+        print("Live audio callback failed.")
+        self._on_live_pipeline_degraded("Live audio callback failed.")
 
     def _on_state_change(self, state: HotkeyState) -> None:
         """Handle state changes."""

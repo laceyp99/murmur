@@ -105,8 +105,8 @@ class Transcriber:
 
         try:
             return processor.process(cleaned_text)
-        except Exception as exc:
-            print(f"⚠️ Ollama post-processing failed: {exc}")
+        except Exception:
+            print("Ollama post-processing failed; using local transcript cleanup.")
             return cleaned_text
 
     def _get_llm_post_processor(self) -> Optional[LLMPostProcessor]:

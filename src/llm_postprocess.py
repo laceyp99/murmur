@@ -185,8 +185,8 @@ class LLMPostProcessor:
                 max_tokens=min(max(len(cleaned_input.split()) * 3, 64), 1024),
                 temperature=0.0,
             )
-        except Exception as exc:
-            print(f"⚠️ Ollama post-processing failed: {exc}")
+        except Exception:
+            print("Ollama post-processing failed; using original transcript.")
             return cleaned_input
 
         elapsed = time.time() - start_time

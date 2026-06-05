@@ -32,8 +32,8 @@ class ClipboardManager:
             pyperclip.copy(text)
             self._last_copied = text
             return True
-        except Exception as e:
-            print(f"Failed to copy to clipboard: {e}")
+        except Exception:
+            print("Failed to copy to clipboard.")
             return False
 
     def get_last_copied(self) -> Optional[str]:

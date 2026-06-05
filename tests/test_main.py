@@ -678,10 +678,7 @@ def test_on_live_block_callback_error_marks_pipeline_degraded_once():
     app._on_live_block_callback_error(RuntimeError("later failure"))
 
     assert app._live_pipeline_degraded is True
-    assert (
-        app._live_pipeline_degraded_reason
-        == "Live audio callback failed: queue submit failed"
-    )
+    assert app._live_pipeline_degraded_reason == "Live audio callback failed."
     assert app.notifications.messages == []
 
 
