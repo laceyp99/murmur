@@ -541,11 +541,7 @@ class MurmurApp:
         attempt_count: int,
     ) -> None:
         """Emit debug logging when live transcription permanently fails for a segment."""
-        print(
-            "Live segment failed: "
-            f"id={segment.segment_id} "
-            f"attempts={attempt_count}"
-        )
+        print(f"Live segment failed: id={segment.segment_id} attempts={attempt_count}")
 
     def _on_live_pipeline_degraded(self, message: str) -> None:
         """Mark the live pipeline degraded and record it once per recording."""

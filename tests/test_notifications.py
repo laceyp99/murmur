@@ -35,3 +35,24 @@ def test_transcription_complete_notification_has_no_transcript_preview(
     stdout = capsys.readouterr().out
     assert "Notification unavailable; message suppressed." in stdout
     assert "private dictated text" not in stdout
+
+
+def test_toast_failure_stdout_suppresses_transcript_preview(monkeypatch, capsys):
+    class FailingToaster:
+        def show_toast(self, title, message, duration, threaded):
+            raise RuntimeError("private dictated text leaked in toast failure")
+
+    monkeypatch.setattr(notifications_module, "TOAST_AVAILABLE", True)
+    monkeypatch.setattr(notifications_module, "ToastNotifier", lambda: FailingToaster())
+    monkeypatch.setattr(
+        notifications_module,
+        "get_config",
+        lambda: SimpleNamespace(enable_notifications=True),
+    )
+    manager = notifications_module.NotificationManager()
+
+    manager.notify("murmur", "private dictated text", threaded=False)
+
+    stdout = capsys.readouterr().out
+    assert "private dictated text" not in stdout
+    assert "leaked in toast failure" not in stdout
