@@ -43,7 +43,12 @@ def test_toast_failure_stdout_suppresses_transcript_preview(monkeypatch, capsys)
             raise RuntimeError("private dictated text leaked in toast failure")
 
     monkeypatch.setattr(notifications_module, "TOAST_AVAILABLE", True)
-    monkeypatch.setattr(notifications_module, "ToastNotifier", lambda: FailingToaster())
+    monkeypatch.setattr(
+        notifications_module,
+        "ToastNotifier",
+        lambda: FailingToaster(),
+        raising=False,
+    )
     monkeypatch.setattr(
         notifications_module,
         "get_config",
