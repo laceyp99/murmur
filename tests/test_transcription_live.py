@@ -41,6 +41,36 @@ def test_transcript_accumulator_returns_text_in_segment_order():
     assert accumulator.get_text() == "first second third"
 
 
+def test_transcript_accumulator_summarizes_contributing_chunk_latency():
+    accumulator = TranscriptAccumulator()
+
+    accumulator.add_chunk(
+        SimpleNamespace(segment_id=2, text="third", latency_seconds=0.6)
+    )
+    accumulator.add_chunk(
+        SimpleNamespace(segment_id=0, text="first", latency_seconds=0.1)
+    )
+    accumulator.add_chunk(SimpleNamespace(segment_id=1, text="", latency_seconds=99.0))
+
+    metrics = accumulator.get_metrics()
+
+    assert metrics.segment_count == 2
+    assert metrics.latency_avg_seconds == 0.35
+    assert metrics.latency_max_seconds == 0.6
+
+
+def test_transcript_accumulator_returns_empty_metrics_without_contributing_chunks():
+    accumulator = TranscriptAccumulator()
+
+    accumulator.add_chunk(SimpleNamespace(segment_id=0, text="", latency_seconds=99.0))
+
+    metrics = accumulator.get_metrics()
+
+    assert metrics.segment_count == 0
+    assert metrics.latency_avg_seconds is None
+    assert metrics.latency_max_seconds is None
+
+
 def test_live_transcription_worker_processes_segments_serially_and_appends_in_order():
     queued_ids = []
     transcribed_ids = []

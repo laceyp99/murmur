@@ -141,8 +141,8 @@ class FakeLogger:
     def __init__(self):
         self.entries = []
 
-    def log(self, audio_data, text, elapsed):
-        self.entries.append((audio_data, text, elapsed))
+    def log(self, audio_data, text, elapsed, live_segment_metrics=None):
+        self.entries.append((audio_data, text, elapsed, live_segment_metrics))
 
     def is_enabled(self):
         return False
@@ -596,7 +596,13 @@ def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeyp
     assert transcriber.segment_calls == []
     assert transcriber.finalize_calls == ["hello world again"]
     assert app.notifications.completed == ["FINAL:hello world again"]
-    assert app.logger.entries == [(audio_data, "FINAL:hello world again", 1.25)]
+    [(logged_audio, logged_text, elapsed, live_segment_metrics)] = app.logger.entries
+    assert logged_audio is audio_data
+    assert logged_text == "FINAL:hello world again"
+    assert elapsed == 1.25
+    assert live_segment_metrics.segment_count == 2
+    assert live_segment_metrics.latency_avg_seconds == 49.55
+    assert live_segment_metrics.latency_max_seconds == 99.0
     assert app.tray.statuses == ["Ready"]
     assert app.hotkey_manager.processing_calls == 1
     assert app.hotkey_manager.idle_calls == 1
@@ -621,13 +627,43 @@ def test_complete_transcription_stdout_omits_transcript_on_success(
         make_audio_data(),
         "private dictated text",
         finalization_started_at=1.0,
+        live_segment_metrics=main_module.LiveSegmentMetrics.empty(),
     )
 
     stdout = capsys.readouterr().out
     assert "Finalized in 1.2s; copied to clipboard." in stdout
+    assert "Live segments: count=0 avg_latency=n/a max_latency=n/a" in stdout
     assert "private dictated text" not in stdout
     assert copied_text == ["private dictated text"]
     assert app.notifications.completed == ["private dictated text"]
+
+
+def test_process_audio_logs_empty_live_segment_metrics_for_offline_fallback(
+    monkeypatch,
+    capsys,
+):
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.notifications = FakeNotifications()
+    app.logger = FakeLogger()
+    app.tray = FakeTray()
+    app.hotkey_manager = FakeHotkeyManager()
+
+    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: True)
+    monkeypatch.setattr(main_module.time, "perf_counter", lambda: 11.5)
+
+    audio_data = make_audio_data()
+    app._process_audio(audio_data, finalization_started_at=10.0)
+
+    stdout = capsys.readouterr().out
+    assert "Live segments: count=0 avg_latency=n/a max_latency=n/a" in stdout
+    [(logged_audio, logged_text, elapsed, live_segment_metrics)] = app.logger.entries
+    assert logged_audio is audio_data
+    assert logged_text == "Fallback text."
+    assert elapsed == 1.5
+    assert live_segment_metrics.segment_count == 0
+    assert live_segment_metrics.latency_avg_seconds is None
+    assert live_segment_metrics.latency_max_seconds is None
 
 
 def test_complete_transcription_stdout_omits_transcript_on_clipboard_failure(
@@ -645,6 +681,7 @@ def test_complete_transcription_stdout_omits_transcript_on_clipboard_failure(
         make_audio_data(),
         "private dictated text",
         finalization_started_at=1.0,
+        live_segment_metrics=main_module.LiveSegmentMetrics.empty(),
     )
 
     stdout = capsys.readouterr().out
@@ -846,7 +883,13 @@ def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch
     assert segmentation_stops == [True]
     assert transcription_stops == [True]
     assert copied_text == ["FINAL:tail kept"]
-    assert app.logger.entries == [(audio_data, "FINAL:tail kept", 0.75)]
+    [(logged_audio, logged_text, elapsed, live_segment_metrics)] = app.logger.entries
+    assert logged_audio is audio_data
+    assert logged_text == "FINAL:tail kept"
+    assert elapsed == 0.75
+    assert live_segment_metrics.segment_count == 1
+    assert live_segment_metrics.latency_avg_seconds == 0.1
+    assert live_segment_metrics.latency_max_seconds == 0.1
     assert app.media_controller.play_calls == 1
     assert app.hotkey_manager.processing_calls == 1
     assert app.hotkey_manager.idle_calls == 1

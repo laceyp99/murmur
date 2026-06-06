@@ -254,12 +254,16 @@ training_data/
 
 Each JSONL entry:
 ```json
-{"timestamp": "2024-12-06T14:30:22", "audio_file": "20241206_143022_123456.wav", "transcription": "Your text", "duration": 3.5, "model": "small", "processing_time": 0.8}
+{"timestamp": "2024-12-06T14:30:22", "audio_file": "20241206_143022_123456.wav", "transcription": "Your text", "duration": 3.5, "model": "small", "processing_time": 0.8, "live_segment_count": 2, "live_segment_latency_avg_seconds": 0.34, "live_segment_latency_max_seconds": 0.51}
 ```
 
 `duration` is the recorded audio length in seconds. `processing_time` is the
 finalization latency after recording stops, measured until the transcript is
-copied/logged.
+copied/logged. `live_segment_count` is the number of live transcript chunks that
+contributed text to the final transcript. `live_segment_latency_avg_seconds` and
+`live_segment_latency_max_seconds` are live segment transcription runtimes, not
+queue time or finalization time. When no live chunks contributed text, the count
+is `0` and the latency fields are `null`.
 
 Privacy notes:
 
