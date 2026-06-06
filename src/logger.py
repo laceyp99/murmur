@@ -14,6 +14,7 @@ from dataclasses import dataclass, asdict
 
 from .config import get_config, get_training_data_dir
 from .audio import AudioData
+from .transcription_live import LiveSegmentMetrics
 
 
 @dataclass
@@ -26,6 +27,9 @@ class TranscriptionLog:
     duration: float
     model: str
     processing_time: float
+    live_segment_count: int
+    live_segment_latency_avg_seconds: Optional[float]
+    live_segment_latency_max_seconds: Optional[float]
 
 
 class DataLogger:
@@ -50,7 +54,11 @@ class DataLogger:
         self._enabled = self.config.enable_logging
 
     def log(
-        self, audio_data: AudioData, transcription: str, processing_time: float
+        self,
+        audio_data: AudioData,
+        transcription: str,
+        processing_time: float,
+        live_segment_metrics: Optional[LiveSegmentMetrics] = None,
     ) -> Optional[TranscriptionLog]:
         """
         Log an audio recording and its transcription.
@@ -59,6 +67,7 @@ class DataLogger:
             audio_data: The recorded audio data
             transcription: The transcription text
             processing_time: Finalization latency after recording stops, in seconds
+            live_segment_metrics: Runtime metrics for live chunks that contributed text
 
         Returns:
             TranscriptionLog entry if successful, None otherwise
@@ -68,6 +77,9 @@ class DataLogger:
 
         if not transcription.strip():
             return None
+
+        if live_segment_metrics is None:
+            live_segment_metrics = LiveSegmentMetrics.empty()
 
         try:
             self.audio_dir.mkdir(parents=True, exist_ok=True)
@@ -88,6 +100,13 @@ class DataLogger:
                 duration=audio_data.duration,
                 model=self.config.get("model", "small"),
                 processing_time=processing_time,
+                live_segment_count=live_segment_metrics.segment_count,
+                live_segment_latency_avg_seconds=(
+                    live_segment_metrics.latency_avg_seconds
+                ),
+                live_segment_latency_max_seconds=(
+                    live_segment_metrics.latency_max_seconds
+                ),
             )
 
             # Append to JSONL file

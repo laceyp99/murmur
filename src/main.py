@@ -12,6 +12,7 @@ from .config import ConfigError, DEFAULT_CONFIG, get_config
 from .audio import AudioRecorder, AudioData
 from .transcription import Transcriber
 from .transcription_live import (
+    LiveSegmentMetrics,
     LiveTranscriptionWorker,
     TranscriptAccumulator,
     TranscriptChunk,
@@ -334,6 +335,7 @@ class MurmurApp:
                 audio_data,
                 live_text,
                 finalization_started_at=finalization_started_at,
+                live_segment_metrics=self._get_live_segment_metrics(),
             )
         finally:
             self.tray.set_status("Ready")
@@ -356,6 +358,7 @@ class MurmurApp:
                 audio_data,
                 text,
                 finalization_started_at=finalization_started_at,
+                live_segment_metrics=LiveSegmentMetrics.empty(),
             )
 
         except Exception:
@@ -401,12 +404,20 @@ class MurmurApp:
 
         return self.transcriber.finalize_text(raw_text)
 
+    def _get_live_segment_metrics(self) -> LiveSegmentMetrics:
+        """Return live segment metrics for chunks that contributed text."""
+        if self.live_transcript_accumulator is None:
+            return LiveSegmentMetrics.empty()
+
+        return self.live_transcript_accumulator.get_metrics()
+
     def _complete_transcription(
         self,
         audio_data: AudioData,
         text: str,
         *,
         finalization_started_at: float,
+        live_segment_metrics: LiveSegmentMetrics,
     ) -> None:
         """Finish clipboard, notification, and logging for a completed transcript."""
         if not text:
@@ -417,12 +428,37 @@ class MurmurApp:
         if copy_to_clipboard(text):
             runtime = time.perf_counter() - finalization_started_at
             print(f"Finalized in {runtime:.1f}s; copied to clipboard.")
+            self._print_live_segment_metrics(live_segment_metrics)
             self.notifications.notify_transcription_complete(text)
-            self.logger.log(audio_data, text, runtime)
+            self.logger.log(audio_data, text, runtime, live_segment_metrics)
             return
 
         print("Transcribed successfully, but failed to copy to clipboard.")
         self.notifications.notify_error("Failed to copy to clipboard")
+
+    def _print_live_segment_metrics(
+        self, live_segment_metrics: LiveSegmentMetrics
+    ) -> None:
+        """Emit content-safe live segment metric summary to stdout."""
+        avg_latency = self._format_optional_seconds(
+            live_segment_metrics.latency_avg_seconds
+        )
+        max_latency = self._format_optional_seconds(
+            live_segment_metrics.latency_max_seconds
+        )
+        print(
+            "Live segments: "
+            f"count={live_segment_metrics.segment_count} "
+            f"avg_latency={avg_latency} "
+            f"max_latency={max_latency}"
+        )
+
+    def _format_optional_seconds(self, value: Optional[float]) -> str:
+        """Format optional second values for content-safe stdout metrics."""
+        if value is None:
+            return "n/a"
+
+        return f"{value:.2f}s"
 
     def _get_segmenter(self, sample_rate: int) -> Optional[WebRTCVADSegmenter]:
         """Return a cached segmenter, or disable VAD if initialization fails."""
