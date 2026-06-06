@@ -31,6 +31,24 @@ class TranscriptChunk:
     latency_seconds: float
 
 
+@dataclass(frozen=True)
+class LiveSegmentMetrics:
+    """Summary metrics for live chunks that contributed transcript text."""
+
+    segment_count: int
+    latency_avg_seconds: Optional[float]
+    latency_max_seconds: Optional[float]
+
+    @classmethod
+    def empty(cls) -> "LiveSegmentMetrics":
+        """Return the default summary when no live chunks contributed text."""
+        return cls(
+            segment_count=0,
+            latency_avg_seconds=None,
+            latency_max_seconds=None,
+        )
+
+
 class TranscriptAccumulator:
     """Store completed transcript chunks and expose them in segment order."""
 
@@ -55,6 +73,19 @@ class TranscriptAccumulator:
     def get_text(self) -> str:
         """Return the concatenated live transcript in segment order."""
         return " ".join(chunk.text for chunk in self.ordered_chunks())
+
+    def get_metrics(self) -> LiveSegmentMetrics:
+        """Return latency metrics for chunks that contributed transcript text."""
+        chunks = self.ordered_chunks()
+        if not chunks:
+            return LiveSegmentMetrics.empty()
+
+        latencies = [chunk.latency_seconds for chunk in chunks]
+        return LiveSegmentMetrics(
+            segment_count=len(latencies),
+            latency_avg_seconds=sum(latencies) / len(latencies),
+            latency_max_seconds=max(latencies),
+        )
 
 
 class LiveTranscriptionWorker:
