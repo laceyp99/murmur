@@ -125,10 +125,17 @@ class LiveVADSegmentationWorker:
                 break
 
             if audio_block is None:
-                self._flush_pending_audio()
+                try:
+                    self._flush_pending_audio()
+                except Exception as exc:
+                    self._disable_after_worker_exception(exc)
                 break
 
-            self._process_block(audio_block)
+            try:
+                self._process_block(audio_block)
+            except Exception as exc:
+                self._disable_after_worker_exception(exc)
+                break
 
     def _flush_pending_audio(self) -> None:
         if self._pending_block.size > 0:
@@ -319,6 +326,13 @@ class LiveVADSegmentationWorker:
 
         if should_notify:
             self._invoke_worker_degraded(message)
+
+    def _disable_after_worker_exception(self, exc: Exception) -> None:
+        message = (
+            "Live VAD worker failed with "
+            f"{type(exc).__name__}. Live segmentation disabled."
+        )
+        self._disable_after_degradation(message)
 
     def _record_degradation(self, message: str) -> bool:
         with self._state_lock:
