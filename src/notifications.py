@@ -70,10 +70,7 @@ class NotificationManager:
             print("Notification unavailable; message suppressed.")
             return
 
-        print(
-            "Notification fallback: "
-            f"{reason}; title={title!r}; message suppressed."
-        )
+        print(f"Notification fallback: {reason}; title={title!r}; message suppressed.")
 
     def _show_toast(self, title: str, message: str, duration: int) -> None:
         """Show a toast notification."""
