@@ -138,14 +138,18 @@ class FakeNotifications:
 
 
 class FakeLogger:
-    def __init__(self):
+    def __init__(self, enabled=True):
+        self.enabled = enabled
         self.entries = []
 
     def log(self, audio_data, text, elapsed, live_segment_metrics=None):
+        if not self.enabled:
+            return None
         self.entries.append((audio_data, text, elapsed, live_segment_metrics))
+        return self.entries[-1]
 
     def is_enabled(self):
-        return False
+        return self.enabled
 
     def get_log_directory(self):
         return "C:/murmur/training_data"
@@ -674,8 +678,49 @@ def test_complete_transcription_stdout_omits_transcript_on_clipboard_failure(
     app = make_app(segmenter=None, transcriber=transcriber)
     app.notifications = FakeNotifications()
     app.logger = FakeLogger()
+    live_segment_metrics = main_module.LiveSegmentMetrics(
+        segment_count=2,
+        latency_avg_seconds=0.25,
+        latency_max_seconds=0.4,
+    )
 
     monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: False)
+    monkeypatch.setattr(main_module.time, "perf_counter", lambda: 2.5)
+
+    audio_data = make_audio_data()
+    app._complete_transcription(
+        audio_data,
+        "private dictated text",
+        finalization_started_at=1.0,
+        live_segment_metrics=live_segment_metrics,
+    )
+
+    stdout = capsys.readouterr().out
+    assert "Finalized in 1.5s; failed to copy to clipboard." in stdout
+    assert "Live segments: count=2 avg_latency=0.25s max_latency=0.40s" in stdout
+    assert "private dictated text" not in stdout
+    assert app.notifications.errors == [
+        "Clipboard copy failed. Please retry the recording. The transcript was saved to training data."
+    ]
+    [(logged_audio, logged_text, elapsed, logged_live_segment_metrics)] = (
+        app.logger.entries
+    )
+    assert logged_audio is audio_data
+    assert logged_text == "private dictated text"
+    assert elapsed == 1.5
+    assert logged_live_segment_metrics is live_segment_metrics
+
+
+def test_complete_transcription_clipboard_failure_retry_message_when_logging_disabled(
+    monkeypatch,
+):
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.notifications = FakeNotifications()
+    app.logger = FakeLogger(enabled=False)
+
+    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: False)
+    monkeypatch.setattr(main_module.time, "perf_counter", lambda: 2.5)
 
     app._complete_transcription(
         make_audio_data(),
@@ -684,10 +729,9 @@ def test_complete_transcription_stdout_omits_transcript_on_clipboard_failure(
         live_segment_metrics=main_module.LiveSegmentMetrics.empty(),
     )
 
-    stdout = capsys.readouterr().out
-    assert "Transcribed successfully, but failed to copy to clipboard." in stdout
-    assert "private dictated text" not in stdout
-    assert app.notifications.errors == ["Failed to copy to clipboard"]
+    assert app.notifications.errors == [
+        "Clipboard copy failed. Please retry the recording."
+    ]
     assert app.logger.entries == []
 
 
