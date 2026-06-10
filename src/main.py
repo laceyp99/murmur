@@ -552,6 +552,7 @@ class MurmurApp:
         return LiveVADSegmentationWorker(
             settings=self._build_vad_settings(sample_rate),
             on_segment=self._on_live_segment_ready,
+            on_worker_degraded=self._on_live_pipeline_degraded,
         )
 
     def _build_vad_settings(self, sample_rate: int) -> VADSettings:
