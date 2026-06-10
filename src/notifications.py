@@ -4,7 +4,7 @@ Provides user feedback through Windows toast notifications.
 """
 
 import threading
-from typing import Optional
+from typing import Any, Optional
 
 try:
     from win10toast import ToastNotifier
@@ -25,13 +25,15 @@ class NotificationManager:
 
     def __init__(self):
         self.config = get_config()
-        self._toaster: Optional[ToastNotifier] = None
+        self._toaster: Optional[Any] = None
+        self._fallback_reason = "toast unavailable"
 
         if TOAST_AVAILABLE:
             try:
                 self._toaster = ToastNotifier()
+                self._fallback_reason = ""
             except Exception:
-                pass
+                self._fallback_reason = "toast initialization failed"
 
     def notify(
         self, title: str, message: str, duration: int = 3, threaded: bool = True
@@ -58,20 +60,32 @@ class NotificationManager:
                 else:
                     self._show_toast(title, message, duration)
             except Exception:
-                self._print_fallback()
+                self._print_fallback(title, "toast delivery failed")
         else:
-            self._print_fallback()
+            self._print_fallback(title, self._fallback_reason)
 
-    def _print_fallback(self) -> None:
+    def _print_fallback(self, title: str, reason: str) -> None:
         """Emit content-safe console fallback status."""
-        print("Notification unavailable; message suppressed.")
+        if reason == "toast unavailable":
+            print("Notification unavailable; message suppressed.")
+            return
+
+        print(
+            "Notification fallback: "
+            f"{reason}; title={title!r}; message suppressed."
+        )
 
     def _show_toast(self, title: str, message: str, duration: int) -> None:
         """Show a toast notification."""
+        toaster = self._toaster
+        if toaster is None:
+            self._print_fallback(title, self._fallback_reason)
+            return
+
         try:
-            self._toaster.show_toast(title, message, duration=duration, threaded=False)
+            toaster.show_toast(title, message, duration=duration, threaded=False)
         except Exception:
-            pass
+            self._print_fallback(title, "toast delivery failed")
 
     def notify_recording_started(self) -> None:
         """Notify that recording has started."""
