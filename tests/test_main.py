@@ -833,6 +833,36 @@ def test_on_live_pipeline_degraded_marks_app_once_without_user_notification():
     assert app.notifications.messages == []
 
 
+def test_build_live_segmenter_wires_degradation_callback(monkeypatch):
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    captured = {}
+
+    class FakeLiveVADSegmentationWorker:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        main_module,
+        "LiveVADSegmentationWorker",
+        FakeLiveVADSegmentationWorker,
+    )
+
+    worker = app._build_live_segmenter(16000)
+
+    assert isinstance(worker, FakeLiveVADSegmentationWorker)
+    assert captured["settings"] == VADSettings.from_app_config(
+        app.config,
+        sample_rate=16000,
+    )
+    assert captured["on_segment"] == app._on_live_segment_ready
+
+    captured["on_worker_degraded"]("live VAD failed")
+
+    assert app._live_pipeline_degraded is True
+    assert app._live_pipeline_degraded_reason == "live VAD failed"
+
+
 def test_start_live_segmentation_registers_recorder_callbacks():
     transcriber = FakeTranscriber()
     recorder = FakeRecorder(audio_data=None)

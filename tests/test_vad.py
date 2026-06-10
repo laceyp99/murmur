@@ -1,3 +1,5 @@
+import threading
+
 import numpy as np
 import pytest
 
@@ -23,6 +25,16 @@ class FakeVad:
         decision = self._speech_flags[self._index]
         self._index += 1
         return decision
+
+
+class RaisingVad:
+    def __init__(self, error):
+        self.error = error
+        self.call_count = 0
+
+    def is_speech(self, pcm16, sample_rate):
+        self.call_count += 1
+        raise self.error
 
 
 def test_float32_to_pcm16_clips_and_emits_expected_byte_length():
@@ -333,3 +345,107 @@ def test_live_worker_merges_segments_across_short_gap_before_emitting():
         emitted_segments[0].audio,
         np.ones(frame_samples * 9, dtype=np.float32),
     )
+
+
+def test_live_worker_degrades_once_after_segment_callback_failure(capsys):
+    frame_samples = 320
+    fake_vad = FakeVad([True, False, False])
+    degraded_event = threading.Event()
+    degraded_messages = []
+
+    def fail_segment_callback(segment):
+        raise RuntimeError("private dictated text leaked in callback")
+
+    def record_degraded(message):
+        degraded_messages.append(message)
+        degraded_event.set()
+
+    worker = LiveVADSegmentationWorker(
+        sample_rate=16000,
+        frame_duration_ms=20,
+        start_padding_ms=0,
+        end_padding_ms=0,
+        silence_duration_ms=20,
+        min_segment_duration_ms=20,
+        merge_gap_ms=0,
+        vad=fake_vad,
+        on_segment=fail_segment_callback,
+        on_worker_degraded=record_degraded,
+        queue_timeout_seconds=0.01,
+    )
+
+    worker.start()
+    try:
+        worker.submit_audio_block(np.ones(frame_samples * 3, dtype=np.float32))
+        assert degraded_event.wait(timeout=1.0)
+    finally:
+        worker.stop()
+
+    processed_frame_count = fake_vad._index
+    worker.start()
+    worker.submit_audio_block(np.ones(frame_samples, dtype=np.float32))
+
+    assert worker.is_degraded() is True
+    assert worker.get_last_error() == (
+        "Live VAD segment callback failed with RuntimeError. "
+        "Live segmentation disabled."
+    )
+    assert degraded_messages == [worker.get_last_error()]
+    assert worker._running is False
+    assert worker._pending_segment is None
+    assert worker._pending_gap_frames == []
+    assert fake_vad._index == processed_frame_count
+
+    stdout = capsys.readouterr().out
+    assert "RuntimeError" in stdout
+    assert "private dictated text" not in stdout
+    assert "leaked in callback" not in stdout
+
+
+def test_live_worker_degrades_once_after_internal_worker_failure(capsys):
+    frame_samples = 320
+    raising_vad = RaisingVad(
+        RuntimeError("private dictated text leaked from VAD internals")
+    )
+    degraded_event = threading.Event()
+    degraded_messages = []
+
+    def record_degraded(message):
+        degraded_messages.append(message)
+        degraded_event.set()
+
+    worker = LiveVADSegmentationWorker(
+        sample_rate=16000,
+        frame_duration_ms=20,
+        start_padding_ms=0,
+        end_padding_ms=0,
+        silence_duration_ms=20,
+        min_segment_duration_ms=20,
+        merge_gap_ms=0,
+        vad=raising_vad,
+        on_worker_degraded=record_degraded,
+        queue_timeout_seconds=0.01,
+    )
+
+    worker.start()
+    try:
+        worker.submit_audio_block(np.ones(frame_samples, dtype=np.float32))
+        assert degraded_event.wait(timeout=1.0)
+    finally:
+        worker.stop()
+
+    worker.start()
+    worker.submit_audio_block(np.ones(frame_samples, dtype=np.float32))
+
+    assert worker.is_degraded() is True
+    assert worker.get_last_error() == (
+        "Live VAD worker failed with RuntimeError. Live segmentation disabled."
+    )
+    assert degraded_messages == [worker.get_last_error()]
+    assert worker._running is False
+    assert raising_vad.call_count == 1
+
+    stdout = capsys.readouterr().out
+    assert "RuntimeError" in stdout
+    assert "private dictated text" not in stdout
+    assert "leaked from VAD internals" not in stdout
