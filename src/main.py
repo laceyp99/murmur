@@ -425,16 +425,21 @@ class MurmurApp:
             self.notifications.notify("Murmur", "No speech detected.")
             return
 
+        runtime = time.perf_counter() - finalization_started_at
+        log_entry = self.logger.log(audio_data, text, runtime, live_segment_metrics)
+
         if copy_to_clipboard(text):
-            runtime = time.perf_counter() - finalization_started_at
             print(f"Finalized in {runtime:.1f}s; copied to clipboard.")
             self._print_live_segment_metrics(live_segment_metrics)
             self.notifications.notify_transcription_complete(text)
-            self.logger.log(audio_data, text, runtime, live_segment_metrics)
             return
 
-        print("Transcribed successfully, but failed to copy to clipboard.")
-        self.notifications.notify_error("Failed to copy to clipboard")
+        print(f"Finalized in {runtime:.1f}s; failed to copy to clipboard.")
+        self._print_live_segment_metrics(live_segment_metrics)
+        message = "Clipboard copy failed. Please retry the recording."
+        if log_entry is not None:
+            message += " The transcript was saved to training data."
+        self.notifications.notify_error(message)
 
     def _print_live_segment_metrics(
         self, live_segment_metrics: LiveSegmentMetrics
