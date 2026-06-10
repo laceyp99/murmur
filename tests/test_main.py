@@ -120,12 +120,25 @@ class FakeTray:
 class FakeNotifications:
     def __init__(self):
         self.completed = []
+        self.copied_to_clipboard = 0
         self.messages = []
         self.errors = []
         self.recording_limits = []
 
     def notify_transcription_complete(self, text):
         self.completed.append(text)
+
+    def notify_transcription_copied(self):
+        self.copied_to_clipboard += 1
+
+    def notify_clipboard_failure_retry(self):
+        self.notify_error("Clipboard copy failed. Please retry the recording.")
+
+    def notify_clipboard_failure_retry_with_training_data(self):
+        self.notify_error(
+            "Clipboard copy failed. Please retry the recording. "
+            "The transcript was saved to training data."
+        )
 
     def notify(self, title, message):
         self.messages.append((title, message))
@@ -138,14 +151,18 @@ class FakeNotifications:
 
 
 class FakeLogger:
-    def __init__(self):
+    def __init__(self, enabled=True):
+        self.enabled = enabled
         self.entries = []
 
     def log(self, audio_data, text, elapsed, live_segment_metrics=None):
+        if not self.enabled:
+            return None
         self.entries.append((audio_data, text, elapsed, live_segment_metrics))
+        return self.entries[-1]
 
     def is_enabled(self):
-        return False
+        return self.enabled
 
     def get_log_directory(self):
         return "C:/murmur/training_data"
@@ -595,7 +612,8 @@ def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeyp
     assert transcriber.audio_calls == []
     assert transcriber.segment_calls == []
     assert transcriber.finalize_calls == ["hello world again"]
-    assert app.notifications.completed == ["FINAL:hello world again"]
+    assert app.notifications.copied_to_clipboard == 1
+    assert app.notifications.completed == []
     [(logged_audio, logged_text, elapsed, live_segment_metrics)] = app.logger.entries
     assert logged_audio is audio_data
     assert logged_text == "FINAL:hello world again"
@@ -635,7 +653,39 @@ def test_complete_transcription_stdout_omits_transcript_on_success(
     assert "Live segments: count=0 avg_latency=n/a max_latency=n/a" in stdout
     assert "private dictated text" not in stdout
     assert copied_text == ["private dictated text"]
-    assert app.notifications.completed == ["private dictated text"]
+    assert app.notifications.copied_to_clipboard == 1
+    assert app.notifications.completed == []
+
+
+def test_complete_transcription_copies_before_training_data_logging(monkeypatch):
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.notifications = FakeNotifications()
+    call_order = []
+
+    class OrderedLogger(FakeLogger):
+        def log(self, audio_data, text, elapsed, live_segment_metrics=None):
+            call_order.append("log")
+            return super().log(audio_data, text, elapsed, live_segment_metrics)
+
+    app.logger = OrderedLogger()
+
+    def copy(text):
+        call_order.append("copy")
+        return True
+
+    monkeypatch.setattr(main_module, "copy_to_clipboard", copy)
+    monkeypatch.setattr(main_module.time, "perf_counter", lambda: 2.2)
+
+    app._complete_transcription(
+        make_audio_data(),
+        "private dictated text",
+        finalization_started_at=1.0,
+        live_segment_metrics=main_module.LiveSegmentMetrics.empty(),
+    )
+
+    assert call_order == ["copy", "log"]
+    assert len(app.logger.entries) == 1
 
 
 def test_process_audio_logs_empty_live_segment_metrics_for_offline_fallback(
@@ -674,8 +724,49 @@ def test_complete_transcription_stdout_omits_transcript_on_clipboard_failure(
     app = make_app(segmenter=None, transcriber=transcriber)
     app.notifications = FakeNotifications()
     app.logger = FakeLogger()
+    live_segment_metrics = main_module.LiveSegmentMetrics(
+        segment_count=2,
+        latency_avg_seconds=0.25,
+        latency_max_seconds=0.4,
+    )
 
     monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: False)
+    monkeypatch.setattr(main_module.time, "perf_counter", lambda: 2.5)
+
+    audio_data = make_audio_data()
+    app._complete_transcription(
+        audio_data,
+        "private dictated text",
+        finalization_started_at=1.0,
+        live_segment_metrics=live_segment_metrics,
+    )
+
+    stdout = capsys.readouterr().out
+    assert "Finalized in 1.5s; failed to copy to clipboard." in stdout
+    assert "Live segments: count=2 avg_latency=0.25s max_latency=0.40s" in stdout
+    assert "private dictated text" not in stdout
+    assert app.notifications.errors == [
+        "Clipboard copy failed. Please retry the recording. The transcript was saved to training data."
+    ]
+    [(logged_audio, logged_text, elapsed, logged_live_segment_metrics)] = (
+        app.logger.entries
+    )
+    assert logged_audio is audio_data
+    assert logged_text == "private dictated text"
+    assert elapsed == 1.5
+    assert logged_live_segment_metrics is live_segment_metrics
+
+
+def test_complete_transcription_clipboard_failure_retry_message_when_logging_disabled(
+    monkeypatch,
+):
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.notifications = FakeNotifications()
+    app.logger = FakeLogger(enabled=False)
+
+    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: False)
+    monkeypatch.setattr(main_module.time, "perf_counter", lambda: 2.5)
 
     app._complete_transcription(
         make_audio_data(),
@@ -684,10 +775,9 @@ def test_complete_transcription_stdout_omits_transcript_on_clipboard_failure(
         live_segment_metrics=main_module.LiveSegmentMetrics.empty(),
     )
 
-    stdout = capsys.readouterr().out
-    assert "Transcribed successfully, but failed to copy to clipboard." in stdout
-    assert "private dictated text" not in stdout
-    assert app.notifications.errors == ["Failed to copy to clipboard"]
+    assert app.notifications.errors == [
+        "Clipboard copy failed. Please retry the recording."
+    ]
     assert app.logger.entries == []
 
 

@@ -221,6 +221,11 @@ If you want to disable the final LLM pass entirely, set `ollama_enabled` to `fal
 - Check your microphone is working and selected as default
 - Check microphone permissions in Windows Settings
 
+**"Clipboard copy failed"**
+- Retry the recording if you still need the transcript on your clipboard
+- When training data logging is off, murmur does not store the transcript for recovery
+- When training data logging is enabled and the save succeeds, murmur keeps the completed transcript in training data even if clipboard copy fails
+
 **"There is a short pause after I stop before text appears"**
 - murmur now transcribes completed speech segments during recording, but it still performs a final drain on stop
 - The remaining delay is usually the last queued segment plus final text cleanup and, when enabled, one Ollama post-processing call
@@ -258,9 +263,10 @@ Each JSONL entry:
 ```
 
 `duration` is the recorded audio length in seconds. `processing_time` is the
-finalization latency after recording stops, measured until the transcript is
-copied/logged. `live_segment_count` is the number of live transcript chunks that
-contributed text to the final transcript. `live_segment_latency_avg_seconds` and
+finalization latency after recording stops, measured through the clipboard copy
+attempt and before training-data logging. `live_segment_count` is the number of
+live transcript chunks that contributed text to the final transcript.
+`live_segment_latency_avg_seconds` and
 `live_segment_latency_max_seconds` are live segment transcription runtimes, not
 queue time or finalization time. When no live chunks contributed text, the count
 is `0` and the latency fields are `null`.
