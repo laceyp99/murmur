@@ -657,6 +657,37 @@ def test_complete_transcription_stdout_omits_transcript_on_success(
     assert app.notifications.completed == []
 
 
+def test_complete_transcription_copies_before_training_data_logging(monkeypatch):
+    transcriber = FakeTranscriber()
+    app = make_app(segmenter=None, transcriber=transcriber)
+    app.notifications = FakeNotifications()
+    call_order = []
+
+    class OrderedLogger(FakeLogger):
+        def log(self, audio_data, text, elapsed, live_segment_metrics=None):
+            call_order.append("log")
+            return super().log(audio_data, text, elapsed, live_segment_metrics)
+
+    app.logger = OrderedLogger()
+
+    def copy(text):
+        call_order.append("copy")
+        return True
+
+    monkeypatch.setattr(main_module, "copy_to_clipboard", copy)
+    monkeypatch.setattr(main_module.time, "perf_counter", lambda: 2.2)
+
+    app._complete_transcription(
+        make_audio_data(),
+        "private dictated text",
+        finalization_started_at=1.0,
+        live_segment_metrics=main_module.LiveSegmentMetrics.empty(),
+    )
+
+    assert call_order == ["copy", "log"]
+    assert len(app.logger.entries) == 1
+
+
 def test_process_audio_logs_empty_live_segment_metrics_for_offline_fallback(
     monkeypatch,
     capsys,

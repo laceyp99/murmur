@@ -425,10 +425,11 @@ class MurmurApp:
             self.notifications.notify("Murmur", "No speech detected.")
             return
 
+        copied = copy_to_clipboard(text)
         runtime = time.perf_counter() - finalization_started_at
         log_entry = self.logger.log(audio_data, text, runtime, live_segment_metrics)
 
-        if copy_to_clipboard(text):
+        if copied:
             print(f"Finalized in {runtime:.1f}s; copied to clipboard.")
             self._print_live_segment_metrics(live_segment_metrics)
             self.notifications.notify_transcription_copied()
