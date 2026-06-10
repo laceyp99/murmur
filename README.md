@@ -221,6 +221,11 @@ If you want to disable the final LLM pass entirely, set `ollama_enabled` to `fal
 - Check your microphone is working and selected as default
 - Check microphone permissions in Windows Settings
 
+**"Clipboard copy failed"**
+- Retry the recording if you still need the transcript on your clipboard
+- When training data logging is off, murmur does not store the transcript for recovery
+- When training data logging is enabled and the save succeeds, murmur keeps the completed transcript in training data even if clipboard copy fails
+
 **"There is a short pause after I stop before text appears"**
 - murmur now transcribes completed speech segments during recording, but it still performs a final drain on stop
 - The remaining delay is usually the last queued segment plus final text cleanup and, when enabled, one Ollama post-processing call
