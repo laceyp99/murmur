@@ -120,12 +120,25 @@ class FakeTray:
 class FakeNotifications:
     def __init__(self):
         self.completed = []
+        self.copied_to_clipboard = 0
         self.messages = []
         self.errors = []
         self.recording_limits = []
 
     def notify_transcription_complete(self, text):
         self.completed.append(text)
+
+    def notify_transcription_copied(self):
+        self.copied_to_clipboard += 1
+
+    def notify_clipboard_failure_retry(self):
+        self.notify_error("Clipboard copy failed. Please retry the recording.")
+
+    def notify_clipboard_failure_retry_with_training_data(self):
+        self.notify_error(
+            "Clipboard copy failed. Please retry the recording. "
+            "The transcript was saved to training data."
+        )
 
     def notify(self, title, message):
         self.messages.append((title, message))
@@ -599,7 +612,8 @@ def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeyp
     assert transcriber.audio_calls == []
     assert transcriber.segment_calls == []
     assert transcriber.finalize_calls == ["hello world again"]
-    assert app.notifications.completed == ["FINAL:hello world again"]
+    assert app.notifications.copied_to_clipboard == 1
+    assert app.notifications.completed == []
     [(logged_audio, logged_text, elapsed, live_segment_metrics)] = app.logger.entries
     assert logged_audio is audio_data
     assert logged_text == "FINAL:hello world again"
@@ -639,7 +653,8 @@ def test_complete_transcription_stdout_omits_transcript_on_success(
     assert "Live segments: count=0 avg_latency=n/a max_latency=n/a" in stdout
     assert "private dictated text" not in stdout
     assert copied_text == ["private dictated text"]
-    assert app.notifications.completed == ["private dictated text"]
+    assert app.notifications.copied_to_clipboard == 1
+    assert app.notifications.completed == []
 
 
 def test_process_audio_logs_empty_live_segment_metrics_for_offline_fallback(

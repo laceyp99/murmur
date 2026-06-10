@@ -431,15 +431,15 @@ class MurmurApp:
         if copy_to_clipboard(text):
             print(f"Finalized in {runtime:.1f}s; copied to clipboard.")
             self._print_live_segment_metrics(live_segment_metrics)
-            self.notifications.notify_transcription_complete(text)
+            self.notifications.notify_transcription_copied()
             return
 
         print(f"Finalized in {runtime:.1f}s; failed to copy to clipboard.")
         self._print_live_segment_metrics(live_segment_metrics)
-        message = "Clipboard copy failed. Please retry the recording."
         if log_entry is not None:
-            message += " The transcript was saved to training data."
-        self.notifications.notify_error(message)
+            self.notifications.notify_clipboard_failure_retry_with_training_data()
+        else:
+            self.notifications.notify_clipboard_failure_retry()
 
     def _print_live_segment_metrics(
         self, live_segment_metrics: LiveSegmentMetrics

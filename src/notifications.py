@@ -87,7 +87,22 @@ class NotificationManager:
 
     def notify_transcription_complete(self, text: str) -> None:
         """Notify that transcription is complete."""
+        self.notify_transcription_copied()
+
+    def notify_transcription_copied(self) -> None:
+        """Notify that transcription was copied to the clipboard."""
         self.notify("murmur", "Transcription copied to clipboard.")
+
+    def notify_clipboard_failure_retry(self) -> None:
+        """Notify that clipboard copy failed and the user should retry recording."""
+        self.notify_error("Clipboard copy failed. Please retry the recording.")
+
+    def notify_clipboard_failure_retry_with_training_data(self) -> None:
+        """Notify that clipboard copy failed after training data was saved."""
+        self.notify_error(
+            "Clipboard copy failed. Please retry the recording. "
+            "The transcript was saved to training data."
+        )
 
     def notify_error(self, error: str) -> None:
         """Notify about an error."""
