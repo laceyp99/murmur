@@ -1,0 +1,69 @@
+site_name: Murmur Docs
+site_description: Visual documentation for Murmur's local audio processing pipeline.
+repo_url: https://github.com/laceyp99/murmur
+repo_name: laceyp99/murmur
+
+docs_dir: docs
+
+# Mermaid rendering needs MkDocs Material plus pymdown-extensions.
+# Install with:
+#   python -m pip install mkdocs-material pymdown-extensions
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - search.highlight
+    - search.suggest
+  palette:
+    - scheme: default
+      primary: blue grey
+      accent: cyan
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue grey
+      accent: cyan
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Pipeline:
+      - Overview: pipeline.md
+      - Live Pipeline: live-pipeline.md
+      - VAD Segmentation: vad-segmentation.md
+      - Transcription And Cleanup: transcription-and-cleanup.md
+      - Fallbacks And Failure Modes: failure-and-fallbacks.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+plugins:
+  - search
+
+watch:
+  - docs
