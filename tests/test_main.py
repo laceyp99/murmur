@@ -32,6 +32,7 @@ class FakeTranscriber:
         self.audio_calls = []
         self.live_segment_calls = []
         self.finalize_calls = []
+        self.finalize_segment_calls = []
         self.load_model_calls = 0
         self.warm_llm_post_processor_calls = 0
 
@@ -50,6 +51,11 @@ class FakeTranscriber:
     def finalize_text(self, text):
         self.finalize_calls.append(text)
         return f"FINAL:{text}" if text else ""
+
+    def finalize_segment_texts(self, segment_texts):
+        segment_texts = list(segment_texts)
+        self.finalize_segment_calls.append(segment_texts)
+        return self.finalize_text(" ".join(segment_texts))
 
     def load_model(self):
         self.load_model_calls += 1
@@ -611,6 +617,7 @@ def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeyp
     assert copied_text == ["FINAL:hello world again"]
     assert transcriber.audio_calls == []
     assert transcriber.segment_calls == []
+    assert transcriber.finalize_segment_calls == [["hello world", "again"]]
     assert transcriber.finalize_calls == ["hello world again"]
     assert app.notifications.copied_to_clipboard == 1
     assert app.notifications.completed == []
