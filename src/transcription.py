@@ -109,6 +109,10 @@ class Transcriber:
             print("Ollama post-processing failed; using local transcript cleanup.")
             return cleaned_text
 
+    def finalize_segment_texts(self, segment_texts: Sequence[str]) -> str:
+        """Apply boundary-aware segment joining before document-level cleanup."""
+        return self.finalize_text(self._join_segment_texts(segment_texts))
+
     def _get_llm_post_processor(self) -> Optional[LLMPostProcessor]:
         """Build the optional final-pass LLM post-processor lazily."""
         if self._llm_post_processor is not None:
@@ -180,8 +184,8 @@ class Transcriber:
                     f"transcribed in {segment_result.processing_time:.2f}s"
                 )
 
-        final_text = self.finalize_text(
-            " ".join(segment.text for segment in segment_results)
+        final_text = self.finalize_segment_texts(
+            [segment.text for segment in segment_results]
         )
 
         return TranscriptionResult(text=final_text, segments=segment_results)
@@ -250,6 +254,39 @@ class Transcriber:
         text = self._fix_common_issues(text)
 
         return text
+
+    def _join_segment_texts(self, segment_texts: Sequence[str]) -> str:
+        """Join Whisper chunks while neutralizing artificial VAD boundaries."""
+        normalized_segments: List[str] = []
+        cleaned_segments = [self._fix_common_issues(text) for text in segment_texts]
+        cleaned_segments = [text for text in cleaned_segments if text]
+
+        for index, text in enumerate(cleaned_segments):
+            if index < len(cleaned_segments) - 1:
+                text = self._strip_boundary_sentence_punctuation(text)
+            if index > 0:
+                text = self._lowercase_boundary_start(text)
+            if text:
+                normalized_segments.append(text)
+
+        return self._fix_common_issues(" ".join(normalized_segments))
+
+    def _strip_boundary_sentence_punctuation(self, text: str) -> str:
+        """Remove sentence punctuation added at a non-final chunk boundary."""
+        return re.sub(r"[.!?]+$", "", text).strip()
+
+    def _lowercase_boundary_start(self, text: str) -> str:
+        """Undo likely chunk-start title casing without touching acronyms or I."""
+        match = re.match(r"^(\W*)([A-Z][a-z]+)\b", text)
+        if match is None:
+            return text
+
+        word = match.group(2)
+        if word == "I":
+            return text
+
+        start_index = match.start(2)
+        return f"{text[:start_index]}{word[0].lower()}{text[start_index + 1 :]}"
 
     def _get_audio_duration(self, segment: AudioSegmentLike) -> float:
         """Compute segment duration from the waveform length and sample rate."""

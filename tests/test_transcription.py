@@ -104,6 +104,60 @@ def test_transcribe_segments_strip_only_trailing_ellipses_from_segment_text():
     assert result.text == "Hello world."
 
 
+def test_transcribe_segments_neutralizes_boundary_punctuation_and_casing():
+    fake_model = FakeModel(
+        [
+            "this is a thought.",
+            "And then the next chunk starts.",
+            "With another boundary.",
+        ]
+    )
+    transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
+    segments = [
+        AudioData(
+            audio=np.array([0.25, -0.5], dtype=np.float32),
+            sample_rate=16000,
+            duration=0.1,
+        ),
+        AudioData(
+            audio=np.array([0.5, 0.25], dtype=np.float32),
+            sample_rate=16000,
+            duration=0.1,
+        ),
+        AudioData(
+            audio=np.array([0.1, 0.35], dtype=np.float32),
+            sample_rate=16000,
+            duration=0.1,
+        ),
+    ]
+
+    result = transcriber.transcribe_segments(segments)
+
+    assert [segment.text for segment in result.segments] == [
+        "this is a thought.",
+        "And then the next chunk starts.",
+        "With another boundary.",
+    ]
+    assert (
+        result.text
+        == "This is a thought and then the next chunk starts with another boundary."
+    )
+
+
+def test_finalize_segment_texts_preserves_boundary_acronyms_and_pronoun_i():
+    transcriber = Transcriber(config=FakeConfig(), model=FakeModel([]), device="cpu")
+
+    result = transcriber.finalize_segment_texts(
+        [
+            "we should compare options.",
+            "NASA has notes.",
+            "I can summarize them.",
+        ]
+    )
+
+    assert result == "We should compare options NASA has notes I can summarize them."
+
+
 def test_transcribe_single_clip_applies_final_document_cleanup_once():
     fake_model = FakeModel(["multiple   spaces"])
     transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
@@ -142,6 +196,27 @@ def test_finalize_text_uses_llm_post_processor_when_enabled():
 
     assert result == "Hello, world!"
     assert fake_processor.calls == ["Hello world."]
+
+
+def test_finalize_segment_texts_sends_boundary_neutral_text_to_llm():
+    config = FakeConfig()
+    config.ollama_enabled = True
+    fake_processor = FakeLLMPostProcessor(response="Cleaned by LLM.")
+    transcriber = Transcriber(
+        config=config,
+        model=FakeModel([]),
+        device="cpu",
+        llm_post_processor=fake_processor,
+    )
+
+    result = transcriber.finalize_segment_texts(
+        ["this should keep flowing.", "Even after whisper split it."]
+    )
+
+    assert result == "Cleaned by LLM."
+    assert fake_processor.calls == [
+        "This should keep flowing even after whisper split it."
+    ]
 
 
 def test_finalize_text_falls_back_when_llm_post_processor_fails():

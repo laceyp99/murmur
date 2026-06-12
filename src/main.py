@@ -398,11 +398,11 @@ class MurmurApp:
         if self.live_transcript_accumulator is None:
             return ""
 
-        raw_text = self.live_transcript_accumulator.get_text().strip()
-        if not raw_text:
+        chunks = self.live_transcript_accumulator.ordered_chunks()
+        if not chunks:
             return ""
 
-        return self.transcriber.finalize_text(raw_text)
+        return self.transcriber.finalize_segment_texts([chunk.text for chunk in chunks])
 
     def _get_live_segment_metrics(self) -> LiveSegmentMetrics:
         """Return live segment metrics for chunks that contributed text."""
