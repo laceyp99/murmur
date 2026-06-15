@@ -7,7 +7,12 @@ pytest.importorskip("whisper")
 
 from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
 from src.audio import AudioData
-from src.transcription import Transcriber
+from src.transcription import (
+    LOGPROB_THRESHOLD,
+    NO_SPEECH_THRESHOLD,
+    Transcriber,
+    _should_accept_whisper_segment,
+)
 
 
 class FakeConfig:
@@ -54,6 +59,54 @@ class FakeLLMPostProcessor:
         if self.error is not None:
             raise self.error
         return True
+
+
+def test_whisper_segment_policy_accepts_likely_speech():
+    assert (
+        _should_accept_whisper_segment(
+            {
+                "no_speech_prob": NO_SPEECH_THRESHOLD - 0.1,
+                "avg_logprob": LOGPROB_THRESHOLD - 0.5,
+            }
+        )
+        is True
+    )
+
+
+def test_whisper_segment_policy_drops_weak_high_no_speech_segment():
+    assert (
+        _should_accept_whisper_segment(
+            {
+                "no_speech_prob": NO_SPEECH_THRESHOLD + 0.1,
+                "avg_logprob": LOGPROB_THRESHOLD - 0.5,
+            }
+        )
+        is False
+    )
+
+
+def test_whisper_segment_policy_keeps_high_confidence_override():
+    assert (
+        _should_accept_whisper_segment(
+            {
+                "no_speech_prob": NO_SPEECH_THRESHOLD + 0.1,
+                "avg_logprob": LOGPROB_THRESHOLD + 0.5,
+            }
+        )
+        is True
+    )
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        {"text": "hello"},
+        {"text": "hello", "no_speech_prob": NO_SPEECH_THRESHOLD + 0.1},
+        {"text": "hello", "avg_logprob": LOGPROB_THRESHOLD - 0.5},
+    ],
+)
+def test_whisper_segment_policy_keeps_segments_with_missing_metadata(segment):
+    assert _should_accept_whisper_segment(segment) is True
 
 
 def test_transcribe_segments_returns_raw_segment_text_and_final_document_text():

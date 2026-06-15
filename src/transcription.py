@@ -6,7 +6,7 @@ Handles Whisper model loading and speech-to-text transcription.
 from dataclasses import dataclass
 import re
 import time
-from typing import List, Optional, Protocol, Sequence
+from typing import List, Mapping, Optional, Protocol, Sequence
 
 import numpy as np
 import torch
@@ -16,6 +16,34 @@ from .config import get_config
 from .audio import AudioData
 from .llm_postprocess import LLMPostProcessor, OllamaClient
 from .user_vocab import load_user_vocab
+
+
+NO_SPEECH_THRESHOLD = 0.6
+LOGPROB_THRESHOLD = -1.0
+
+
+def _should_accept_whisper_segment(segment: Mapping[str, object]) -> bool:
+    """Decide whether Whisper metadata points to speech worth keeping."""
+    no_speech_prob = _as_optional_float(segment.get("no_speech_prob"))
+    avg_logprob = _as_optional_float(segment.get("avg_logprob"))
+
+    if no_speech_prob is None or avg_logprob is None:
+        return True
+
+    return not (
+        no_speech_prob > NO_SPEECH_THRESHOLD and avg_logprob < LOGPROB_THRESHOLD
+    )
+
+
+def _as_optional_float(value: object) -> float | None:
+    """Coerce Whisper numeric metadata without rejecting odd result shapes."""
+    if value is None:
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class AudioSegmentLike(Protocol):
