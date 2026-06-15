@@ -35,6 +35,14 @@ def _should_accept_whisper_segment(segment: Mapping[str, object]) -> bool:
     )
 
 
+def _has_whisper_filter_metadata(segment: Mapping[str, object]) -> bool:
+    """Return whether a Whisper segment has usable no-speech filter metadata."""
+    return (
+        _as_optional_float(segment.get("no_speech_prob")) is not None
+        and _as_optional_float(segment.get("avg_logprob")) is not None
+    )
+
+
 def _as_optional_float(value: object) -> float | None:
     """Coerce Whisper numeric metadata without rejecting odd result shapes."""
     if value is None:
@@ -238,7 +246,39 @@ class Transcriber:
             task="transcribe",
         )
 
-        return self._post_process_segment_text(result["text"])
+        raw_text = self._extract_accepted_whisper_text(result)
+        return self._post_process_segment_text(raw_text)
+
+    def _extract_accepted_whisper_text(self, result: Mapping[str, object]) -> str:
+        """Use Whisper segment metadata to drop likely non-speech text."""
+        segments = result.get("segments")
+        if not isinstance(segments, list) or not segments:
+            return self._get_whisper_text(result)
+
+        accepted_texts: List[str] = []
+        found_filter_metadata = False
+        for segment in segments:
+            if not isinstance(segment, dict):
+                return self._get_whisper_text(result)
+
+            found_filter_metadata = (
+                found_filter_metadata or _has_whisper_filter_metadata(segment)
+            )
+            if _should_accept_whisper_segment(segment):
+                accepted_texts.append(self._get_whisper_text(segment))
+
+        if not found_filter_metadata:
+            return self._get_whisper_text(result)
+
+        return " ".join(text for text in accepted_texts if text)
+
+    def _get_whisper_text(self, result: Mapping[str, object]) -> str:
+        """Read Whisper text fields without turning None into text."""
+        text = result.get("text")
+        if not isinstance(text, str):
+            return ""
+
+        return text
 
     def _prepare_audio(self, audio: np.ndarray) -> np.ndarray:
         """Convert audio to a normalized float32 mono waveform for Whisper."""
