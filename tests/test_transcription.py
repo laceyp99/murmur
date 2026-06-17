@@ -7,7 +7,12 @@ pytest.importorskip("whisper")
 
 from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
 from src.audio import AudioData
-from src.transcription import Transcriber
+from src.transcription import (
+    LOGPROB_THRESHOLD,
+    NO_SPEECH_THRESHOLD,
+    Transcriber,
+    _should_accept_whisper_segment,
+)
 
 
 class FakeConfig:
@@ -34,7 +39,10 @@ class FakeModel:
                 "task": task,
             }
         )
-        return {"text": self._responses.pop(0)}
+        response = self._responses.pop(0)
+        if isinstance(response, dict):
+            return response
+        return {"text": response}
 
 
 class FakeLLMPostProcessor:
@@ -54,6 +62,66 @@ class FakeLLMPostProcessor:
         if self.error is not None:
             raise self.error
         return True
+
+
+def test_whisper_segment_policy_accepts_likely_speech():
+    assert (
+        _should_accept_whisper_segment(
+            {
+                "no_speech_prob": NO_SPEECH_THRESHOLD - 0.1,
+                "avg_logprob": LOGPROB_THRESHOLD - 0.5,
+            }
+        )
+        is True
+    )
+
+
+def test_whisper_segment_policy_drops_weak_high_no_speech_segment():
+    assert (
+        _should_accept_whisper_segment(
+            {
+                "no_speech_prob": NO_SPEECH_THRESHOLD + 0.1,
+                "avg_logprob": LOGPROB_THRESHOLD - 0.5,
+            }
+        )
+        is False
+    )
+
+
+def test_whisper_segment_policy_drops_exact_logprob_threshold():
+    assert (
+        _should_accept_whisper_segment(
+            {
+                "no_speech_prob": NO_SPEECH_THRESHOLD + 0.1,
+                "avg_logprob": LOGPROB_THRESHOLD,
+            }
+        )
+        is False
+    )
+
+
+def test_whisper_segment_policy_keeps_high_confidence_override():
+    assert (
+        _should_accept_whisper_segment(
+            {
+                "no_speech_prob": NO_SPEECH_THRESHOLD + 0.1,
+                "avg_logprob": LOGPROB_THRESHOLD + 0.5,
+            }
+        )
+        is True
+    )
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        {"text": "hello"},
+        {"text": "hello", "no_speech_prob": NO_SPEECH_THRESHOLD + 0.1},
+        {"text": "hello", "avg_logprob": LOGPROB_THRESHOLD - 0.5},
+    ],
+)
+def test_whisper_segment_policy_keeps_segments_with_missing_metadata(segment):
+    assert _should_accept_whisper_segment(segment) is True
 
 
 def test_transcribe_segments_returns_raw_segment_text_and_final_document_text():
@@ -142,6 +210,96 @@ def test_transcribe_segments_neutralizes_boundary_punctuation_and_casing():
         result.text
         == "This is a thought and then the next chunk starts with another boundary."
     )
+
+
+def test_transcribe_segments_skips_filtered_no_speech_segments():
+    fake_model = FakeModel(
+        [
+            {
+                "text": "thank you",
+                "segments": [
+                    {
+                        "text": "thank you",
+                        "no_speech_prob": NO_SPEECH_THRESHOLD + 0.1,
+                        "avg_logprob": LOGPROB_THRESHOLD - 0.5,
+                    }
+                ],
+            },
+            {
+                "text": "actual speech",
+                "segments": [
+                    {
+                        "text": "actual speech",
+                        "no_speech_prob": NO_SPEECH_THRESHOLD - 0.1,
+                        "avg_logprob": LOGPROB_THRESHOLD - 0.5,
+                    }
+                ],
+            },
+        ]
+    )
+    transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
+    segments = [
+        AudioData(
+            audio=np.array([0.25, -0.5], dtype=np.float32),
+            sample_rate=16000,
+            duration=0.1,
+        ),
+        AudioData(
+            audio=np.array([0.5, 0.25], dtype=np.float32),
+            sample_rate=16000,
+            duration=0.1,
+        ),
+    ]
+
+    result = transcriber.transcribe_segments(segments)
+
+    assert [segment.text for segment in result.segments] == ["actual speech"]
+    assert result.segments[0].index == 1
+    assert result.text == "Actual speech."
+
+
+def test_transcribe_segment_keeps_high_confidence_no_speech_override():
+    fake_model = FakeModel(
+        [
+            {
+                "text": "quiet speech",
+                "segments": [
+                    {
+                        "text": "quiet speech",
+                        "no_speech_prob": NO_SPEECH_THRESHOLD + 0.1,
+                        "avg_logprob": LOGPROB_THRESHOLD + 0.5,
+                    }
+                ],
+            }
+        ]
+    )
+    transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
+    audio_data = AudioData(
+        audio=np.array([0.1, -0.2, 0.05], dtype=np.float32),
+        sample_rate=16000,
+        duration=0.1,
+    )
+
+    assert transcriber.transcribe_segment(audio_data) == "quiet speech"
+
+
+def test_transcribe_segment_preserves_top_level_text_when_metadata_is_missing():
+    fake_model = FakeModel(
+        [
+            {
+                "text": "top level text",
+                "segments": [{"text": "segment text"}],
+            }
+        ]
+    )
+    transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
+    audio_data = AudioData(
+        audio=np.array([0.1, -0.2, 0.05], dtype=np.float32),
+        sample_rate=16000,
+        duration=0.1,
+    )
+
+    assert transcriber.transcribe_segment(audio_data) == "top level text"
 
 
 def test_finalize_segment_texts_preserves_boundary_acronyms_and_pronoun_i():

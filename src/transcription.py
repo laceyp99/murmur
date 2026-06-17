@@ -6,7 +6,7 @@ Handles Whisper model loading and speech-to-text transcription.
 from dataclasses import dataclass
 import re
 import time
-from typing import List, Optional, Protocol, Sequence
+from typing import List, Mapping, Optional, Protocol, Sequence
 
 import numpy as np
 import torch
@@ -16,6 +16,42 @@ from .config import get_config
 from .audio import AudioData
 from .llm_postprocess import LLMPostProcessor, OllamaClient
 from .user_vocab import load_user_vocab
+
+
+NO_SPEECH_THRESHOLD = 0.4
+LOGPROB_THRESHOLD = -0.6
+
+
+def _should_accept_whisper_segment(segment: Mapping[str, object]) -> bool:
+    """Decide whether Whisper metadata points to speech worth keeping."""
+    no_speech_prob = _as_optional_float(segment.get("no_speech_prob"))
+    avg_logprob = _as_optional_float(segment.get("avg_logprob"))
+
+    if no_speech_prob is None or avg_logprob is None:
+        return True
+
+    return not (
+        no_speech_prob > NO_SPEECH_THRESHOLD and avg_logprob <= LOGPROB_THRESHOLD
+    )
+
+
+def _has_whisper_filter_metadata(segment: Mapping[str, object]) -> bool:
+    """Return whether a Whisper segment has usable no-speech filter metadata."""
+    return (
+        _as_optional_float(segment.get("no_speech_prob")) is not None
+        and _as_optional_float(segment.get("avg_logprob")) is not None
+    )
+
+
+def _as_optional_float(value: object) -> float | None:
+    """Coerce Whisper numeric metadata without rejecting odd result shapes."""
+    if value is None:
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class AudioSegmentLike(Protocol):
@@ -210,7 +246,39 @@ class Transcriber:
             task="transcribe",
         )
 
-        return self._post_process_segment_text(result["text"])
+        raw_text = self._extract_accepted_whisper_text(result)
+        return self._post_process_segment_text(raw_text)
+
+    def _extract_accepted_whisper_text(self, result: Mapping[str, object]) -> str:
+        """Use Whisper segment metadata to drop likely non-speech text."""
+        segments = result.get("segments")
+        if not isinstance(segments, list) or not segments:
+            return self._get_whisper_text(result)
+
+        accepted_texts: List[str] = []
+        found_filter_metadata = False
+        for segment in segments:
+            if not isinstance(segment, dict):
+                return self._get_whisper_text(result)
+
+            found_filter_metadata = (
+                found_filter_metadata or _has_whisper_filter_metadata(segment)
+            )
+            if _should_accept_whisper_segment(segment):
+                accepted_texts.append(self._get_whisper_text(segment))
+
+        if not found_filter_metadata:
+            return self._get_whisper_text(result)
+
+        return " ".join(text for text in accepted_texts if text)
+
+    def _get_whisper_text(self, result: Mapping[str, object]) -> str:
+        """Read Whisper text fields without turning None into text."""
+        text = result.get("text")
+        if not isinstance(text, str):
+            return ""
+
+        return text
 
     def _prepare_audio(self, audio: np.ndarray) -> np.ndarray:
         """Convert audio to a normalized float32 mono waveform for Whisper."""
