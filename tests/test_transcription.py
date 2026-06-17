@@ -88,6 +88,18 @@ def test_whisper_segment_policy_drops_weak_high_no_speech_segment():
     )
 
 
+def test_whisper_segment_policy_drops_exact_logprob_threshold():
+    assert (
+        _should_accept_whisper_segment(
+            {
+                "no_speech_prob": NO_SPEECH_THRESHOLD + 0.1,
+                "avg_logprob": LOGPROB_THRESHOLD,
+            }
+        )
+        is False
+    )
+
+
 def test_whisper_segment_policy_keeps_high_confidence_override():
     assert (
         _should_accept_whisper_segment(

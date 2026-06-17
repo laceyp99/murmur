@@ -18,8 +18,8 @@ from .llm_postprocess import LLMPostProcessor, OllamaClient
 from .user_vocab import load_user_vocab
 
 
-NO_SPEECH_THRESHOLD = 0.6
-LOGPROB_THRESHOLD = -1.0
+NO_SPEECH_THRESHOLD = 0.4
+LOGPROB_THRESHOLD = -0.6
 
 
 def _should_accept_whisper_segment(segment: Mapping[str, object]) -> bool:
@@ -31,7 +31,7 @@ def _should_accept_whisper_segment(segment: Mapping[str, object]) -> bool:
         return True
 
     return not (
-        no_speech_prob > NO_SPEECH_THRESHOLD and avg_logprob < LOGPROB_THRESHOLD
+        no_speech_prob > NO_SPEECH_THRESHOLD and avg_logprob <= LOGPROB_THRESHOLD
     )
 
 

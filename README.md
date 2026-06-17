@@ -98,7 +98,7 @@ Or double-click `run_background.vbs`.
 - murmur captures audio in lightweight 100 ms recorder blocks.
 - A background WebRTC VAD worker reframes those blocks into 20 ms speech frames.
 - Completed speech segments are transcribed serially in the background while you are still recording.
-- Before accepting Whisper output, murmur filters likely non-speech segments using Whisper metadata. Segments with `no_speech_prob > 0.6` and `avg_logprob < -1.0` are skipped, while high-confidence speech is kept even when the no-speech probability is elevated. These are private defaults for now; very quiet speech may need future tuning.
+- Before accepting Whisper output, murmur filters likely non-speech segments using Whisper metadata. Segments with `no_speech_prob > 0.4` and `avg_logprob <= -0.6` are skipped, while high-confidence speech is kept even when the no-speech probability is elevated. These are private defaults for now; very quiet speech may need future tuning.
 - If the live VAD or live transcription path fails mid-recording, murmur logs the failure and falls back to finalizing from the full recorded audio when you stop.
 - When you stop, murmur flushes any pending speech, drains the live transcription queue, applies one final document cleanup pass, and copies the final text to the clipboard.
 - If a recording reaches `max_recording_duration`, murmur stops capture automatically, shows a notification, then finalizes the captured audio.
