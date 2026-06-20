@@ -10,7 +10,13 @@ from .autostart import set_autostart
 from .config import ConfigError, get_config, get_training_data_dir
 from .hotkey import is_hotkey_valid
 from .logger import get_logger
-from .settings_schema import TAB_ORDER
+from .settings_schema import (
+    SETTINGS_BY_KEY,
+    TAB_ORDER,
+    NumericSettingError,
+    normalize_value,
+    parse_numeric_text,
+)
 
 
 class SettingsWindow:
@@ -27,6 +33,7 @@ class SettingsWindow:
         self.root.geometry("760x620")
         self.root.minsize(700, 560)
         self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
+        self.numeric_vars = {}
 
         # Set icon if possible
         # self.root.iconbitmap("path/to/icon.ico")
@@ -76,6 +83,11 @@ class SettingsWindow:
             self.pause_media_var,
         )
 
+        vad = self.tabs.tab("VAD")
+        self._add_number_row(vad, 0, SETTINGS_BY_KEY["vad_aggressiveness"])
+        self._add_number_row(vad, 1, SETTINGS_BY_KEY["vad_padding_ms"])
+        self._add_number_row(vad, 2, SETTINGS_BY_KEY["vad_silence_duration_ms"])
+
         transcription = self.tabs.tab("Transcription")
         self._add_select_row(
             transcription,
@@ -98,6 +110,14 @@ class SettingsWindow:
             self.lang_var,
             "Leave blank or enter none for automatic language detection.",
         )
+        self._add_number_row(
+            transcription,
+            3,
+            SETTINGS_BY_KEY["max_recording_duration"],
+        )
+
+        cleanup = self.tabs.tab("LLM Cleanup")
+        self._add_number_row(cleanup, 0, SETTINGS_BY_KEY["ollama_timeout_seconds"])
 
         privacy = self.tabs.tab("Data Privacy")
         self._add_switch(
@@ -174,6 +194,88 @@ class SettingsWindow:
                 wraplength=620,
             ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
 
+    def _add_number_row(self, parent, row, setting):
+        current_value = normalize_value(
+            self.config.get(setting.key, setting.default),
+            setting,
+        )
+        entry_var = tk.StringVar(value=str(current_value))
+        slider_var = tk.DoubleVar(value=current_value)
+        self.numeric_vars[setting.key] = entry_var
+
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.grid(row=row, column=0, sticky="ew", padx=16, pady=12)
+        frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(frame, text=setting.label, anchor="w").grid(
+            row=0, column=0, sticky="w"
+        )
+        value_label = ctk.CTkLabel(frame, text=f"Current: {current_value}")
+        value_label.grid(row=0, column=2, sticky="e", padx=(12, 0))
+
+        def on_slider(value):
+            rounded_value = normalize_value(value, setting)
+            entry_var.set(str(rounded_value))
+            value_label.configure(text=f"Current: {rounded_value}")
+
+        slider = ctk.CTkSlider(
+            frame,
+            from_=setting.min_value,
+            to=setting.max_value,
+            variable=slider_var,
+            command=on_slider,
+        )
+        slider.grid(row=1, column=1, sticky="ew", padx=(16, 12), pady=(6, 0))
+
+        def on_entry_change(*_args):
+            try:
+                parsed_value = parse_numeric_text(entry_var.get(), setting)
+            except NumericSettingError:
+                value_label.configure(text="Current: invalid")
+                return
+            slider_var.set(parsed_value)
+            value_label.configure(text=f"Current: {parsed_value}")
+
+        entry_var.trace_add("write", on_entry_change)
+        ctk.CTkEntry(frame, textvariable=entry_var, width=88).grid(
+            row=1, column=2, sticky="e", pady=(6, 0)
+        )
+        ctk.CTkLabel(
+            frame,
+            text=(
+                f"Min {setting.min_value:g} | Max {setting.max_value:g} | "
+                f"Default {setting.default}"
+            ),
+            anchor="w",
+            text_color=("gray35", "gray70"),
+        ).grid(row=2, column=1, sticky="w", padx=(16, 0), pady=(4, 0))
+        if setting.help_text:
+            ctk.CTkLabel(
+                frame,
+                text=setting.help_text,
+                anchor="w",
+                justify="left",
+                text_color=("gray35", "gray70"),
+                wraplength=520,
+            ).grid(row=3, column=1, columnspan=2, sticky="ew", padx=(16, 0), pady=(4, 0))
+
+    def _collect_numeric_values(self):
+        numeric_values = {}
+        for key, variable in getattr(self, "numeric_vars", {}).items():
+            setting = SETTINGS_BY_KEY[key]
+            try:
+                parsed_value = parse_numeric_text(variable.get(), setting)
+            except NumericSettingError:
+                variable.set(str(setting.default))
+                messagebox.showerror(
+                    "Murmur",
+                    f"Please enter a number for {setting.label}.",
+                )
+                return None
+            variable.set(str(parsed_value))
+            numeric_values[key] = parsed_value
+        return numeric_values
+
     def _purge_training_data(self):
         if not messagebox.askyesno(
             "Delete logged data",
@@ -216,6 +318,10 @@ class SettingsWindow:
                 return
 
         lang = self.lang_var.get().strip()
+        numeric_values = self._collect_numeric_values()
+        if numeric_values is None:
+            return
+
         old_autostart = self.config.start_with_windows
         new_autostart = self.autostart_var.get()
         updated_values = {
@@ -227,6 +333,7 @@ class SettingsWindow:
             "enable_logging": new_logging,
             "pause_media_while_recording": self.pause_media_var.get(),
         }
+        updated_values.update(numeric_values)
 
         if previous_logging != new_logging:
             updated_values["logging_consent_updated_at"] = datetime.now().isoformat()

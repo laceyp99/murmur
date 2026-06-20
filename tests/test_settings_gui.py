@@ -32,6 +32,18 @@ class FakeConfig:
             self.set(key, value)
 
 
+def make_numeric_vars(**overrides):
+    values = {
+        "vad_aggressiveness": "1",
+        "vad_padding_ms": "220",
+        "vad_silence_duration_ms": "400",
+        "max_recording_duration": "300",
+        "ollama_timeout_seconds": "60",
+    }
+    values.update(overrides)
+    return {key: FakeValue(value) for key, value in values.items()}
+
+
 class FakeLogger:
     def __init__(self):
         self.enabled_calls = []
@@ -82,6 +94,10 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     window.logging_var = FakeValue(True)
     window.pause_media_var = FakeValue(False)
     window.autostart_var = FakeValue(True)
+    window.numeric_vars = make_numeric_vars(
+        vad_aggressiveness="99",
+        ollama_timeout_seconds="30",
+    )
     window.root = SimpleNamespace(destroy=lambda: None)
 
     window._save()
@@ -94,6 +110,11 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
         ("enable_notifications", True),
         ("enable_logging", True),
         ("pause_media_while_recording", False),
+        ("vad_aggressiveness", 3),
+        ("vad_padding_ms", 220),
+        ("vad_silence_duration_ms", 400),
+        ("max_recording_duration", 300),
+        ("ollama_timeout_seconds", 60),
         ("logging_consent_updated_at", "2026-05-25T12:00:00"),
         ("logging_consent_source", "settings"),
         ("start_with_windows", True),
@@ -140,6 +161,7 @@ def test_save_rejects_invalid_hotkey_without_persisting_changes(monkeypatch):
     window.logging_var = FakeValue(False)
     window.pause_media_var = FakeValue(True)
     window.autostart_var = FakeValue(False)
+    window.numeric_vars = make_numeric_vars()
     window.root = SimpleNamespace(destroy=lambda: destroy_calls.append(True))
 
     window._save()
@@ -149,4 +171,44 @@ def test_save_rejects_invalid_hotkey_without_persisting_changes(monkeypatch):
     assert set_autostart_calls == []
     assert destroy_calls == []
     assert len(info_calls) == 0
+    assert len(error_calls) == 1
+
+
+def test_save_rejects_non_numeric_setting_and_resets_field(monkeypatch):
+    config = FakeConfig()
+    logger = FakeLogger()
+    error_calls = []
+    destroy_calls = []
+
+    monkeypatch.setattr(settings_module, "is_hotkey_valid", lambda value: True)
+    monkeypatch.setattr(
+        settings_module,
+        "messagebox",
+        SimpleNamespace(
+            askyesno=lambda *args, **kwargs: True,
+            showinfo=lambda *args, **kwargs: None,
+            showerror=lambda *args, **kwargs: error_calls.append((args, kwargs)),
+        ),
+    )
+
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.config = config
+    window.logger = logger
+    window.hotkey_var = FakeValue("ctrl+alt+space")
+    window.model_var = FakeValue("small")
+    window.device_var = FakeValue("cpu")
+    window.lang_var = FakeValue("")
+    window.notify_var = FakeValue(True)
+    window.logging_var = FakeValue(False)
+    window.pause_media_var = FakeValue(True)
+    window.autostart_var = FakeValue(False)
+    window.numeric_vars = make_numeric_vars(max_recording_duration="abc")
+    window.root = SimpleNamespace(destroy=lambda: destroy_calls.append(True))
+
+    window._save()
+
+    assert config.set_calls == []
+    assert logger.enabled_calls == []
+    assert destroy_calls == []
+    assert window.numeric_vars["max_recording_duration"].get() == "300"
     assert len(error_calls) == 1
