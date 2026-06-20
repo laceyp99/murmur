@@ -94,6 +94,10 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     window.logging_var = FakeValue(True)
     window.pause_media_var = FakeValue(False)
     window.autostart_var = FakeValue(True)
+    window.ollama_enabled_var = FakeValue(True)
+    window.ollama_endpoint_var = FakeValue(" http://localhost:11434 ")
+    window.ollama_model_name_var = FakeValue("granite4.1:3b")
+    window.ollama_preload_model_var = FakeValue(False)
     window.numeric_vars = make_numeric_vars(
         vad_aggressiveness="99",
         ollama_timeout_seconds="30",
@@ -110,6 +114,10 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
         ("enable_notifications", True),
         ("enable_logging", True),
         ("pause_media_while_recording", False),
+        ("ollama_enabled", True),
+        ("ollama_endpoint", "http://localhost:11434"),
+        ("ollama_model_name", "granite4.1:3b"),
+        ("ollama_preload_model", False),
         ("vad_aggressiveness", 3),
         ("vad_padding_ms", 220),
         ("vad_silence_duration_ms", 400),
@@ -161,6 +169,10 @@ def test_save_rejects_invalid_hotkey_without_persisting_changes(monkeypatch):
     window.logging_var = FakeValue(False)
     window.pause_media_var = FakeValue(True)
     window.autostart_var = FakeValue(False)
+    window.ollama_enabled_var = FakeValue(True)
+    window.ollama_endpoint_var = FakeValue("http://localhost:11434")
+    window.ollama_model_name_var = FakeValue("granite4.1:3b")
+    window.ollama_preload_model_var = FakeValue(True)
     window.numeric_vars = make_numeric_vars()
     window.root = SimpleNamespace(destroy=lambda: destroy_calls.append(True))
 
@@ -202,6 +214,10 @@ def test_save_rejects_non_numeric_setting_and_resets_field(monkeypatch):
     window.logging_var = FakeValue(False)
     window.pause_media_var = FakeValue(True)
     window.autostart_var = FakeValue(False)
+    window.ollama_enabled_var = FakeValue(True)
+    window.ollama_endpoint_var = FakeValue("http://localhost:11434")
+    window.ollama_model_name_var = FakeValue("granite4.1:3b")
+    window.ollama_preload_model_var = FakeValue(True)
     window.numeric_vars = make_numeric_vars(max_recording_duration="abc")
     window.root = SimpleNamespace(destroy=lambda: destroy_calls.append(True))
 
@@ -212,3 +228,40 @@ def test_save_rejects_non_numeric_setting_and_resets_field(monkeypatch):
     assert destroy_calls == []
     assert window.numeric_vars["max_recording_duration"].get() == "300"
     assert len(error_calls) == 1
+
+
+def test_ollama_connection_test_uses_unsaved_values(monkeypatch):
+    checks = []
+    info_calls = []
+
+    monkeypatch.setattr(
+        settings_module,
+        "check_ollama_connection",
+        lambda **kwargs: checks.append(kwargs)
+        or SimpleNamespace(ok=True, message="connected"),
+    )
+    monkeypatch.setattr(
+        settings_module,
+        "messagebox",
+        SimpleNamespace(
+            askyesno=lambda *args, **kwargs: True,
+            showinfo=lambda *args, **kwargs: info_calls.append((args, kwargs)),
+            showerror=lambda *args, **kwargs: None,
+        ),
+    )
+
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.ollama_endpoint_var = FakeValue("http://127.0.0.1:11434")
+    window.ollama_model_name_var = FakeValue("qwen:latest")
+    window.numeric_vars = make_numeric_vars(ollama_timeout_seconds="300")
+
+    window._test_ollama_connection()
+
+    assert checks == [
+        {
+            "endpoint": "http://127.0.0.1:11434",
+            "model_name": "qwen:latest",
+            "timeout": 5,
+        }
+    ]
+    assert len(info_calls) == 1

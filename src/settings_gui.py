@@ -9,6 +9,7 @@ import customtkinter as ctk
 from .autostart import set_autostart
 from .config import ConfigError, get_config, get_training_data_dir
 from .hotkey import is_hotkey_valid
+from .llm_postprocess import check_ollama_connection
 from .logger import get_logger
 from .settings_schema import (
     SETTINGS_BY_KEY,
@@ -71,6 +72,12 @@ class SettingsWindow:
         self.pause_media_var = tk.BooleanVar(
             value=self.config.pause_media_while_recording
         )
+        self.ollama_enabled_var = tk.BooleanVar(value=self.config.ollama_enabled)
+        self.ollama_endpoint_var = tk.StringVar(value=self.config.ollama_endpoint)
+        self.ollama_model_name_var = tk.StringVar(value=self.config.ollama_model_name)
+        self.ollama_preload_model_var = tk.BooleanVar(
+            value=self.config.ollama_preload_model
+        )
 
         general = self.tabs.tab("General")
         self._add_text_row(general, 0, "Hotkey", self.hotkey_var)
@@ -117,7 +124,36 @@ class SettingsWindow:
         )
 
         cleanup = self.tabs.tab("LLM Cleanup")
-        self._add_number_row(cleanup, 0, SETTINGS_BY_KEY["ollama_timeout_seconds"])
+        self._add_switch(
+            cleanup,
+            0,
+            "Enable Ollama cleanup",
+            self.ollama_enabled_var,
+        )
+        self._add_text_row(
+            cleanup,
+            1,
+            "Ollama endpoint",
+            self.ollama_endpoint_var,
+        )
+        self._add_text_row(
+            cleanup,
+            2,
+            "Ollama model",
+            self.ollama_model_name_var,
+        )
+        self._add_number_row(cleanup, 3, SETTINGS_BY_KEY["ollama_timeout_seconds"])
+        self._add_switch(
+            cleanup,
+            4,
+            "Preload Ollama model",
+            self.ollama_preload_model_var,
+        )
+        ctk.CTkButton(
+            cleanup,
+            text="Test Ollama Connection",
+            command=self._test_ollama_connection,
+        ).grid(row=5, column=0, sticky="w", padx=16, pady=(8, 10))
 
         privacy = self.tabs.tab("Data Privacy")
         self._add_switch(
@@ -276,6 +312,24 @@ class SettingsWindow:
             numeric_values[key] = parsed_value
         return numeric_values
 
+    def _test_ollama_connection(self):
+        timeout_setting = SETTINGS_BY_KEY["ollama_timeout_seconds"]
+        timeout_var = self.numeric_vars.get("ollama_timeout_seconds")
+        try:
+            configured_timeout = parse_numeric_text(timeout_var.get(), timeout_setting)
+        except (AttributeError, NumericSettingError):
+            configured_timeout = timeout_setting.default
+
+        result = check_ollama_connection(
+            endpoint=self.ollama_endpoint_var.get(),
+            model_name=self.ollama_model_name_var.get(),
+            timeout=max(1, min(configured_timeout, 5)),
+        )
+        if result.ok:
+            messagebox.showinfo("Murmur", result.message)
+        else:
+            messagebox.showerror("Murmur", result.message)
+
     def _purge_training_data(self):
         if not messagebox.askyesno(
             "Delete logged data",
@@ -332,6 +386,10 @@ class SettingsWindow:
             "enable_notifications": self.notify_var.get(),
             "enable_logging": new_logging,
             "pause_media_while_recording": self.pause_media_var.get(),
+            "ollama_enabled": self.ollama_enabled_var.get(),
+            "ollama_endpoint": self.ollama_endpoint_var.get().strip(),
+            "ollama_model_name": self.ollama_model_name_var.get().strip(),
+            "ollama_preload_model": self.ollama_preload_model_var.get(),
         }
         updated_values.update(numeric_values)
 
