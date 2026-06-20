@@ -51,6 +51,7 @@ SETTINGS: tuple[SettingMetadata, ...] = (
         value_type="str",
         default=DEFAULT_CONFIG["hotkey"],
         help_text="Keyboard shortcut that starts and stops recording.",
+        restart_required=True,
     ),
     SettingMetadata(
         key="enable_notifications",
@@ -195,6 +196,7 @@ SETTINGS: tuple[SettingMetadata, ...] = (
         max_value=300,
         step=15,
         help_text="Maximum seconds to wait for one final cleanup request.",
+        restart_required=True,
     ),
     SettingMetadata(
         key="ollama_preload_model",

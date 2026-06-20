@@ -177,8 +177,13 @@ class DataLogger:
 
         file_count = 0
         total_bytes = 0
-        for path in self.log_dir.rglob("*"):
-            if not path.is_file():
+        purge_targets = []
+        if self.audio_dir.exists():
+            purge_targets.extend(path for path in self.audio_dir.rglob("*"))
+        purge_targets.append(self.metadata_file)
+
+        for path in purge_targets:
+            if not path.exists() or not path.is_file():
                 continue
             file_count += 1
             try:

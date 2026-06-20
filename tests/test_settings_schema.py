@@ -47,6 +47,11 @@ def test_bounded_numeric_metadata_has_defaults_within_range():
         assert setting.min_value <= setting.default <= setting.max_value
 
 
+def test_runtime_cached_settings_are_marked_restart_required():
+    assert SETTINGS_BY_KEY["hotkey"].restart_required is True
+    assert SETTINGS_BY_KEY["ollama_timeout_seconds"].restart_required is True
+
+
 def test_numeric_values_are_clamped_for_display_and_save():
     timeout = SETTINGS_BY_KEY["ollama_timeout_seconds"]
 

@@ -85,6 +85,7 @@ def test_storage_summary_counts_existing_logged_files_without_creating_dir(
     audio_dir.mkdir(parents=True)
     (audio_dir / "sample.wav").write_bytes(b"12345")
     (log_dir / "transcriptions.jsonl").write_text("{}", encoding="utf-8")
+    (log_dir / "unrelated.tmp").write_text("ignored", encoding="utf-8")
 
     summary = data_logger.get_storage_summary()
 
