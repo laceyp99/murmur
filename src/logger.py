@@ -32,6 +32,14 @@ class TranscriptionLog:
     live_segment_latency_max_seconds: Optional[float]
 
 
+@dataclass(frozen=True)
+class TrainingDataStorageSummary:
+    """Approximate local storage used by logged training data."""
+
+    file_count: int
+    total_bytes: int
+
+
 class DataLogger:
     """
     Logs audio recordings and transcriptions for training data collection.
@@ -161,6 +169,27 @@ class DataLogger:
             self.log_dir.rmdir()
 
         return removed_files
+
+    def get_storage_summary(self) -> TrainingDataStorageSummary:
+        """Return file count and total bytes for existing logged training data."""
+        if not self.log_dir.exists():
+            return TrainingDataStorageSummary(file_count=0, total_bytes=0)
+
+        file_count = 0
+        total_bytes = 0
+        for path in self.log_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            file_count += 1
+            try:
+                total_bytes += path.stat().st_size
+            except OSError:
+                continue
+
+        return TrainingDataStorageSummary(
+            file_count=file_count,
+            total_bytes=total_bytes,
+        )
 
     def get_entry_count(self) -> int:
         """Get the number of logged entries."""

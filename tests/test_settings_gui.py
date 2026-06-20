@@ -52,9 +52,18 @@ def make_numeric_vars(**overrides):
 class FakeLogger:
     def __init__(self):
         self.enabled_calls = []
+        self.summary = SimpleNamespace(file_count=0, total_bytes=0)
+        self.purge_calls = 0
 
     def set_enabled(self, enabled):
         self.enabled_calls.append(enabled)
+
+    def get_storage_summary(self):
+        return self.summary
+
+    def purge_all(self):
+        self.purge_calls += 1
+        return self.summary.file_count
 
 
 def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
@@ -289,4 +298,31 @@ def test_ollama_connection_test_uses_unsaved_values(monkeypatch):
             "timeout": 5,
         }
     ]
+    assert len(info_calls) == 1
+
+
+def test_purge_training_data_confirms_count_and_size(monkeypatch):
+    logger = FakeLogger()
+    logger.summary = SimpleNamespace(file_count=2, total_bytes=1536)
+    confirm_messages = []
+    info_calls = []
+
+    monkeypatch.setattr(
+        settings_module,
+        "messagebox",
+        SimpleNamespace(
+            askyesno=lambda title, message: confirm_messages.append(message) or True,
+            showinfo=lambda *args, **kwargs: info_calls.append((args, kwargs)),
+            showerror=lambda *args, **kwargs: None,
+        ),
+    )
+
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.logger = logger
+
+    window._purge_training_data()
+
+    assert logger.purge_calls == 1
+    assert "Files: 2" in confirm_messages[0]
+    assert "Approximate size: 1.5 KB" in confirm_messages[0]
     assert len(info_calls) == 1

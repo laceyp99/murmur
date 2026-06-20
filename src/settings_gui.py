@@ -21,6 +21,14 @@ from .settings_schema import (
 )
 
 
+def _format_bytes(size_bytes):
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+
 class SettingsWindow:
     """A tabbed customtkinter window for editing Murmur configuration."""
 
@@ -389,9 +397,18 @@ class SettingsWindow:
             messagebox.showerror("Murmur", result.message)
 
     def _purge_training_data(self):
+        summary = self.logger.get_storage_summary()
+        if summary.file_count == 0:
+            messagebox.showinfo("Murmur", "No logged training data was found.")
+            return
+
         if not messagebox.askyesno(
             "Delete logged data",
-            "Delete all stored WAV files and transcription logs from the local training data folder?",
+            (
+                "Delete all stored WAV files and transcription logs from the local "
+                f"training data folder?\n\nFiles: {summary.file_count}\n"
+                f"Approximate size: {_format_bytes(summary.total_bytes)}"
+            ),
         ):
             return
 

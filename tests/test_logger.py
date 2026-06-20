@@ -66,3 +66,27 @@ def test_data_logger_writes_empty_live_segment_metrics_by_default(
     assert entry["live_segment_count"] == 0
     assert entry["live_segment_latency_avg_seconds"] is None
     assert entry["live_segment_latency_max_seconds"] is None
+
+
+def test_storage_summary_counts_existing_logged_files_without_creating_dir(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(logger_module, "get_config", lambda: FakeConfig())
+    log_dir = tmp_path / "training_data"
+    data_logger = DataLogger(log_dir=log_dir)
+
+    empty_summary = data_logger.get_storage_summary()
+
+    assert empty_summary.file_count == 0
+    assert empty_summary.total_bytes == 0
+    assert not log_dir.exists()
+
+    audio_dir = log_dir / "audio"
+    audio_dir.mkdir(parents=True)
+    (audio_dir / "sample.wav").write_bytes(b"12345")
+    (log_dir / "transcriptions.jsonl").write_text("{}", encoding="utf-8")
+
+    summary = data_logger.get_storage_summary()
+
+    assert summary.file_count == 2
+    assert summary.total_bytes == 7
