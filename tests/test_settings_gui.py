@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.config import DEFAULT_CONFIG
+
 
 settings_module = pytest.importorskip("src.settings_gui")
 
@@ -30,6 +32,9 @@ class FakeConfig:
     def update(self, values):
         for key, value in values.items():
             self.set(key, value)
+
+    def get(self, key, default=None):
+        return getattr(self, key, DEFAULT_CONFIG.get(key, default))
 
 
 def make_numeric_vars(**overrides):
@@ -130,6 +135,7 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     assert logger.enabled_calls == [True]
     assert set_autostart_calls == [True]
     assert len(info_calls) == 1
+    assert "Device" in info_calls[0][0][1]
 
 
 def test_save_rejects_invalid_hotkey_without_persisting_changes(monkeypatch):
@@ -230,6 +236,24 @@ def test_save_rejects_non_numeric_setting_and_resets_field(monkeypatch):
     assert len(error_calls) == 1
 
 
+def test_reset_tab_to_defaults_preserves_other_tab_edits():
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    hotkey_var = FakeValue("ctrl+alt+p")
+    vad_var = FakeValue("800")
+    model_var = FakeValue("large")
+    window.setting_vars = {
+        "hotkey": hotkey_var,
+        "vad_padding_ms": vad_var,
+        "model": model_var,
+    }
+
+    window._reset_tab_to_defaults("VAD")
+
+    assert hotkey_var.get() == "ctrl+alt+p"
+    assert vad_var.get() == "220"
+    assert model_var.get() == "large"
+
+
 def test_ollama_connection_test_uses_unsaved_values(monkeypatch):
     checks = []
     info_calls = []
@@ -237,8 +261,9 @@ def test_ollama_connection_test_uses_unsaved_values(monkeypatch):
     monkeypatch.setattr(
         settings_module,
         "check_ollama_connection",
-        lambda **kwargs: checks.append(kwargs)
-        or SimpleNamespace(ok=True, message="connected"),
+        lambda **kwargs: (
+            checks.append(kwargs) or SimpleNamespace(ok=True, message="connected")
+        ),
     )
     monkeypatch.setattr(
         settings_module,

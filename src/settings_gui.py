@@ -17,6 +17,7 @@ from .settings_schema import (
     NumericSettingError,
     normalize_value,
     parse_numeric_text,
+    settings_for_tab,
 )
 
 
@@ -34,6 +35,7 @@ class SettingsWindow:
         self.root.geometry("760x620")
         self.root.minsize(700, 560)
         self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
+        self.setting_vars = {}
         self.numeric_vars = {}
 
         # Set icon if possible
@@ -77,6 +79,22 @@ class SettingsWindow:
         self.ollama_model_name_var = tk.StringVar(value=self.config.ollama_model_name)
         self.ollama_preload_model_var = tk.BooleanVar(
             value=self.config.ollama_preload_model
+        )
+        self.setting_vars.update(
+            {
+                "hotkey": self.hotkey_var,
+                "model": self.model_var,
+                "device": self.device_var,
+                "language": self.lang_var,
+                "enable_notifications": self.notify_var,
+                "enable_logging": self.logging_var,
+                "start_with_windows": self.autostart_var,
+                "pause_media_while_recording": self.pause_media_var,
+                "ollama_enabled": self.ollama_enabled_var,
+                "ollama_endpoint": self.ollama_endpoint_var,
+                "ollama_model_name": self.ollama_model_name_var,
+                "ollama_preload_model": self.ollama_preload_model_var,
+            }
         )
 
         general = self.tabs.tab("General")
@@ -176,15 +194,23 @@ class SettingsWindow:
             command=self._purge_training_data,
         ).grid(row=2, column=0, sticky="w", padx=16, pady=(4, 10))
 
+        for tab_name in TAB_ORDER:
+            self._add_tab_reset_button(self.tabs.tab(tab_name), tab_name)
+
         button_bar = ctk.CTkFrame(self.root, fg_color="transparent")
         button_bar.grid(row=2, column=0, sticky="ew", padx=24, pady=(8, 20))
         button_bar.grid_columnconfigure(0, weight=1)
         ctk.CTkButton(button_bar, text="Cancel", command=self.root.destroy).grid(
             row=0, column=1, padx=(0, 8)
         )
-        ctk.CTkButton(button_bar, text="Save", command=self._save).grid(
-            row=0, column=2
-        )
+        ctk.CTkButton(button_bar, text="Save", command=self._save).grid(row=0, column=2)
+
+    def _add_tab_reset_button(self, parent, tab_name):
+        ctk.CTkButton(
+            parent,
+            text="Reset This Tab",
+            command=lambda: self._reset_tab_to_defaults(tab_name),
+        ).grid(row=99, column=0, sticky="w", padx=16, pady=(16, 10))
 
     def _add_text_row(self, parent, row, label, variable, help_text=""):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -238,6 +264,7 @@ class SettingsWindow:
         entry_var = tk.StringVar(value=str(current_value))
         slider_var = tk.DoubleVar(value=current_value)
         self.numeric_vars[setting.key] = entry_var
+        self.setting_vars[setting.key] = entry_var
 
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.grid(row=row, column=0, sticky="ew", padx=16, pady=12)
@@ -293,7 +320,9 @@ class SettingsWindow:
                 justify="left",
                 text_color=("gray35", "gray70"),
                 wraplength=520,
-            ).grid(row=3, column=1, columnspan=2, sticky="ew", padx=(16, 0), pady=(4, 0))
+            ).grid(
+                row=3, column=1, columnspan=2, sticky="ew", padx=(16, 0), pady=(4, 0)
+            )
 
     def _collect_numeric_values(self):
         numeric_values = {}
@@ -311,6 +340,35 @@ class SettingsWindow:
             variable.set(str(parsed_value))
             numeric_values[key] = parsed_value
         return numeric_values
+
+    def _reset_tab_to_defaults(self, tab_name):
+        for setting in settings_for_tab(tab_name):
+            variable = self.setting_vars.get(setting.key)
+            if variable is None:
+                continue
+
+            default_value = normalize_value(setting.default, setting)
+            if setting.value_type == "optional_str" and default_value is None:
+                default_value = ""
+            variable.set(
+                default_value if setting.value_type == "bool" else str(default_value)
+            )
+
+    def _read_config_value(self, key):
+        if hasattr(self.config, "get"):
+            return self.config.get(key, SETTINGS_BY_KEY[key].default)
+        return getattr(self.config, key, SETTINGS_BY_KEY[key].default)
+
+    def _changed_restart_settings(self, updated_values):
+        changed_restart_settings = []
+        for key, new_value in updated_values.items():
+            setting = SETTINGS_BY_KEY.get(key)
+            if setting is None or not setting.restart_required:
+                continue
+            old_value = normalize_value(self._read_config_value(key), setting)
+            if old_value != normalize_value(new_value, setting):
+                changed_restart_settings.append(setting.label)
+        return changed_restart_settings
 
     def _test_ollama_connection(self):
         timeout_setting = SETTINGS_BY_KEY["ollama_timeout_seconds"]
@@ -393,6 +451,8 @@ class SettingsWindow:
         }
         updated_values.update(numeric_values)
 
+        restart_settings = self._changed_restart_settings(updated_values)
+
         if previous_logging != new_logging:
             updated_values["logging_consent_updated_at"] = datetime.now().isoformat()
             updated_values["logging_consent_source"] = "settings"
@@ -411,9 +471,14 @@ class SettingsWindow:
         if old_autostart != new_autostart:
             set_autostart(new_autostart)
 
-        messagebox.showinfo(
-            "Murmur", "Settings saved! Some changes may require a restart."
-        )
+        if restart_settings:
+            messagebox.showinfo(
+                "Murmur",
+                "Settings saved. Restart Murmur for these changes to fully apply: "
+                + ", ".join(restart_settings),
+            )
+        else:
+            messagebox.showinfo("Murmur", "Settings saved.")
         self.root.destroy()
 
     def show(self):
