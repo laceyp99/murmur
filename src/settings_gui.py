@@ -1,26 +1,32 @@
-"""
-Settings GUI for Murmur using tkinter.
-"""
+"""Settings GUI for Murmur using customtkinter."""
 
 import tkinter as tk
 from datetime import datetime
-from tkinter import ttk, messagebox
-from .config import ConfigError, get_config, get_training_data_dir
+from tkinter import messagebox
+
+import customtkinter as ctk
+
 from .autostart import set_autostart
+from .config import ConfigError, get_config, get_training_data_dir
 from .hotkey import is_hotkey_valid
 from .logger import get_logger
+from .settings_schema import TAB_ORDER
 
 
 class SettingsWindow:
-    """A simple tkinter window for editing Murmur configuration."""
+    """A tabbed customtkinter window for editing Murmur configuration."""
 
     def __init__(self):
         self.config = get_config()
         self.logger = get_logger()
-        self.root = tk.Tk()
+        ctk.set_appearance_mode("system")
+        ctk.set_default_color_theme("blue")
+
+        self.root = ctk.CTk()
         self.root.title("Murmur Settings")
-        self.root.geometry("460x560")
-        self.root.resizable(False, False)
+        self.root.geometry("760x620")
+        self.root.minsize(700, 560)
+        self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
 
         # Set icon if possible
         # self.root.iconbitmap("path/to/icon.ico")
@@ -28,112 +34,145 @@ class SettingsWindow:
         self._setup_ui()
 
     def _setup_ui(self):
-        main_frame = ttk.Frame(self.root, padding="20")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_rowconfigure(1, weight=1)
 
-        # Hotkey
-        ttk.Label(main_frame, text="Hotkey:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        header = ctk.CTkFrame(self.root, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 8))
+        header.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            header,
+            text="Murmur Settings",
+            font=ctk.CTkFont(size=24, weight="bold"),
+        ).grid(row=0, column=0, sticky="w")
+
+        self.tabs = ctk.CTkTabview(self.root)
+        self.tabs.grid(row=1, column=0, sticky="nsew", padx=24, pady=8)
+        for tab_name in TAB_ORDER:
+            tab = self.tabs.add(tab_name)
+            tab.grid_columnconfigure(0, weight=1)
+
         self.hotkey_var = tk.StringVar(value=self.config.hotkey)
-        ttk.Entry(main_frame, textvariable=self.hotkey_var).grid(
-            row=0, column=1, sticky=tk.EW, pady=5
-        )
-
-        # Model
-        ttk.Label(main_frame, text="Whisper Model:").grid(
-            row=1, column=0, sticky=tk.W, pady=5
-        )
         self.model_var = tk.StringVar(value=self.config.model_name)
-        models = ["tiny", "base", "small", "medium", "large"]
-        ttk.Combobox(
-            main_frame, textvariable=self.model_var, values=models, state="readonly"
-        ).grid(row=1, column=1, sticky=tk.EW, pady=5)
-
-        # Device
-        ttk.Label(main_frame, text="Device:").grid(row=2, column=0, sticky=tk.W, pady=5)
         self.device_var = tk.StringVar(value=self.config.device)
-        devices = ["cuda", "cpu"]
-        ttk.Combobox(
-            main_frame, textvariable=self.device_var, values=devices, state="readonly"
-        ).grid(row=2, column=1, sticky=tk.EW, pady=5)
-
-        # Language
-        ttk.Label(main_frame, text="Language (null for auto):").grid(
-            row=3, column=0, sticky=tk.W, pady=5
-        )
         self.lang_var = tk.StringVar(
             value=str(self.config.language) if self.config.language else ""
         )
-        ttk.Entry(main_frame, textvariable=self.lang_var).grid(
-            row=3, column=1, sticky=tk.EW, pady=5
-        )
-
-        # Notifications
         self.notify_var = tk.BooleanVar(value=self.config.enable_notifications)
-        ttk.Checkbutton(
-            main_frame, text="Enable Notifications", variable=self.notify_var
-        ).grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=5)
-
-        # Logging
         self.logging_var = tk.BooleanVar(value=self.config.enable_logging)
-        ttk.Checkbutton(
-            main_frame, text="Enable Training Data Logging", variable=self.logging_var
-        ).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=5)
-
-        ttk.Label(
-            main_frame,
-            text=(
-                "When enabled, Murmur stores raw WAV audio and transcript text locally "
-                "for training and fine-tuning. Leave this off unless you explicitly want "
-                "to keep that data."
-            ),
-            wraplength=400,
-            justify=tk.LEFT,
-        ).grid(row=6, column=0, columnspan=2, sticky=tk.W, pady=(0, 10))
-
-        ttk.Label(main_frame, text="Training data location:").grid(
-            row=7, column=0, sticky=tk.W, pady=(0, 5)
-        )
-        ttk.Label(
-            main_frame,
-            text=str(get_training_data_dir()),
-            wraplength=400,
-            justify=tk.LEFT,
-        ).grid(row=8, column=0, columnspan=2, sticky=tk.W, pady=(0, 10))
-
-        ttk.Button(
-            main_frame,
-            text="Delete Logged Data",
-            command=self._purge_training_data,
-        ).grid(row=9, column=0, columnspan=2, sticky=tk.W, pady=(0, 10))
-
-        # Auto-start
         self.autostart_var = tk.BooleanVar(value=self.config.start_with_windows)
-        ttk.Checkbutton(
-            main_frame, text="Start with Windows", variable=self.autostart_var
-        ).grid(row=10, column=0, columnspan=2, sticky=tk.W, pady=5)
-
-        # Pause media while recording
         self.pause_media_var = tk.BooleanVar(
             value=self.config.pause_media_while_recording
         )
-        ttk.Checkbutton(
-            main_frame,
-            text="Pause media while recording",
-            variable=self.pause_media_var,
-        ).grid(row=11, column=0, columnspan=2, sticky=tk.W, pady=5)
 
-        # Buttons
-        btn_frame = ttk.Frame(main_frame, padding="20")
-        btn_frame.grid(row=12, column=0, columnspan=2, sticky=tk.EW)
-
-        ttk.Button(btn_frame, text="Save", command=self._save).pack(
-            side=tk.RIGHT, padx=5
-        )
-        ttk.Button(btn_frame, text="Cancel", command=self.root.destroy).pack(
-            side=tk.RIGHT, padx=5
+        general = self.tabs.tab("General")
+        self._add_text_row(general, 0, "Hotkey", self.hotkey_var)
+        self._add_switch(general, 1, "Enable notifications", self.notify_var)
+        self._add_switch(general, 2, "Start with Windows", self.autostart_var)
+        self._add_switch(
+            general,
+            3,
+            "Pause media while recording",
+            self.pause_media_var,
         )
 
-        main_frame.columnconfigure(1, weight=1)
+        transcription = self.tabs.tab("Transcription")
+        self._add_select_row(
+            transcription,
+            0,
+            "Whisper model",
+            self.model_var,
+            ["tiny", "base", "small", "medium", "large"],
+        )
+        self._add_select_row(
+            transcription,
+            1,
+            "Device",
+            self.device_var,
+            ["cuda", "cpu"],
+        )
+        self._add_text_row(
+            transcription,
+            2,
+            "Language",
+            self.lang_var,
+            "Leave blank or enter none for automatic language detection.",
+        )
+
+        privacy = self.tabs.tab("Data Privacy")
+        self._add_switch(
+            privacy,
+            0,
+            "Enable training data logging",
+            self.logging_var,
+            "Stores raw WAV audio and transcript text locally after confirmation.",
+        )
+        ctk.CTkLabel(
+            privacy,
+            text=f"Training data location:\n{get_training_data_dir()}",
+            anchor="w",
+            justify="left",
+            wraplength=620,
+        ).grid(row=1, column=0, sticky="ew", padx=16, pady=(10, 6))
+        ctk.CTkButton(
+            privacy,
+            text="Delete Logged Data",
+            command=self._purge_training_data,
+        ).grid(row=2, column=0, sticky="w", padx=16, pady=(4, 10))
+
+        button_bar = ctk.CTkFrame(self.root, fg_color="transparent")
+        button_bar.grid(row=2, column=0, sticky="ew", padx=24, pady=(8, 20))
+        button_bar.grid_columnconfigure(0, weight=1)
+        ctk.CTkButton(button_bar, text="Cancel", command=self.root.destroy).grid(
+            row=0, column=1, padx=(0, 8)
+        )
+        ctk.CTkButton(button_bar, text="Save", command=self._save).grid(
+            row=0, column=2
+        )
+
+    def _add_text_row(self, parent, row, label, variable, help_text=""):
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.grid(row=row, column=0, sticky="ew", padx=16, pady=10)
+        frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(frame, text=label, anchor="w").grid(row=0, column=0, sticky="w")
+        ctk.CTkEntry(frame, textvariable=variable).grid(
+            row=0, column=1, sticky="ew", padx=(16, 0)
+        )
+        if help_text:
+            ctk.CTkLabel(
+                frame,
+                text=help_text,
+                anchor="w",
+                justify="left",
+                text_color=("gray35", "gray70"),
+                wraplength=520,
+            ).grid(row=1, column=1, sticky="ew", padx=(16, 0), pady=(4, 0))
+
+    def _add_select_row(self, parent, row, label, variable, values):
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.grid(row=row, column=0, sticky="ew", padx=16, pady=10)
+        frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(frame, text=label, anchor="w").grid(row=0, column=0, sticky="w")
+        ctk.CTkOptionMenu(frame, variable=variable, values=values).grid(
+            row=0, column=1, sticky="ew", padx=(16, 0)
+        )
+
+    def _add_switch(self, parent, row, text, variable, help_text=""):
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.grid(row=row, column=0, sticky="ew", padx=16, pady=10)
+        frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkSwitch(frame, text=text, variable=variable).grid(
+            row=0, column=0, sticky="w"
+        )
+        if help_text:
+            ctk.CTkLabel(
+                frame,
+                text=help_text,
+                anchor="w",
+                justify="left",
+                text_color=("gray35", "gray70"),
+                wraplength=620,
+            ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
 
     def _purge_training_data(self):
         if not messagebox.askyesno(
