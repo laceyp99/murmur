@@ -17,6 +17,7 @@ dependencies = [
     "keyboard>=0.13.5",
     "pyperclip>=1.8.2",
     "ollama>=0.6.2",
+    "customtkinter>=5.2.2",
     "pystray>=0.19.5",
     "Pillow>=10.0.0",
     'win10toast>=0.9; platform_system == "Windows"',

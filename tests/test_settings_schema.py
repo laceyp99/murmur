@@ -1,0 +1,66 @@
+from src.config import DEFAULT_CONFIG
+from src.settings_schema import (
+    SETTINGS,
+    SETTINGS_BY_KEY,
+    TAB_ORDER,
+    NumericSettingError,
+    normalize_value,
+    parse_numeric_text,
+    settings_for_tab,
+)
+
+
+def test_settings_metadata_covers_gui_managed_config_without_sample_rate():
+    expected_keys = set(DEFAULT_CONFIG) - {
+        "sample_rate",
+        "logging_consent_updated_at",
+        "logging_consent_source",
+    }
+
+    assert set(SETTINGS_BY_KEY) == expected_keys
+    assert [setting.tab for setting in SETTINGS if setting.tab in TAB_ORDER]
+
+
+def test_tabs_have_expected_order_and_settings():
+    assert TAB_ORDER == (
+        "General",
+        "VAD",
+        "Transcription",
+        "LLM Cleanup",
+        "Data Privacy",
+    )
+    assert [setting.key for setting in settings_for_tab("VAD")] == [
+        "vad_aggressiveness",
+        "vad_padding_ms",
+        "vad_silence_duration_ms",
+    ]
+
+
+def test_bounded_numeric_metadata_has_defaults_within_range():
+    for setting in SETTINGS:
+        if not setting.bounded:
+            continue
+
+        assert setting.min_value is not None
+        assert setting.max_value is not None
+        assert setting.step is not None
+        assert setting.min_value <= setting.default <= setting.max_value
+
+
+def test_numeric_values_are_clamped_for_display_and_save():
+    timeout = SETTINGS_BY_KEY["ollama_timeout_seconds"]
+
+    assert normalize_value(10, timeout) == 60
+    assert normalize_value(999, timeout) == 300
+    assert parse_numeric_text("120", timeout) == 120
+
+
+def test_non_numeric_text_raises_for_save_parsing():
+    timeout = SETTINGS_BY_KEY["ollama_timeout_seconds"]
+
+    try:
+        parse_numeric_text("abc", timeout)
+    except NumericSettingError as exc:
+        assert str(exc) == "ollama_timeout_seconds"
+    else:
+        raise AssertionError("expected NumericSettingError")
