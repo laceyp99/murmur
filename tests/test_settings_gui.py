@@ -311,6 +311,12 @@ def test_changed_restart_settings_warns_when_save_clamps_existing_config():
     assert changed_settings == ["Maximum recording duration"]
 
 
+def test_slider_number_of_steps_uses_numeric_setting_step():
+    vad_padding = settings_module.SETTINGS_BY_KEY["vad_padding_ms"]
+
+    assert settings_module._slider_number_of_steps(vad_padding) == 75
+
+
 def test_reset_tab_to_defaults_preserves_other_tab_edits():
     window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
     hotkey_var = FakeValue("ctrl+alt+p")

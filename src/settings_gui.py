@@ -39,6 +39,17 @@ def _restart_compare_value(value, setting):
     return normalize_value(value, setting)
 
 
+def _slider_number_of_steps(setting):
+    if (
+        setting.step is None
+        or setting.min_value is None
+        or setting.max_value is None
+        or setting.step <= 0
+    ):
+        return None
+    return int(round((setting.max_value - setting.min_value) / setting.step))
+
+
 class SettingsWindow:
     """A tabbed customtkinter window for editing Murmur configuration."""
 
@@ -303,6 +314,7 @@ class SettingsWindow:
             frame,
             from_=setting.min_value,
             to=setting.max_value,
+            number_of_steps=_slider_number_of_steps(setting),
             variable=slider_var,
             command=on_slider,
         )

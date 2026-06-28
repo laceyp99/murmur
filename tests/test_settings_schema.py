@@ -60,6 +60,12 @@ def test_numeric_values_are_clamped_for_display_and_save():
     assert parse_numeric_text("120", timeout) == 120
 
 
+def test_numeric_text_entry_allows_values_between_slider_steps():
+    vad_padding = SETTINGS_BY_KEY["vad_padding_ms"]
+
+    assert parse_numeric_text("237", vad_padding) == 237
+
+
 def test_non_numeric_text_raises_for_save_parsing():
     timeout = SETTINGS_BY_KEY["ollama_timeout_seconds"]
 
