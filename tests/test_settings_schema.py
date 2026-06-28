@@ -18,7 +18,9 @@ def test_settings_metadata_covers_gui_managed_config_without_sample_rate():
     }
 
     assert set(SETTINGS_BY_KEY) == expected_keys
-    assert [setting.tab for setting in SETTINGS if setting.tab in TAB_ORDER]
+    setting_tabs = {setting.tab for setting in SETTINGS}
+    assert setting_tabs <= set(TAB_ORDER)
+    assert set(TAB_ORDER) <= setting_tabs
 
 
 def test_tabs_have_expected_order_and_settings():
