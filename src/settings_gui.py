@@ -461,6 +461,18 @@ class SettingsWindow:
         if numeric_values is None:
             return
 
+        new_ollama_enabled = self.ollama_enabled_var.get()
+        new_ollama_endpoint = self.ollama_endpoint_var.get().strip()
+        new_ollama_model_name = self.ollama_model_name_var.get().strip()
+        if new_ollama_enabled and (
+            not new_ollama_endpoint or not new_ollama_model_name
+        ):
+            messagebox.showerror(
+                "Murmur",
+                "Please enter an Ollama endpoint and model before enabling cleanup.",
+            )
+            return
+
         old_autostart = self.config.start_with_windows
         new_autostart = self.autostart_var.get()
         updated_values = {
@@ -471,9 +483,9 @@ class SettingsWindow:
             "enable_notifications": self.notify_var.get(),
             "enable_logging": new_logging,
             "pause_media_while_recording": self.pause_media_var.get(),
-            "ollama_enabled": self.ollama_enabled_var.get(),
-            "ollama_endpoint": self.ollama_endpoint_var.get().strip(),
-            "ollama_model_name": self.ollama_model_name_var.get().strip(),
+            "ollama_enabled": new_ollama_enabled,
+            "ollama_endpoint": new_ollama_endpoint,
+            "ollama_model_name": new_ollama_model_name,
             "ollama_preload_model": self.ollama_preload_model_var.get(),
         }
         updated_values.update(numeric_values)
