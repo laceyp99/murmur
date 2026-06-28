@@ -245,6 +245,19 @@ def test_save_rejects_non_numeric_setting_and_resets_field(monkeypatch):
     assert len(error_calls) == 1
 
 
+def test_changed_restart_settings_warns_when_save_clamps_existing_config():
+    config = FakeConfig()
+    config.max_recording_duration = 5000
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.config = config
+
+    changed_settings = window._changed_restart_settings(
+        {"max_recording_duration": 1800}
+    )
+
+    assert changed_settings == ["Maximum recording duration"]
+
+
 def test_reset_tab_to_defaults_preserves_other_tab_edits():
     window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
     hotkey_var = FakeValue("ctrl+alt+p")

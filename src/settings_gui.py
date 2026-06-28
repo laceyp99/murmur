@@ -29,6 +29,16 @@ def _format_bytes(size_bytes):
     return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 
+def _restart_compare_value(value, setting):
+    """Coerce without clamping so restart warnings catch clamped saves."""
+    if setting.control == "number":
+        try:
+            return int(round(float(value)))
+        except (TypeError, ValueError):
+            return normalize_value(setting.default, setting)
+    return normalize_value(value, setting)
+
+
 class SettingsWindow:
     """A tabbed customtkinter window for editing Murmur configuration."""
 
@@ -373,8 +383,8 @@ class SettingsWindow:
             setting = SETTINGS_BY_KEY.get(key)
             if setting is None or not setting.restart_required:
                 continue
-            old_value = normalize_value(self._read_config_value(key), setting)
-            if old_value != normalize_value(new_value, setting):
+            old_value = _restart_compare_value(self._read_config_value(key), setting)
+            if old_value != _restart_compare_value(new_value, setting):
                 changed_restart_settings.append(setting.label)
         return changed_restart_settings
 
