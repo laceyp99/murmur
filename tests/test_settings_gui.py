@@ -2,10 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from src import settings_gui as settings_module
 from src.config import DEFAULT_CONFIG
-
-
-settings_module = pytest.importorskip("src.settings_gui")
 
 
 class FakeValue:
