@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -227,6 +228,8 @@ class NumericSettingError(ValueError):
 
 def clamp_number(value: float, setting: SettingMetadata) -> int:
     """Clamp a numeric setting to its configured bounds."""
+    if not math.isfinite(value):
+        raise ValueError(setting.key)
     if setting.min_value is not None:
         value = max(setting.min_value, value)
     if setting.max_value is not None:
@@ -238,7 +241,7 @@ def parse_numeric_text(text: str, setting: SettingMetadata) -> int:
     """Parse and clamp user-entered numeric text."""
     try:
         return clamp_number(float(text.strip()), setting)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise NumericSettingError(setting.key) from exc
 
 
@@ -247,7 +250,7 @@ def normalize_value(value: Any, setting: SettingMetadata) -> Any:
     if setting.control == "number":
         try:
             return clamp_number(float(value), setting)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return clamp_number(float(setting.default), setting)
 
     if setting.value_type == "bool":

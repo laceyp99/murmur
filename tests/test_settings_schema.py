@@ -77,3 +77,20 @@ def test_non_numeric_text_raises_for_save_parsing():
         assert str(exc) == "ollama_timeout_seconds"
     else:
         raise AssertionError("expected NumericSettingError")
+
+
+def test_non_finite_numeric_text_raises_for_save_parsing():
+    timeout = SETTINGS_BY_KEY["ollama_timeout_seconds"]
+
+    try:
+        parse_numeric_text("inf", timeout)
+    except NumericSettingError as exc:
+        assert str(exc) == "ollama_timeout_seconds"
+    else:
+        raise AssertionError("expected NumericSettingError")
+
+
+def test_non_finite_numeric_config_normalizes_to_default():
+    timeout = SETTINGS_BY_KEY["ollama_timeout_seconds"]
+
+    assert normalize_value("inf", timeout) == 60
