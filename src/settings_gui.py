@@ -38,6 +38,8 @@ def _format_bytes(size_bytes):
 _INVALID_RESTART_COMPARE_VALUE = object()
 _APP_DISPLAY_NAME = "murmur"
 _SETTINGS_TITLE = "murmur settings"
+_SETTINGS_WINDOW_GEOMETRY = "760x700"
+_SETTINGS_WINDOW_MIN_SIZE = (700, 640)
 _WINDOWS_APP_USER_MODEL_ID = "murmur"
 _WINDOWS_APP_ID_SET = False
 _IMAGE_ICON = 1
@@ -271,8 +273,8 @@ class SettingsWindow:
 
         self.root = ctk.CTk() if self._owns_root else ctk.CTkToplevel(master)
         self.root.title(_SETTINGS_TITLE)
-        self.root.geometry("760x620")
-        self.root.minsize(700, 560)
+        self.root.geometry(_SETTINGS_WINDOW_GEOMETRY)
+        self.root.minsize(*_SETTINGS_WINDOW_MIN_SIZE)
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.setting_vars = {}
         self.numeric_vars = {}
