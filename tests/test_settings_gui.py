@@ -103,6 +103,75 @@ def test_settings_window_service_focuses_existing_window_and_recreates_closed(
     assert created_windows[1].focus_calls == 1
 
 
+def test_apply_window_icon_reuses_loaded_resources_across_retries(monkeypatch):
+    icon_path = "C:/fake/icon.ico"
+    logo_path = "C:/fake/logo.png"
+    after_callbacks = []
+    iconbitmap_calls = []
+    iconphoto_calls = []
+    load_image_calls = []
+    photoimage_calls = []
+
+    class FakeCFunc:
+        def __init__(self, func):
+            self._func = func
+
+        def __call__(self, *args, **kwargs):
+            return self._func(*args, **kwargs)
+
+    class FakeUser32:
+        def __init__(self):
+            self.GetParent = FakeCFunc(lambda hwnd: 0)
+            self.LoadImageW = FakeCFunc(self._load_image)
+            self.SendMessageW = FakeCFunc(lambda *args: 0)
+            self.SetClassLongPtrW = FakeCFunc(lambda *args: 0)
+            self.SetClassLongW = FakeCFunc(lambda *args: 0)
+
+        def _load_image(self, _hinstance, _path, _image_type, width, height, _flags):
+            load_image_calls.append((width, height))
+            return 1000 + len(load_image_calls)
+
+    class FakeWindow:
+        def winfo_id(self):
+            return 123
+
+        def iconbitmap(self, default):
+            iconbitmap_calls.append(default)
+
+        def iconphoto(self, *_args):
+            iconphoto_calls.append(_args)
+
+        def after(self, _delay, callback):
+            after_callbacks.append(callback)
+
+    monkeypatch.setattr(settings_module, "get_app_icon_path", lambda: icon_path)
+    monkeypatch.setattr(settings_module, "get_logo_path", lambda: logo_path)
+    monkeypatch.setattr(
+        settings_module.tk,
+        "PhotoImage",
+        lambda file: photoimage_calls.append(file) or SimpleNamespace(file=file),
+    )
+    monkeypatch.setattr(
+        settings_module.ctypes,
+        "windll",
+        SimpleNamespace(user32=FakeUser32()),
+        raising=False,
+    )
+
+    window = FakeWindow()
+    result = settings_module._apply_window_icon(window)
+
+    for callback in after_callbacks:
+        callback()
+
+    assert load_image_calls == [(16, 16), (32, 32)]
+    assert photoimage_calls == [logo_path]
+    assert len(iconbitmap_calls) == 5
+    assert len(iconphoto_calls) == 5
+    assert result["native"] == [1001, 1002]
+    assert len(result["tk"]) == 1
+
+
 def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     config = FakeConfig()
     logger = FakeLogger()

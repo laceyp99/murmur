@@ -124,25 +124,31 @@ def _apply_window_icon(window):
         return None
 
     icon_images = []
-    native_icons = []
+    native_icons = None
 
     def apply_once():
+        nonlocal native_icons
+
         if icon_path is not None:
             try:
                 window.iconbitmap(default=str(icon_path))
             except tk.TclError:
                 pass
-            native_icon = _apply_native_window_icon(window, icon_path)
-            if native_icon is not None:
-                native_icons.extend(native_icon)
+            native_icons = _apply_native_window_icon(
+                window, icon_path, native_icons=native_icons
+            )
 
         if logo_path is not None:
-            try:
-                icon_image = tk.PhotoImage(file=str(logo_path))
-                window.iconphoto(True, icon_image)
-                icon_images.append(icon_image)
-            except tk.TclError:
-                pass
+            if not icon_images:
+                try:
+                    icon_images.append(tk.PhotoImage(file=str(logo_path)))
+                except tk.TclError:
+                    pass
+            if icon_images:
+                try:
+                    window.iconphoto(True, icon_images[0])
+                except tk.TclError:
+                    pass
 
     apply_once()
 
@@ -154,14 +160,17 @@ def _apply_window_icon(window):
     except tk.TclError:
         pass
 
-    return {"tk": icon_images, "native": native_icons}
+    return {
+        "tk": icon_images,
+        "native": native_icons if native_icons is not None else [],
+    }
 
 
-def _apply_native_window_icon(window, icon_path):
+def _apply_native_window_icon(window, icon_path, native_icons=None):
     try:
         tk_hwnd = window.winfo_id()
     except tk.TclError:
-        return None
+        return native_icons
 
     try:
         user32 = ctypes.windll.user32
@@ -169,25 +178,30 @@ def _apply_native_window_icon(window, icon_path):
         user32.GetParent.restype = wintypes.HWND
         hwnd = user32.GetParent(tk_hwnd) or tk_hwnd
 
-        load_image = user32.LoadImageW
-        load_image.argtypes = [
-            wintypes.HINSTANCE,
-            wintypes.LPCWSTR,
-            wintypes.UINT,
-            ctypes.c_int,
-            ctypes.c_int,
-            wintypes.UINT,
-        ]
-        load_image.restype = wintypes.HANDLE
+        if native_icons is None:
+            load_image = user32.LoadImageW
+            load_image.argtypes = [
+                wintypes.HINSTANCE,
+                wintypes.LPCWSTR,
+                wintypes.UINT,
+                ctypes.c_int,
+                ctypes.c_int,
+                wintypes.UINT,
+            ]
+            load_image.restype = wintypes.HANDLE
 
-        small_icon = load_image(
-            None, str(icon_path), _IMAGE_ICON, 16, 16, _LR_LOADFROMFILE
-        )
-        big_icon = load_image(
-            None, str(icon_path), _IMAGE_ICON, 32, 32, _LR_LOADFROMFILE
-        )
-        if not small_icon or not big_icon:
-            return None
+            small_icon = load_image(
+                None, str(icon_path), _IMAGE_ICON, 16, 16, _LR_LOADFROMFILE
+            )
+            big_icon = load_image(
+                None, str(icon_path), _IMAGE_ICON, 32, 32, _LR_LOADFROMFILE
+            )
+            if not small_icon or not big_icon:
+                return None
+
+            native_icons = [small_icon, big_icon]
+
+        small_icon, big_icon = native_icons
 
         user32.SendMessageW.argtypes = [
             wintypes.HWND,
@@ -205,9 +219,9 @@ def _apply_native_window_icon(window, icon_path):
         set_class_long(hwnd, _GCLP_HICONSM, small_icon)
         set_class_long(hwnd, _GCLP_HICON, big_icon)
 
-        return [small_icon, big_icon]
+        return native_icons
     except (AttributeError, OSError, TypeError):
-        return None
+        return native_icons
 
 
 def _run_settings_ui():
