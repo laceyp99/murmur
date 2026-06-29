@@ -677,7 +677,7 @@ class SettingsWindow:
             result = check_ollama_connection(
                 endpoint=endpoint,
                 model_name=model_name,
-                timeout=max(1, min(configured_timeout, 5)),
+                timeout=configured_timeout,
             )
             try:
                 self.root.after(

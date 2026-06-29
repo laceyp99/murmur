@@ -569,7 +569,7 @@ def test_ollama_connection_test_uses_unsaved_values(monkeypatch):
         {
             "endpoint": "http://127.0.0.1:11434",
             "model_name": "qwen:latest",
-            "timeout": 5,
+            "timeout": 300,
         }
     ]
     assert len(after_callbacks) == 1
