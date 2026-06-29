@@ -174,6 +174,7 @@ def test_apply_window_icon_reuses_loaded_resources_across_retries(monkeypatch):
 
 def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     config = FakeConfig()
+    config.device = "cuda"
     logger = FakeLogger()
     set_autostart_calls = []
     info_calls = []
