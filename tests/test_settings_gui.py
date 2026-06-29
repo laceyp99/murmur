@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import queue
 
 import pytest
 
@@ -529,6 +530,11 @@ def test_ollama_connection_test_uses_unsaved_values(monkeypatch):
             Thread=FakeThread,
             current_thread=settings_module.threading.current_thread,
         ),
+    )
+    monkeypatch.setattr(
+        settings_module,
+        "_ollama_connection_test_results",
+        queue.Queue(),
     )
     monkeypatch.setattr(
         settings_module,

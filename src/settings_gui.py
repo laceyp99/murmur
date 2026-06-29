@@ -4,6 +4,7 @@ import ctypes
 import queue
 import threading
 import tkinter as tk
+import weakref
 from datetime import datetime
 from tkinter import messagebox
 from ctypes import wintypes
@@ -93,6 +94,7 @@ class _SettingsWindowService:
 
 
 _settings_requests = queue.Queue()
+_ollama_connection_test_results = queue.Queue()
 _settings_thread = None
 _settings_thread_lock = threading.Lock()
 
@@ -293,6 +295,8 @@ class SettingsWindow:
         self._logo_image = None
         self._window_icon = None
         self._ollama_test_button = None
+        self._ollama_test_in_progress = False
+        self._ollama_test_token = None
 
         self._window_icon = _apply_window_icon(self.root)
 
@@ -661,6 +665,28 @@ class SettingsWindow:
         else:
             messagebox.showerror(_APP_DISPLAY_NAME, result.message)
 
+    def _poll_ollama_connection_test_result(self):
+        if not self._ollama_test_in_progress:
+            return
+
+        try:
+            while True:
+                window_ref, token, result = _ollama_connection_test_results.get_nowait()
+                if window_ref() is not self or token != self._ollama_test_token:
+                    continue
+
+                self._ollama_test_in_progress = False
+                self._ollama_test_token = None
+                self._finish_ollama_connection_test(result)
+                return
+        except queue.Empty:
+            pass
+
+        try:
+            self.root.after(100, self._poll_ollama_connection_test_result)
+        except tk.TclError:
+            pass
+
     def _test_ollama_connection(self):
         timeout_setting = SETTINGS_BY_KEY["ollama_timeout_seconds"]
         timeout_var = self.numeric_vars.get("ollama_timeout_seconds")
@@ -671,7 +697,13 @@ class SettingsWindow:
 
         endpoint = self.ollama_endpoint_var.get()
         model_name = self.ollama_model_name_var.get()
+        self._ollama_test_in_progress = True
+        self._ollama_test_token = object()
         self._set_ollama_test_button_busy(True)
+        self.root.after(100, self._poll_ollama_connection_test_result)
+
+        test_window_ref = weakref.ref(self)
+        test_token = self._ollama_test_token
 
         def run():
             result = check_ollama_connection(
@@ -679,13 +711,7 @@ class SettingsWindow:
                 model_name=model_name,
                 timeout=configured_timeout,
             )
-            try:
-                self.root.after(
-                    0,
-                    lambda: self._finish_ollama_connection_test(result),
-                )
-            except tk.TclError:
-                pass
+            _ollama_connection_test_results.put((test_window_ref, test_token, result))
 
         threading.Thread(target=run, daemon=True).start()
 
