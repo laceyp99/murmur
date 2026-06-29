@@ -251,7 +251,12 @@ def normalize_value(value: Any, setting: SettingMetadata) -> Any:
         try:
             return clamp_number(float(value), setting)
         except (TypeError, ValueError, OverflowError):
-            return clamp_number(float(setting.default), setting)
+            try:
+                return clamp_number(float(setting.default), setting)
+            except (TypeError, ValueError, OverflowError) as default_exc:
+                raise ValueError(
+                    f"Setting '{setting.key}' has an unparseable default: {setting.default!r}"
+                ) from default_exc
 
     if setting.value_type == "bool":
         return bool(value)

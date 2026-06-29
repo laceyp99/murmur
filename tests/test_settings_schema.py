@@ -4,6 +4,7 @@ from src.settings_schema import (
     SETTINGS_BY_KEY,
     TAB_ORDER,
     NumericSettingError,
+    SettingMetadata,
     normalize_value,
     parse_numeric_text,
     settings_for_tab,
@@ -94,3 +95,24 @@ def test_non_finite_numeric_config_normalizes_to_default():
     timeout = SETTINGS_BY_KEY["ollama_timeout_seconds"]
 
     assert normalize_value("inf", timeout) == 60
+
+
+def test_numeric_config_raises_clear_error_when_default_is_invalid():
+    setting = SettingMetadata(
+        key="demo_timeout",
+        label="Demo timeout",
+        tab="General",
+        control="number",
+        value_type="int",
+        default="auto",
+        min_value=0,
+        max_value=10,
+        step=1,
+    )
+
+    try:
+        normalize_value("bad", setting)
+    except ValueError as exc:
+        assert str(exc) == "Setting 'demo_timeout' has an unparseable default: 'auto'"
+    else:
+        raise AssertionError("expected ValueError")
