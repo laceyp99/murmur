@@ -94,16 +94,19 @@ def _run_settings_ui():
     service = _SettingsWindowService(root)
 
     def process_requests():
-        while True:
-            try:
-                request = _settings_requests.get_nowait()
-            except queue.Empty:
-                break
+        try:
+            while True:
+                try:
+                    request = _settings_requests.get_nowait()
+                except queue.Empty:
+                    break
 
-            if request == "show":
-                service.show()
-
-        root.after(100, process_requests)
+                if request == "show":
+                    service.show()
+        except Exception as exc:
+            messagebox.showerror("Murmur", f"Failed to open settings: {exc}")
+        finally:
+            root.after(100, process_requests)
 
     try:
         root.after(0, process_requests)
