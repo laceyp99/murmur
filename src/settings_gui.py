@@ -292,6 +292,7 @@ class SettingsWindow:
         self.numeric_vars = {}
         self._logo_image = None
         self._window_icon = None
+        self._ollama_test_button = None
 
         self._window_icon = _apply_window_icon(self.root)
 
@@ -436,11 +437,14 @@ class SettingsWindow:
             "Preload Ollama model",
             self.ollama_preload_model_var,
         )
-        ctk.CTkButton(
+        self._ollama_test_button = ctk.CTkButton(
             cleanup,
             text="Test Ollama Connection",
             command=self._test_ollama_connection,
-        ).grid(row=5, column=0, sticky="w", padx=16, pady=(8, 10))
+        )
+        self._ollama_test_button.grid(
+            row=5, column=0, sticky="w", padx=16, pady=(8, 10)
+        )
 
         privacy = self.tabs.tab("Data Privacy")
         self._add_switch(
@@ -640,6 +644,23 @@ class SettingsWindow:
                 changed_restart_settings.append(setting.label)
         return changed_restart_settings
 
+    def _set_ollama_test_button_busy(self, busy):
+        button = getattr(self, "_ollama_test_button", None)
+        if button is None:
+            return
+
+        button.configure(
+            state="disabled" if busy else "normal",
+            text="Testing…" if busy else "Test Ollama Connection",
+        )
+
+    def _finish_ollama_connection_test(self, result):
+        self._set_ollama_test_button_busy(False)
+        if result.ok:
+            messagebox.showinfo(_APP_DISPLAY_NAME, result.message)
+        else:
+            messagebox.showerror(_APP_DISPLAY_NAME, result.message)
+
     def _test_ollama_connection(self):
         timeout_setting = SETTINGS_BY_KEY["ollama_timeout_seconds"]
         timeout_var = self.numeric_vars.get("ollama_timeout_seconds")
@@ -648,15 +669,25 @@ class SettingsWindow:
         except (AttributeError, NumericSettingError):
             configured_timeout = timeout_setting.default
 
-        result = check_ollama_connection(
-            endpoint=self.ollama_endpoint_var.get(),
-            model_name=self.ollama_model_name_var.get(),
-            timeout=max(1, min(configured_timeout, 5)),
-        )
-        if result.ok:
-            messagebox.showinfo(_APP_DISPLAY_NAME, result.message)
-        else:
-            messagebox.showerror(_APP_DISPLAY_NAME, result.message)
+        endpoint = self.ollama_endpoint_var.get()
+        model_name = self.ollama_model_name_var.get()
+        self._set_ollama_test_button_busy(True)
+
+        def run():
+            result = check_ollama_connection(
+                endpoint=endpoint,
+                model_name=model_name,
+                timeout=max(1, min(configured_timeout, 5)),
+            )
+            try:
+                self.root.after(
+                    0,
+                    lambda: self._finish_ollama_connection_test(result),
+                )
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _purge_training_data(self):
         summary = self.logger.get_storage_summary()

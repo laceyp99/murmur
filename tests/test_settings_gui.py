@@ -500,7 +500,36 @@ def test_reset_tab_to_defaults_preserves_other_tab_edits():
 def test_ollama_connection_test_uses_unsaved_values(monkeypatch):
     checks = []
     info_calls = []
+    after_callbacks = []
+    thread_starts = []
 
+    class FakeButton:
+        def __init__(self):
+            self.configure_calls = []
+
+        def configure(self, **kwargs):
+            self.configure_calls.append(kwargs)
+
+    class FakeRoot:
+        def after(self, _delay, callback):
+            after_callbacks.append(callback)
+
+    class FakeThread:
+        def __init__(self, target, daemon):
+            self.target = target
+            self.daemon = daemon
+
+        def start(self):
+            thread_starts.append(self)
+
+    monkeypatch.setattr(
+        settings_module,
+        "threading",
+        SimpleNamespace(
+            Thread=FakeThread,
+            current_thread=settings_module.threading.current_thread,
+        ),
+    )
     monkeypatch.setattr(
         settings_module,
         "check_ollama_connection",
@@ -519,11 +548,22 @@ def test_ollama_connection_test_uses_unsaved_values(monkeypatch):
     )
 
     window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.root = FakeRoot()
+    window._ollama_test_button = FakeButton()
     window.ollama_endpoint_var = FakeValue("http://127.0.0.1:11434")
     window.ollama_model_name_var = FakeValue("qwen:latest")
     window.numeric_vars = make_numeric_vars(ollama_timeout_seconds="300")
 
     window._test_ollama_connection()
+
+    assert len(thread_starts) == 1
+    assert checks == []
+    assert window._ollama_test_button.configure_calls[0] == {
+        "state": "disabled",
+        "text": "Testing…",
+    }
+
+    thread_starts[0].target()
 
     assert checks == [
         {
@@ -532,7 +572,16 @@ def test_ollama_connection_test_uses_unsaved_values(monkeypatch):
             "timeout": 5,
         }
     ]
+    assert len(after_callbacks) == 1
+    assert info_calls == []
+
+    after_callbacks[0]()
+
     assert len(info_calls) == 1
+    assert window._ollama_test_button.configure_calls[-1] == {
+        "state": "normal",
+        "text": "Test Ollama Connection",
+    }
 
 
 def test_purge_training_data_confirms_count_and_size(monkeypatch):
