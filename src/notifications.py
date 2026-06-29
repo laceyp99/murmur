@@ -117,7 +117,7 @@ class NotificationManager:
 
     def notify_error(self, error: str) -> None:
         """Notify about an error."""
-        self.notify("murmur Error", error)
+        self.notify("murmur", error)
 
 
 # Global notification manager instance

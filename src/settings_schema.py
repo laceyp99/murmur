@@ -114,7 +114,7 @@ SETTINGS: tuple[SettingMetadata, ...] = (
         min_value=100,
         max_value=1500,
         step=25,
-        help_text="How long silence must last before Murmur finalizes a speech segment.",
+        help_text="How long silence must last before murmur finalizes a speech segment.",
         restart_required=True,
     ),
     SettingMetadata(

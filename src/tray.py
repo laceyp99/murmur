@@ -2,10 +2,10 @@
 System tray management for Murmur.
 """
 
-import threading
-import os
 from PIL import Image
+import threading
 
+from .assets import get_logo_path
 from .config import get_config
 
 
@@ -23,18 +23,7 @@ class TrayManager:
 
     def _create_image(self):
         """Load and prepare the tray icon image."""
-        # Try to find the logo file
-        possible_paths = [
-            os.path.join(os.path.dirname(__file__), "..", "murmur tray logo.png"),
-            os.path.join(os.path.dirname(__file__), "..", "murmur.png"),
-        ]
-
-        logo_path = None
-        for path in possible_paths:
-            if os.path.exists(path):
-                logo_path = path
-                break
-
+        logo_path = get_logo_path()
         if logo_path:
             try:
                 image = Image.open(logo_path)

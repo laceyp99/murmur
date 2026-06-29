@@ -1,14 +1,18 @@
 """Settings GUI for Murmur using customtkinter."""
 
+import ctypes
 import queue
 import threading
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox
+from ctypes import wintypes
 
 import customtkinter as ctk
+from PIL import Image
 
 from .autostart import set_autostart
+from .assets import get_app_icon_path, get_logo_path
 from .config import ConfigError, get_config, get_training_data_dir
 from .hotkey import is_hotkey_valid
 from .llm_postprocess import check_ollama_connection
@@ -32,6 +36,17 @@ def _format_bytes(size_bytes):
 
 
 _INVALID_RESTART_COMPARE_VALUE = object()
+_APP_DISPLAY_NAME = "murmur"
+_SETTINGS_TITLE = "murmur settings"
+_WINDOWS_APP_USER_MODEL_ID = "murmur"
+_WINDOWS_APP_ID_SET = False
+_IMAGE_ICON = 1
+_LR_LOADFROMFILE = 0x00000010
+_WM_SETICON = 0x0080
+_ICON_SMALL = 0
+_ICON_BIG = 1
+_GCLP_HICON = -14
+_GCLP_HICONSM = -34
 
 
 def _restart_compare_value(value, setting):
@@ -85,11 +100,121 @@ def _configure_customtkinter():
     ctk.set_default_color_theme("blue")
 
 
+def _configure_windows_app_identity():
+    global _WINDOWS_APP_ID_SET
+
+    if _WINDOWS_APP_ID_SET:
+        return
+
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            _WINDOWS_APP_USER_MODEL_ID
+        )
+        _WINDOWS_APP_ID_SET = True
+    except (AttributeError, OSError):
+        return
+
+
+def _apply_window_icon(window):
+    icon_path = get_app_icon_path()
+    logo_path = get_logo_path()
+    if icon_path is None and logo_path is None:
+        return None
+
+    icon_images = []
+    native_icons = []
+
+    def apply_once():
+        if icon_path is not None:
+            try:
+                window.iconbitmap(default=str(icon_path))
+            except tk.TclError:
+                pass
+            native_icon = _apply_native_window_icon(window, icon_path)
+            if native_icon is not None:
+                native_icons.extend(native_icon)
+
+        if logo_path is not None:
+            try:
+                icon_image = tk.PhotoImage(file=str(logo_path))
+                window.iconphoto(True, icon_image)
+                icon_images.append(icon_image)
+            except tk.TclError:
+                pass
+
+    apply_once()
+
+    try:
+        window.after(250, apply_once)
+        window.after(500, apply_once)
+        window.after(1000, apply_once)
+        window.after(1500, apply_once)
+    except tk.TclError:
+        pass
+
+    return {"tk": icon_images, "native": native_icons}
+
+
+def _apply_native_window_icon(window, icon_path):
+    try:
+        tk_hwnd = window.winfo_id()
+    except tk.TclError:
+        return None
+
+    try:
+        user32 = ctypes.windll.user32
+        user32.GetParent.argtypes = [wintypes.HWND]
+        user32.GetParent.restype = wintypes.HWND
+        hwnd = user32.GetParent(tk_hwnd) or tk_hwnd
+
+        load_image = user32.LoadImageW
+        load_image.argtypes = [
+            wintypes.HINSTANCE,
+            wintypes.LPCWSTR,
+            wintypes.UINT,
+            ctypes.c_int,
+            ctypes.c_int,
+            wintypes.UINT,
+        ]
+        load_image.restype = wintypes.HANDLE
+
+        small_icon = load_image(
+            None, str(icon_path), _IMAGE_ICON, 16, 16, _LR_LOADFROMFILE
+        )
+        big_icon = load_image(
+            None, str(icon_path), _IMAGE_ICON, 32, 32, _LR_LOADFROMFILE
+        )
+        if not small_icon or not big_icon:
+            return None
+
+        user32.SendMessageW.argtypes = [
+            wintypes.HWND,
+            wintypes.UINT,
+            wintypes.WPARAM,
+            wintypes.LPARAM,
+        ]
+        user32.SendMessageW.restype = wintypes.LPARAM
+        user32.SendMessageW(hwnd, _WM_SETICON, _ICON_SMALL, small_icon)
+        user32.SendMessageW(hwnd, _WM_SETICON, _ICON_BIG, big_icon)
+
+        set_class_long = getattr(user32, "SetClassLongPtrW", user32.SetClassLongW)
+        set_class_long.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+        set_class_long.restype = ctypes.c_void_p
+        set_class_long(hwnd, _GCLP_HICONSM, small_icon)
+        set_class_long(hwnd, _GCLP_HICON, big_icon)
+
+        return [small_icon, big_icon]
+    except (AttributeError, OSError, TypeError):
+        return None
+
+
 def _run_settings_ui():
     global _settings_thread
 
+    _configure_windows_app_identity()
     _configure_customtkinter()
     root = ctk.CTk()
+    root._murmur_window_icon = _apply_window_icon(root)
     root.withdraw()
     service = _SettingsWindowService(root)
 
@@ -104,7 +229,7 @@ def _run_settings_ui():
                 if request == "show":
                     service.show()
         except Exception as exc:
-            messagebox.showerror("Murmur", f"Failed to open settings: {exc}")
+            messagebox.showerror(_APP_DISPLAY_NAME, f"Failed to open settings: {exc}")
         finally:
             root.after(100, process_requests)
 
@@ -136,6 +261,7 @@ class SettingsWindow:
     """A tabbed customtkinter window for editing Murmur configuration."""
 
     def __init__(self, master=None, on_close=None):
+        _configure_windows_app_identity()
         self.config = get_config()
         self.logger = get_logger()
         self._on_close = on_close
@@ -144,15 +270,16 @@ class SettingsWindow:
         _configure_customtkinter()
 
         self.root = ctk.CTk() if self._owns_root else ctk.CTkToplevel(master)
-        self.root.title("Murmur Settings")
+        self.root.title(_SETTINGS_TITLE)
         self.root.geometry("760x620")
         self.root.minsize(700, 560)
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.setting_vars = {}
         self.numeric_vars = {}
+        self._logo_image = None
+        self._window_icon = None
 
-        # Set icon if possible
-        # self.root.iconbitmap("path/to/icon.ico")
+        self._window_icon = _apply_window_icon(self.root)
 
         self._setup_ui()
 
@@ -162,12 +289,27 @@ class SettingsWindow:
 
         header = ctk.CTkFrame(self.root, fg_color="transparent")
         header.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 8))
-        header.grid_columnconfigure(0, weight=1)
+        header.grid_columnconfigure(1, weight=1)
+
+        logo_path = get_logo_path()
+        if logo_path is not None:
+            try:
+                self._logo_image = ctk.CTkImage(
+                    light_image=Image.open(logo_path),
+                    dark_image=Image.open(logo_path),
+                    size=(36, 36),
+                )
+                ctk.CTkLabel(header, text="", image=self._logo_image).grid(
+                    row=0, column=0, sticky="w", padx=(0, 10)
+                )
+            except Exception:
+                self._logo_image = None
+
         ctk.CTkLabel(
             header,
-            text="Murmur Settings",
+            text=_SETTINGS_TITLE,
             font=ctk.CTkFont(size=24, weight="bold"),
-        ).grid(row=0, column=0, sticky="w")
+        ).grid(row=0, column=1, sticky="w")
 
         self.tabs = ctk.CTkTabview(self.root)
         self.tabs.grid(row=1, column=0, sticky="nsew", padx=24, pady=8)
@@ -447,7 +589,7 @@ class SettingsWindow:
             except NumericSettingError:
                 variable.set(str(setting.default))
                 messagebox.showerror(
-                    "Murmur",
+                    _APP_DISPLAY_NAME,
                     f"Please enter a number for {setting.label}.",
                 )
                 return None
@@ -498,14 +640,14 @@ class SettingsWindow:
             timeout=max(1, min(configured_timeout, 5)),
         )
         if result.ok:
-            messagebox.showinfo("Murmur", result.message)
+            messagebox.showinfo(_APP_DISPLAY_NAME, result.message)
         else:
-            messagebox.showerror("Murmur", result.message)
+            messagebox.showerror(_APP_DISPLAY_NAME, result.message)
 
     def _purge_training_data(self):
         summary = self.logger.get_storage_summary()
         if summary.file_count == 0:
-            messagebox.showinfo("Murmur", "No logged training data was found.")
+            messagebox.showinfo(_APP_DISPLAY_NAME, "No logged training data was found.")
             return
 
         if not messagebox.askyesno(
@@ -521,22 +663,24 @@ class SettingsWindow:
         try:
             removed_files = self.logger.purge_all()
         except Exception as exc:
-            messagebox.showerror("Murmur", f"Failed to delete logged data: {exc}")
+            messagebox.showerror(
+                _APP_DISPLAY_NAME, f"Failed to delete logged data: {exc}"
+            )
             return
 
         if removed_files:
             messagebox.showinfo(
-                "Murmur",
+                _APP_DISPLAY_NAME,
                 f"Deleted {removed_files} logged file(s) from {get_training_data_dir()}.",
             )
         else:
-            messagebox.showinfo("Murmur", "No logged training data was found.")
+            messagebox.showinfo(_APP_DISPLAY_NAME, "No logged training data was found.")
 
     def _save(self):
         new_hotkey = self.hotkey_var.get().strip()
         if not is_hotkey_valid(new_hotkey):
             messagebox.showerror(
-                "Murmur", "Please enter a valid hotkey before saving settings."
+                _APP_DISPLAY_NAME, "Please enter a valid hotkey before saving settings."
             )
             return
 
@@ -564,7 +708,7 @@ class SettingsWindow:
             not new_ollama_endpoint or not new_ollama_model_name
         ):
             messagebox.showerror(
-                "Murmur",
+                _APP_DISPLAY_NAME,
                 "Please enter an Ollama endpoint and model before enabling cleanup.",
             )
             return
@@ -597,7 +741,7 @@ class SettingsWindow:
         try:
             self.config.update(updated_values)
         except ConfigError as exc:
-            messagebox.showerror("Murmur", f"Failed to save settings: {exc}")
+            messagebox.showerror(_APP_DISPLAY_NAME, f"Failed to save settings: {exc}")
             return
 
         self.logger.set_enabled(new_logging)
@@ -608,12 +752,12 @@ class SettingsWindow:
 
         if restart_settings:
             messagebox.showinfo(
-                "Murmur",
-                "Settings saved. Restart Murmur for these changes to fully apply: "
+                _APP_DISPLAY_NAME,
+                "Settings saved. Restart murmur for these changes to fully apply: "
                 + ", ".join(restart_settings),
             )
         else:
-            messagebox.showinfo("Murmur", "Settings saved.")
+            messagebox.showinfo(_APP_DISPLAY_NAME, "Settings saved.")
         self._close()
 
     def is_open(self):
