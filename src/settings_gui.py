@@ -1,5 +1,7 @@
 """Settings GUI for Murmur using customtkinter."""
 
+import queue
+import threading
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox
@@ -53,20 +55,96 @@ def _slider_number_of_steps(setting):
     return int(round((setting.max_value - setting.min_value) / setting.step))
 
 
+class _SettingsWindowService:
+    """Own the single CustomTk root and focus or create one settings window."""
+
+    def __init__(self, master):
+        self.master = master
+        self.window = None
+
+    def show(self):
+        if self.window is not None and self.window.is_open():
+            self.window.focus()
+            return
+
+        self.window = SettingsWindow(master=self.master, on_close=self._clear_window)
+        self.window.focus()
+
+    def _clear_window(self, window):
+        if self.window is window:
+            self.window = None
+
+
+_settings_requests = queue.Queue()
+_settings_thread = None
+_settings_thread_lock = threading.Lock()
+
+
+def _configure_customtkinter():
+    ctk.set_appearance_mode("system")
+    ctk.set_default_color_theme("blue")
+
+
+def _run_settings_ui():
+    global _settings_thread
+
+    _configure_customtkinter()
+    root = ctk.CTk()
+    root.withdraw()
+    service = _SettingsWindowService(root)
+
+    def process_requests():
+        while True:
+            try:
+                request = _settings_requests.get_nowait()
+            except queue.Empty:
+                break
+
+            if request == "show":
+                service.show()
+
+        root.after(100, process_requests)
+
+    try:
+        root.after(0, process_requests)
+        root.mainloop()
+    finally:
+        with _settings_thread_lock:
+            if _settings_thread is threading.current_thread():
+                _settings_thread = None
+
+
+def _ensure_settings_ui_thread():
+    global _settings_thread
+
+    with _settings_thread_lock:
+        if _settings_thread is not None and _settings_thread.is_alive():
+            return
+
+        _settings_thread = threading.Thread(
+            target=_run_settings_ui,
+            name="MurmurSettingsUI",
+            daemon=True,
+        )
+        _settings_thread.start()
+
+
 class SettingsWindow:
     """A tabbed customtkinter window for editing Murmur configuration."""
 
-    def __init__(self):
+    def __init__(self, master=None, on_close=None):
         self.config = get_config()
         self.logger = get_logger()
-        ctk.set_appearance_mode("system")
-        ctk.set_default_color_theme("blue")
+        self._on_close = on_close
+        self._closed = False
+        self._owns_root = master is None
+        _configure_customtkinter()
 
-        self.root = ctk.CTk()
+        self.root = ctk.CTk() if self._owns_root else ctk.CTkToplevel(master)
         self.root.title("Murmur Settings")
         self.root.geometry("760x620")
         self.root.minsize(700, 560)
-        self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
+        self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.setting_vars = {}
         self.numeric_vars = {}
 
@@ -232,7 +310,7 @@ class SettingsWindow:
         button_bar = ctk.CTkFrame(self.root, fg_color="transparent")
         button_bar.grid(row=2, column=0, sticky="ew", padx=24, pady=(8, 20))
         button_bar.grid_columnconfigure(0, weight=1)
-        ctk.CTkButton(button_bar, text="Cancel", command=self.root.destroy).grid(
+        ctk.CTkButton(button_bar, text="Cancel", command=self._close).grid(
             row=0, column=1, padx=(0, 8)
         )
         ctk.CTkButton(button_bar, text="Save", command=self._save).grid(row=0, column=2)
@@ -533,14 +611,41 @@ class SettingsWindow:
             )
         else:
             messagebox.showinfo("Murmur", "Settings saved.")
-        self.root.destroy()
+        self._close()
+
+    def is_open(self):
+        try:
+            return bool(self.root.winfo_exists()) and not self._closed
+        except tk.TclError:
+            return False
+
+    def focus(self):
+        if not self.is_open():
+            return
+
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def _close(self):
+        if getattr(self, "_closed", False):
+            return
+
+        self._closed = True
+        try:
+            self.root.destroy()
+        finally:
+            on_close = getattr(self, "_on_close", None)
+            if on_close is not None:
+                on_close(self)
 
     def show(self):
-        self.root.focus_force()
-        self.root.mainloop()
+        self.focus()
+        if self._owns_root:
+            self.root.mainloop()
 
 
 def show_settings():
-    """Helper function to show the settings window."""
-    app = SettingsWindow()
-    app.show()
+    """Request the settings window from the persistent CustomTk UI thread."""
+    _ensure_settings_ui_thread()
+    _settings_requests.put("show")

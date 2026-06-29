@@ -64,6 +64,45 @@ class FakeLogger:
         return self.summary.file_count
 
 
+def test_settings_window_service_focuses_existing_window_and_recreates_closed(
+    monkeypatch,
+):
+    created_windows = []
+
+    class FakeWindow:
+        def __init__(self, master, on_close):
+            self.master = master
+            self.on_close = on_close
+            self.open = True
+            self.focus_calls = 0
+            created_windows.append(self)
+
+        def is_open(self):
+            return self.open
+
+        def focus(self):
+            self.focus_calls += 1
+
+        def close(self):
+            self.open = False
+            self.on_close(self)
+
+    monkeypatch.setattr(settings_module, "SettingsWindow", FakeWindow)
+
+    master = object()
+    service = settings_module._SettingsWindowService(master)
+
+    service.show()
+    service.show()
+    created_windows[0].close()
+    service.show()
+
+    assert len(created_windows) == 2
+    assert created_windows[0].master is master
+    assert created_windows[0].focus_calls == 2
+    assert created_windows[1].focus_calls == 1
+
+
 def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     config = FakeConfig()
     logger = FakeLogger()
