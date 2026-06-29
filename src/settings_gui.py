@@ -29,13 +29,16 @@ def _format_bytes(size_bytes):
     return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 
+_INVALID_RESTART_COMPARE_VALUE = object()
+
+
 def _restart_compare_value(value, setting):
-    """Coerce without clamping so restart warnings catch clamped saves."""
+    """Coerce without clamping so restart warnings catch clamped or repaired saves."""
     if setting.control == "number":
         try:
             return int(round(float(value)))
-        except (TypeError, ValueError):
-            return normalize_value(setting.default, setting)
+        except (TypeError, ValueError, OverflowError):
+            return _INVALID_RESTART_COMPARE_VALUE
     return normalize_value(value, setting)
 
 

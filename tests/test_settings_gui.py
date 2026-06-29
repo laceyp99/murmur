@@ -309,6 +309,17 @@ def test_changed_restart_settings_warns_when_save_clamps_existing_config():
     assert changed_settings == ["Maximum recording duration"]
 
 
+def test_changed_restart_settings_warns_when_existing_numeric_config_is_invalid():
+    config = FakeConfig()
+    config.vad_aggressiveness = "not-a-number"
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.config = config
+
+    changed_settings = window._changed_restart_settings({"vad_aggressiveness": 1})
+
+    assert changed_settings == ["VAD aggressiveness"]
+
+
 def test_slider_number_of_steps_uses_numeric_setting_step():
     vad_padding = settings_module.SETTINGS_BY_KEY["vad_padding_ms"]
 
