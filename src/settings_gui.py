@@ -263,13 +263,11 @@ class SettingsWindow:
     """A tabbed customtkinter window for editing Murmur configuration."""
 
     def __init__(self, master=None, on_close=None):
-        _configure_windows_app_identity()
         self.config = get_config()
         self.logger = get_logger()
         self._on_close = on_close
         self._closed = False
         self._owns_root = master is None
-        _configure_customtkinter()
 
         self.root = ctk.CTk() if self._owns_root else ctk.CTkToplevel(master)
         self.root.title(_SETTINGS_TITLE)
