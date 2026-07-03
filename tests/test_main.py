@@ -987,14 +987,30 @@ def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch
         SimpleNamespace(segment_id=0, text="tail kept", latency_seconds=0.1)
     )
 
+    stop_order = []
     segmentation_stops = []
     transcription_stops = []
     copied_text = []
+    play_media = app.media_controller.play
     monkeypatch.setattr(
-        app, "_stop_live_segmentation", lambda: segmentation_stops.append(True)
+        app.recorder,
+        "stop_recording",
+        lambda: stop_order.append("recorder") or audio_data,
     )
     monkeypatch.setattr(
-        app, "_stop_live_transcription", lambda: transcription_stops.append(True)
+        app.media_controller,
+        "play",
+        lambda: stop_order.append("media") or play_media(),
+    )
+    monkeypatch.setattr(
+        app,
+        "_stop_live_segmentation",
+        lambda: stop_order.append("segmentation") or segmentation_stops.append(True),
+    )
+    monkeypatch.setattr(
+        app,
+        "_stop_live_transcription",
+        lambda: stop_order.append("transcription") or transcription_stops.append(True),
     )
     monkeypatch.setattr(
         main_module, "copy_to_clipboard", lambda text: copied_text.append(text) or True
@@ -1007,6 +1023,7 @@ def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch
     app._on_recording_stop()
 
     assert app.tray.statuses[0] == "Finalizing..."
+    assert stop_order == ["recorder", "media", "segmentation", "transcription"]
     assert segmentation_stops == [True]
     assert transcription_stops == [True]
     assert copied_text == ["FINAL:tail kept"]
