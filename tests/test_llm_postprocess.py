@@ -1,7 +1,11 @@
 from types import SimpleNamespace
 
 from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
-from src.llm_postprocess import LLMPostProcessor, OllamaClient
+from src.llm_postprocess import (
+    LLMPostProcessor,
+    OllamaClient,
+    check_ollama_connection,
+)
 
 
 MODEL_NAME = DEFAULT_OLLAMA_MODEL_NAME
@@ -333,3 +337,42 @@ def test_ollama_client_warm_skips_missing_model():
 
     assert warmed is False
     assert fake_client.calls == []
+
+
+def test_check_ollama_connection_reports_available_model():
+    class FakeClient:
+        def __init__(self, endpoint, model_name, timeout):
+            self.endpoint = endpoint
+            self.model_name = model_name
+            self.timeout = timeout
+
+        def is_model_available(self):
+            return True
+
+    result = check_ollama_connection(
+        endpoint=" http://localhost:11434 ",
+        model_name=MODEL_NAME,
+        timeout=2,
+        client_factory=FakeClient,
+    )
+
+    assert result.ok is True
+    assert MODEL_NAME in result.message
+
+
+def test_check_ollama_connection_reports_missing_model():
+    class FakeClient:
+        def __init__(self, endpoint, model_name, timeout):
+            pass
+
+        def is_model_available(self):
+            return False
+
+    result = check_ollama_connection(
+        endpoint="http://localhost:11434",
+        model_name="missing:latest",
+        client_factory=FakeClient,
+    )
+
+    assert result.ok is False
+    assert "not installed" in result.message

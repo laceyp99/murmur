@@ -233,7 +233,7 @@ class MurmurApp:
                 if not self.media_controller.pause():
                     print("⚠️ Failed to pause media playback")
                     self.notifications.notify(
-                        "Murmur", "Could not pause media playback"
+                        "murmur", "Could not pause media playback"
                     )
 
         try:
@@ -263,7 +263,7 @@ class MurmurApp:
         if self._was_media_playing:
             if not self.media_controller.play():
                 print("⚠️ Failed to resume media playback")
-                self.notifications.notify("Murmur", "Could not resume media playback")
+                self.notifications.notify("murmur", "Could not resume media playback")
             self._was_media_playing = False
 
         self._stop_live_segmentation()
@@ -422,7 +422,7 @@ class MurmurApp:
         """Finish clipboard, notification, and logging for a completed transcript."""
         if not text:
             print("⚠️ No speech detected.")
-            self.notifications.notify("Murmur", "No speech detected.")
+            self.notifications.notify("murmur", "No speech detected.")
             return
 
         copied = copy_to_clipboard(text)

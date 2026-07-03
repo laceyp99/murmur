@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 try:
@@ -158,6 +159,43 @@ class OllamaClient:
                 model_names.append(str(name))
 
         return model_names
+
+
+@dataclass(frozen=True)
+class OllamaConnectionCheck:
+    """Result of a lightweight Ollama endpoint/model availability check."""
+
+    ok: bool
+    message: str
+
+
+def check_ollama_connection(
+    endpoint: str,
+    model_name: str,
+    timeout: float = 5.0,
+    client_factory: type[OllamaClient] = OllamaClient,
+) -> OllamaConnectionCheck:
+    """Check that Ollama is reachable and the configured model is installed."""
+    try:
+        client = client_factory(
+            endpoint=endpoint.strip(),
+            model_name=model_name.strip(),
+            timeout=timeout,
+        )
+        if client.is_model_available():
+            return OllamaConnectionCheck(
+                ok=True,
+                message=f"Ollama is reachable and model '{model_name.strip()}' is available.",
+            )
+        return OllamaConnectionCheck(
+            ok=False,
+            message=f"Ollama is reachable, but model '{model_name.strip()}' is not installed.",
+        )
+    except Exception as exc:
+        return OllamaConnectionCheck(
+            ok=False,
+            message=f"Could not reach Ollama: {exc}",
+        )
 
 
 class LLMPostProcessor:

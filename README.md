@@ -205,6 +205,28 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
 }
 ```
 
+Open **Settings** from the tray icon to edit the user-facing configuration in a
+tabbed control panel:
+
+- **General**: hotkey, notifications, Windows startup, and media pause behavior.
+- **VAD**: WebRTC VAD aggressiveness, speech padding, and silence-to-stop timing.
+- **Transcription**: Whisper model, device, language, and maximum recording duration.
+- **LLM Cleanup**: Ollama enablement, endpoint, model, request timeout, preload behavior, and connection testing.
+- **Data Privacy**: training data logging opt-in and logged-data deletion.
+
+Numeric controls use bounded sliders plus editable number fields. Existing
+out-of-range config values are clamped when displayed, and saving persists the
+nearest allowed value. Non-numeric text in a numeric field blocks Save, resets
+that field to its default in the UI, and leaves the config file unchanged.
+
+Each tab has **Reset This Tab**, which resets only that tab's current UI values
+to defaults. Reset values are not written until you click **Save**. **Cancel**
+and the window close button discard unsaved edits.
+
+Some changes, such as Whisper model/device, language, VAD timing, max recording
+duration, Ollama endpoint/model, or preload behavior, may require restarting
+murmur before the running recorder/transcription pipeline fully reflects them.
+
 ### Configuration Options
 
 | Option | Description | Default |
@@ -214,10 +236,10 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
 | `device` | Compute device (cuda, cpu) | `cuda` |
 | `language` | Language code (null for auto-detect) | `null` |
 | `sample_rate` | Audio sample rate in Hz | `16000` |
-| `vad_aggressiveness` | WebRTC VAD aggressiveness level | `1` |
-| `vad_padding_ms` | Speech end padding in ms; start padding is derived asymmetrically from this value | `220` |
-| `vad_silence_duration_ms` | Silence duration in ms required to close a speech segment | `400` |
-| `max_recording_duration` | Maximum recording length in seconds before murmur auto-stops, notifies, and finalizes | `300` |
+| `vad_aggressiveness` | WebRTC VAD aggressiveness level, bounded to `0-3` in Settings | `1` |
+| `vad_padding_ms` | Speech end padding in ms, bounded to `50-800` in Settings; start padding is derived asymmetrically from this value | `220` |
+| `vad_silence_duration_ms` | Silence duration in ms required to close a speech segment, bounded to `100-1500` in Settings | `400` |
+| `max_recording_duration` | Maximum recording length in seconds before murmur auto-stops, notifies, and finalizes; bounded to `30-1800` in Settings | `300` |
 | `enable_logging` | Save raw audio/transcriptions for training after explicit opt-in | `false` |
 | `enable_notifications` | Show Windows toast notifications | `true` |
 | `start_with_windows` | Automatically start on login | `true` |
@@ -227,7 +249,7 @@ Configuration is stored in `%APPDATA%\murmur\config.json`:
 | `ollama_enabled` | Enable the final-pass Ollama cleanup step | `true` |
 | `ollama_endpoint` | Ollama server endpoint | `http://localhost:11434` |
 | `ollama_model_name` | Ollama model used for final cleanup | `granite4.1:3b` |
-| `ollama_timeout_seconds` | Request timeout for Ollama calls (minimum 60 seconds) | `60` |
+| `ollama_timeout_seconds` | Request timeout for Ollama calls, bounded to `60-300` in Settings | `60` |
 | `ollama_preload_model` | Warm the Ollama model on startup when enabled | `true` |
 
 ### Ollama setup
@@ -239,9 +261,10 @@ ollama pull granite4.1:3b
 ollama serve
 ```
 
-These Ollama controls are currently JSON-only; edit `%APPDATA%\murmur\config.json` to change them.
-
-If you want to disable the final LLM pass entirely, set `ollama_enabled` to `false` in `%APPDATA%\murmur\config.json`.
+Use **Settings > LLM Cleanup > Test Ollama Connection** to check the currently
+entered endpoint and model before saving. If you want to disable the final LLM
+pass entirely, turn off **Enable Ollama cleanup** in Settings or set
+`ollama_enabled` to `false` in `%APPDATA%\murmur\config.json`.
 
 ## Troubleshooting
 
@@ -311,5 +334,5 @@ Privacy notes:
 - Raw WAV audio and transcript text are only stored after you opt in.
 - Normal console status output does not include transcript text.
 - You can disable logging at any time from Settings.
-- You can delete existing logged data from Settings with **Delete Logged Data**.
+- You can delete existing logged data from Settings with **Delete Logged Data**; murmur shows the file count and approximate size before confirmation.
 - Ollama defaults to `http://localhost:11434`; if you point it at a remote endpoint, your transcripts leave the local machine for that final cleanup step.
