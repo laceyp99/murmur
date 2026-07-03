@@ -259,15 +259,15 @@ class MurmurApp:
         finalization_started_at = time.perf_counter()
 
         audio_data = self.recorder.stop_recording()
-        self._stop_live_segmentation()
-        self._stop_live_transcription()
-
         # Resume media if it was playing before recording
         if self._was_media_playing:
             if not self.media_controller.play():
                 print("⚠️ Failed to resume media playback")
                 self.notifications.notify("murmur", "Could not resume media playback")
             self._was_media_playing = False
+
+        self._stop_live_segmentation()
+        self._stop_live_transcription()
 
         if audio_data is not None:
             self._finalize_recording(
