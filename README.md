@@ -35,32 +35,66 @@ git clone https://github.com/laceyp99/murmur.git
 cd murmur
 ```
 
-### 2. Create a Virtual Environment (Recommended)
+### 2. Create a Virtual Environment
 
-```bash
-python -m venv venv
-venv\Scripts\activate
+```powershell
+py -3.12 -m venv venv
+venv\Scripts\python.exe -m pip install --upgrade pip
 ```
+
+Use `venv\Scripts\python.exe -m pip ...` for the install commands below. Calling
+the venv interpreter directly avoids installing packages into the wrong Python
+when PowerShell activation or PATH resolution is inconsistent.
 
 ### 3. Install PyTorch with CUDA Support
 
-If you want CUDA acceleration, install PyTorch with CUDA first:
+For NVIDIA GPU acceleration, install the official PyTorch CUDA wheels before
+installing murmur:
 
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+```powershell
+venv\Scripts\python.exe -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
 
-For CPU-only installation, skip this step and let the project dependencies install from PyPI.
+This project only needs `torch`, but installing the matching `torchvision` and
+`torchaudio` wheels keeps the local PyTorch stack consistent. If you are setting
+up a new machine, check the current selector at
+[pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/) and
+use the Windows + Pip + CUDA command it recommends.
+
+Verify that the venv has a CUDA-enabled Torch build and can see your GPU:
+
+```powershell
+venv\Scripts\python.exe -c "import torch; print('torch', torch.__version__); print('cuda build', torch.version.cuda); print('cuda available', torch.cuda.is_available()); print('gpu', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'n/a')"
+```
+
+Expected for GPU use:
+
+- `torch.__version__` includes a CUDA suffix such as `+cu121`
+- `torch.version.cuda` is not `None`
+- `torch.cuda.is_available()` prints `True`
+- `gpu` prints your NVIDIA GPU name
+
+If `torch.cuda.is_available()` is `False`, update your NVIDIA driver and
+reinstall the PyTorch CUDA wheels in the venv:
+
+```powershell
+venv\Scripts\python.exe -m pip install --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+
+For CPU-only installation, skip this step and let the project dependencies
+install Torch from PyPI.
 
 ### 4. Install murmur and developer dependencies
 
 Use the editable install so local code changes are picked up immediately:
 
-```bash
-pip install -e .[dev]
+```powershell
+venv\Scripts\python.exe -m pip install -e .[dev]
 ```
 
-This installs murmur, the runtime dependencies, Ruff, and pytest.
+This installs murmur, the runtime dependencies, Ruff, and pytest. The editable
+install should not replace an already-installed CUDA Torch wheel because
+`pyproject.toml` only requires `torch>=2.0.0`.
 
 ### 5. Install FFmpeg (Required by Whisper)
 
