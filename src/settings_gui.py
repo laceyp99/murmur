@@ -609,7 +609,11 @@ class SettingsWindow:
             try:
                 parsed_value = parse_numeric_text(variable.get(), setting)
             except NumericSettingError:
-                variable.set(str(setting.default))
+                persisted_value = normalize_value(
+                    self.config.get(setting.key, setting.default),
+                    setting,
+                )
+                variable.set(str(persisted_value))
                 messagebox.showerror(
                     _APP_DISPLAY_NAME,
                     f"Please enter a number for {setting.label}.",
