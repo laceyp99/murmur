@@ -761,6 +761,25 @@ class SettingsWindow:
             )
             return
 
+        lang = normalize_value(
+            self.lang_var.get(),
+            SETTINGS_BY_KEY["language"],
+        )
+        if lang is not None:
+            from whisper.tokenizer import LANGUAGES
+
+            normalized_lang = lang.casefold()
+            valid_languages = {code.casefold() for code in LANGUAGES} | {
+                name.casefold() for name in LANGUAGES.values()
+            }
+            if normalized_lang not in valid_languages:
+                messagebox.showerror(
+                    _APP_DISPLAY_NAME,
+                    "Please enter a valid Whisper language code or name for Language.",
+                    parent=self.root,
+                )
+                return
+
         previous_logging = self.config.enable_logging
         new_logging = self.logging_var.get()
 
@@ -773,7 +792,6 @@ class SettingsWindow:
                 self.logging_var.set(False)
                 return
 
-        lang = self.lang_var.get().strip()
         numeric_values = self._collect_numeric_values()
         if numeric_values is None:
             return
@@ -796,7 +814,7 @@ class SettingsWindow:
             "hotkey": new_hotkey,
             "model": normalize_value(self.model_var.get(), SETTINGS_BY_KEY["model"]),
             "device": normalize_value(self.device_var.get(), SETTINGS_BY_KEY["device"]),
-            "language": lang if lang and lang.lower() != "none" else None,
+            "language": lang,
             "enable_notifications": self.notify_var.get(),
             "enable_logging": new_logging,
             "pause_media_while_recording": self.pause_media_var.get(),
