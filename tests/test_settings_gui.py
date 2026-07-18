@@ -476,6 +476,94 @@ def test_changed_restart_settings_warns_when_existing_numeric_config_is_invalid(
     assert changed_settings == ["VAD aggressiveness"]
 
 
+def test_changed_restart_settings_warns_when_save_repairs_invalid_select():
+    config = FakeConfig()
+    config.model = "bogus"
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.config = config
+
+    changed_settings = window._changed_restart_settings({"model": "base"})
+
+    assert changed_settings == ["Whisper model"]
+
+
+def test_save_rejects_invalid_whisper_language(monkeypatch):
+    config = FakeConfig()
+    logger = FakeLogger()
+    error_calls = []
+    destroy_calls = []
+
+    monkeypatch.setattr(settings_module, "is_hotkey_valid", lambda value: True)
+    monkeypatch.setattr(
+        settings_module,
+        "messagebox",
+        SimpleNamespace(
+            askyesno=lambda *args, **kwargs: True,
+            showinfo=lambda *args, **kwargs: None,
+            showerror=lambda *args, **kwargs: error_calls.append((args, kwargs)),
+        ),
+    )
+
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.config = config
+    window.logger = logger
+    window.hotkey_var = FakeValue("ctrl+alt+space")
+    window.lang_var = FakeValue("englsh")
+    window.root = SimpleNamespace(destroy=lambda: destroy_calls.append(True))
+
+    window._save()
+
+    assert config.set_calls == []
+    assert logger.enabled_calls == []
+    assert destroy_calls == []
+    assert len(error_calls) == 1
+    assert "Whisper language code or name" in error_calls[0][0][1]
+    assert error_calls[0][1] == {"parent": window.root}
+
+
+@pytest.mark.parametrize("language", ["en", "English", "", "none"])
+def test_save_accepts_supported_or_auto_detect_language(monkeypatch, language):
+    config = FakeConfig()
+    logger = FakeLogger()
+    error_calls = []
+
+    monkeypatch.setattr(settings_module, "is_hotkey_valid", lambda value: True)
+    monkeypatch.setattr(settings_module, "set_autostart", lambda enabled: None)
+    monkeypatch.setattr(
+        settings_module,
+        "messagebox",
+        SimpleNamespace(
+            askyesno=lambda *args, **kwargs: True,
+            showinfo=lambda *args, **kwargs: None,
+            showerror=lambda *args, **kwargs: error_calls.append((args, kwargs)),
+        ),
+    )
+
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.config = config
+    window.logger = logger
+    window.hotkey_var = FakeValue("ctrl+alt+space")
+    window.model_var = FakeValue("small")
+    window.device_var = FakeValue("cpu")
+    window.lang_var = FakeValue(language)
+    window.notify_var = FakeValue(True)
+    window.logging_var = FakeValue(False)
+    window.pause_media_var = FakeValue(True)
+    window.autostart_var = FakeValue(False)
+    window.ollama_enabled_var = FakeValue(False)
+    window.ollama_endpoint_var = FakeValue("")
+    window.ollama_model_name_var = FakeValue("")
+    window.ollama_preload_model_var = FakeValue(False)
+    window.numeric_vars = make_numeric_vars()
+    window.root = SimpleNamespace(destroy=lambda: None)
+
+    window._save()
+
+    assert error_calls == []
+    expected_language = language if language not in {"", "none"} else None
+    assert ("language", expected_language) in config.set_calls
+
+
 def test_slider_number_of_steps_uses_numeric_setting_step():
     vad_padding = settings_module.SETTINGS_BY_KEY["vad_padding_ms"]
 
