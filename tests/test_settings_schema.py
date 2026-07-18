@@ -63,6 +63,15 @@ def test_numeric_values_are_clamped_for_display_and_save():
     assert parse_numeric_text("120", timeout) == 120
 
 
+def test_select_values_outside_allowed_choices_normalize_to_default():
+    model = SETTINGS_BY_KEY["model"]
+    device = SETTINGS_BY_KEY["device"]
+
+    assert normalize_value("bogus", model) == model.default
+    assert normalize_value("gpu", device) == device.default
+    assert normalize_value(" small ", model) == "small"
+
+
 def test_numeric_text_entry_allows_values_between_slider_steps():
     vad_padding = SETTINGS_BY_KEY["vad_padding_ms"]
 

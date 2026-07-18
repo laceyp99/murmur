@@ -59,6 +59,8 @@ def _restart_compare_value(value, setting):
             return int(round(float(value)))
         except (TypeError, ValueError, OverflowError):
             return _INVALID_RESTART_COMPARE_VALUE
+    if setting.control == "select":
+        return "" if value is None else str(value).strip()
     return normalize_value(value, setting)
 
 
@@ -337,8 +339,12 @@ class SettingsWindow:
             tab.grid_columnconfigure(0, weight=1)
 
         self.hotkey_var = tk.StringVar(value=self.config.hotkey)
-        self.model_var = tk.StringVar(value=self.config.model_name)
-        self.device_var = tk.StringVar(value=self.config.device)
+        self.model_var = tk.StringVar(
+            value=normalize_value(self.config.model_name, SETTINGS_BY_KEY["model"])
+        )
+        self.device_var = tk.StringVar(
+            value=normalize_value(self.config.device, SETTINGS_BY_KEY["device"])
+        )
         self.lang_var = tk.StringVar(
             value=str(self.config.language) if self.config.language else ""
         )
@@ -788,8 +794,8 @@ class SettingsWindow:
         new_autostart = self.autostart_var.get()
         updated_values = {
             "hotkey": new_hotkey,
-            "model": self.model_var.get(),
-            "device": self.device_var.get(),
+            "model": normalize_value(self.model_var.get(), SETTINGS_BY_KEY["model"]),
+            "device": normalize_value(self.device_var.get(), SETTINGS_BY_KEY["device"]),
             "language": lang if lang and lang.lower() != "none" else None,
             "enable_notifications": self.notify_var.get(),
             "enable_logging": new_logging,

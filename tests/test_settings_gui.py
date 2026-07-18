@@ -474,6 +474,17 @@ def test_changed_restart_settings_warns_when_existing_numeric_config_is_invalid(
     assert changed_settings == ["VAD aggressiveness"]
 
 
+def test_changed_restart_settings_warns_when_save_repairs_invalid_select():
+    config = FakeConfig()
+    config.model = "bogus"
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.config = config
+
+    changed_settings = window._changed_restart_settings({"model": "base"})
+
+    assert changed_settings == ["Whisper model"]
+
+
 def test_slider_number_of_steps_uses_numeric_setting_step():
     vad_padding = settings_module.SETTINGS_BY_KEY["vad_padding_ms"]
 

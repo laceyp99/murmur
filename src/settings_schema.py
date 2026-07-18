@@ -258,6 +258,10 @@ def normalize_value(value: Any, setting: SettingMetadata) -> Any:
                     f"Setting '{setting.key}' has an unparseable default: {setting.default!r}"
                 ) from default_exc
 
+    if setting.control == "select":
+        text = "" if value is None else str(value).strip()
+        return text if text in setting.choices else setting.default
+
     if setting.value_type == "bool":
         return bool(value)
 
