@@ -309,8 +309,9 @@ def test_save_rejects_invalid_hotkey_without_persisting_changes(monkeypatch):
     assert len(error_calls) == 1
 
 
-def test_save_rejects_non_numeric_setting_and_resets_field(monkeypatch):
+def test_save_rejects_non_numeric_setting_and_restores_persisted_value(monkeypatch):
     config = FakeConfig()
+    config.max_recording_duration = 600
     logger = FakeLogger()
     error_calls = []
     destroy_calls = []
@@ -349,12 +350,13 @@ def test_save_rejects_non_numeric_setting_and_resets_field(monkeypatch):
     assert config.set_calls == []
     assert logger.enabled_calls == []
     assert destroy_calls == []
-    assert window.numeric_vars["max_recording_duration"].get() == "300"
+    assert window.numeric_vars["max_recording_duration"].get() == "600"
     assert len(error_calls) == 1
 
 
 def test_save_rejects_non_finite_numeric_setting(monkeypatch):
     config = FakeConfig()
+    config.max_recording_duration = 450
     logger = FakeLogger()
     error_calls = []
     destroy_calls = []
@@ -393,7 +395,7 @@ def test_save_rejects_non_finite_numeric_setting(monkeypatch):
     assert config.set_calls == []
     assert logger.enabled_calls == []
     assert destroy_calls == []
-    assert window.numeric_vars["max_recording_duration"].get() == "300"
+    assert window.numeric_vars["max_recording_duration"].get() == "450"
     assert len(error_calls) == 1
 
 
