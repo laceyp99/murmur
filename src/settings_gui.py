@@ -772,9 +772,9 @@ class SettingsWindow:
         if lang is not None:
             from whisper.tokenizer import LANGUAGES
 
-            normalized_lang = lang.casefold()
-            valid_languages = {code.casefold() for code in LANGUAGES} | {
-                name.casefold() for name in LANGUAGES.values()
+            normalized_lang = lang.lower()
+            valid_languages = {code.lower() for code in LANGUAGES} | {
+                name.lower() for name in LANGUAGES.values()
             }
             if normalized_lang not in valid_languages:
                 messagebox.showerror(
