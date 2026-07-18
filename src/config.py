@@ -4,6 +4,7 @@ Configuration management for Murmur.
 
 import json
 import os
+import threading
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
@@ -64,6 +65,7 @@ class Config:
     def __init__(self):
         self.config_dir = get_app_data_dir()
         self.config_file = self.config_dir / "config.json"
+        self._lock = threading.RLock()
         self._config: Dict[str, Any] = {}
         self._startup_notice: Optional[str] = None
         self._load()
@@ -94,21 +96,27 @@ class Config:
 
     def _save_config(self, config_data: Dict[str, Any]) -> None:
         """Write config data atomically to disk."""
-        temp_file = self.config_dir / f"config.{os.getpid()}.tmp"
+        with self._lock:
+            temp_file = self.config_dir / f"config.{os.getpid()}.tmp"
 
-        try:
-            with open(temp_file, "w", encoding="utf-8") as file_handle:
-                json.dump(config_data, file_handle, indent=2)
-            os.replace(temp_file, self.config_file)
-        except OSError as exc:
             try:
-                temp_file.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise ConfigError("Failed to write config file") from exc
+                with open(temp_file, "w", encoding="utf-8") as file_handle:
+                    json.dump(config_data, file_handle, indent=2)
+                os.replace(temp_file, self.config_file)
+            except OSError as exc:
+                try:
+                    temp_file.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise ConfigError("Failed to write config file") from exc
 
     def _load(self):
         """Load configuration from file or create default."""
+        with self._lock:
+            self._load_locked()
+
+    def _load_locked(self) -> None:
+        """Load configuration while the caller holds the config lock."""
         try:
             self.config_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -137,11 +145,13 @@ class Config:
 
     def _save(self):
         """Save configuration to file."""
-        self._save_config(self._config)
+        with self._lock:
+            self._save_config(self._config)
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a configuration value."""
-        return self._config.get(key, default)
+        with self._lock:
+            return self._config.get(key, default)
 
     def set(self, key: str, value: Any):
         """Set a configuration value and save."""
@@ -149,20 +159,23 @@ class Config:
 
     def update(self, values: Mapping[str, Any]) -> None:
         """Update multiple configuration values and save them atomically."""
-        updated_config = self._config.copy()
-        updated_config.update(dict(values))
-        self._save_config(updated_config)
-        self._config = updated_config
+        with self._lock:
+            updated_config = self._config.copy()
+            updated_config.update(dict(values))
+            self._save_config(updated_config)
+            self._config = updated_config
 
     def get_all(self) -> Dict[str, Any]:
         """Get all configuration values."""
-        return self._config.copy()
+        with self._lock:
+            return self._config.copy()
 
     def consume_startup_notice(self) -> Optional[str]:
         """Return and clear any startup notice generated during config load."""
-        notice = self._startup_notice
-        self._startup_notice = None
-        return notice
+        with self._lock:
+            notice = self._startup_notice
+            self._startup_notice = None
+            return notice
 
     @property
     def hotkey(self) -> str:

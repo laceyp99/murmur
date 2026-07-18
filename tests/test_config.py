@@ -1,4 +1,5 @@
 import json
+import threading
 
 import pytest
 
@@ -106,3 +107,46 @@ def test_config_set_raises_when_atomic_save_fails(tmp_path, monkeypatch):
 
     assert cfg.model_name == "small"
     assert config_file.read_text(encoding="utf-8") == original_contents
+
+
+def test_concurrent_updates_preserve_disjoint_keys(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    cfg = Config()
+    original_save = cfg._save_config
+    first_save_started = threading.Event()
+    second_save_finished = threading.Event()
+    save_count = 0
+    save_count_lock = threading.Lock()
+
+    def coordinated_save(config_data):
+        nonlocal save_count
+        with save_count_lock:
+            save_count += 1
+            current_save = save_count
+
+        if current_save == 1:
+            first_save_started.set()
+            second_save_finished.wait(timeout=0.2)
+
+        original_save(config_data)
+
+        if current_save == 2:
+            second_save_finished.set()
+
+    monkeypatch.setattr(cfg, "_save_config", coordinated_save)
+    first_thread = threading.Thread(target=cfg.update, args=({"thread_a": True},))
+    second_thread = threading.Thread(target=cfg.update, args=({"thread_b": True},))
+
+    first_thread.start()
+    assert first_save_started.wait(timeout=1)
+    second_thread.start()
+    first_thread.join(timeout=1)
+    second_thread.join(timeout=1)
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert cfg.get("thread_a") is True
+    assert cfg.get("thread_b") is True
+    persisted_config = json.loads(cfg.config_file.read_text(encoding="utf-8"))
+    assert persisted_config["thread_a"] is True
+    assert persisted_config["thread_b"] is True
