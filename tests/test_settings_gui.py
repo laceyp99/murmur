@@ -253,6 +253,7 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     assert set_autostart_calls == [True]
     assert len(info_calls) == 1
     assert "Device" in info_calls[0][0][1]
+    assert info_calls[0][1] == {"parent": window.root}
 
 
 def test_save_rejects_invalid_hotkey_without_persisting_changes(monkeypatch):
@@ -307,6 +308,7 @@ def test_save_rejects_invalid_hotkey_without_persisting_changes(monkeypatch):
     assert destroy_calls == []
     assert len(info_calls) == 0
     assert len(error_calls) == 1
+    assert error_calls[0][1] == {"parent": window.root}
 
 
 def test_save_rejects_non_numeric_setting_and_restores_persisted_value(monkeypatch):
@@ -352,6 +354,7 @@ def test_save_rejects_non_numeric_setting_and_restores_persisted_value(monkeypat
     assert destroy_calls == []
     assert window.numeric_vars["max_recording_duration"].get() == "600"
     assert len(error_calls) == 1
+    assert error_calls[0][1] == {"parent": window.root}
 
 
 def test_save_rejects_non_finite_numeric_setting(monkeypatch):
@@ -397,6 +400,7 @@ def test_save_rejects_non_finite_numeric_setting(monkeypatch):
     assert destroy_calls == []
     assert window.numeric_vars["max_recording_duration"].get() == "450"
     assert len(error_calls) == 1
+    assert error_calls[0][1] == {"parent": window.root}
 
 
 @pytest.mark.parametrize(
@@ -450,6 +454,7 @@ def test_save_rejects_blank_ollama_settings_when_cleanup_enabled(
     assert destroy_calls == []
     assert len(error_calls) == 1
     assert "Ollama endpoint and model" in error_calls[0][0][1]
+    assert error_calls[0][1] == {"parent": window.root}
 
 
 def test_changed_restart_settings_warns_when_save_clamps_existing_config():
@@ -674,6 +679,7 @@ def test_ollama_connection_test_uses_unsaved_values(monkeypatch):
     after_callbacks[0]()
 
     assert len(info_calls) == 1
+    assert info_calls[0][1] == {"parent": window.root}
     assert window._ollama_test_button.configure_calls[-1] == {
         "state": "normal",
         "text": "Test Ollama Connection",
@@ -683,14 +689,16 @@ def test_ollama_connection_test_uses_unsaved_values(monkeypatch):
 def test_purge_training_data_confirms_count_and_size(monkeypatch):
     logger = FakeLogger()
     logger.summary = SimpleNamespace(file_count=2, total_bytes=1536)
-    confirm_messages = []
+    confirm_calls = []
     info_calls = []
 
     monkeypatch.setattr(
         settings_module,
         "messagebox",
         SimpleNamespace(
-            askyesno=lambda title, message: confirm_messages.append(message) or True,
+            askyesno=lambda *args, **kwargs: (
+                confirm_calls.append((args, kwargs)) or True
+            ),
             showinfo=lambda *args, **kwargs: info_calls.append((args, kwargs)),
             showerror=lambda *args, **kwargs: None,
         ),
@@ -698,10 +706,13 @@ def test_purge_training_data_confirms_count_and_size(monkeypatch):
 
     window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
     window.logger = logger
+    window.root = object()
 
     window._purge_training_data()
 
     assert logger.purge_calls == 1
-    assert "Files: 2" in confirm_messages[0]
-    assert "Approximate size: 1.5 KB" in confirm_messages[0]
+    assert "Files: 2" in confirm_calls[0][0][1]
+    assert "Approximate size: 1.5 KB" in confirm_calls[0][0][1]
+    assert confirm_calls[0][1] == {"parent": window.root}
     assert len(info_calls) == 1
+    assert info_calls[0][1] == {"parent": window.root}
