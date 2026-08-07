@@ -2,22 +2,24 @@
 
 import ctypes
 import queue
+import sys
 import threading
 import tkinter as tk
 import weakref
+from ctypes import wintypes
 from datetime import datetime
 from tkinter import messagebox
-from ctypes import wintypes
 
 import customtkinter as ctk
 from PIL import Image
 
-from .autostart import set_autostart
 from .assets import get_app_icon_path, get_logo_path
+from .autostart import set_autostart
 from .config import ConfigError, get_config, get_training_data_dir
 from .hotkey import is_hotkey_valid
 from .llm_postprocess import check_ollama_connection
 from .logger import get_logger
+from .notifications import get_notification_manager
 from .settings_schema import (
     SETTINGS_BY_KEY,
     TAB_ORDER,
@@ -99,6 +101,20 @@ _settings_requests = queue.Queue()
 _ollama_connection_test_results = queue.Queue()
 _settings_thread = None
 _settings_thread_lock = threading.Lock()
+
+
+def _drain_settings_requests():
+    while True:
+        try:
+            _settings_requests.get_nowait()
+        except queue.Empty:
+            return
+
+
+def _report_settings_ui_failure(exc):
+    message = f"Failed to open settings: {exc}"
+    print(message, file=sys.stderr)
+    get_notification_manager().notify_error(message)
 
 
 def _configure_customtkinter():
@@ -231,35 +247,44 @@ def _apply_native_window_icon(window, icon_path, native_icons=None):
 def _run_settings_ui():
     global _settings_thread
 
-    _configure_windows_app_identity()
-    _configure_customtkinter()
-    root = ctk.CTk()
-    root._murmur_window_icon = _apply_window_icon(root)
-    root.withdraw()
-    service = _SettingsWindowService(root)
-
-    def process_requests():
-        try:
-            while True:
-                try:
-                    request = _settings_requests.get_nowait()
-                except queue.Empty:
-                    break
-
-                if request == "show":
-                    service.show()
-        except Exception as exc:
-            messagebox.showerror(_APP_DISPLAY_NAME, f"Failed to open settings: {exc}")
-        finally:
-            root.after(100, process_requests)
-
+    failure = None
     try:
+        _configure_windows_app_identity()
+        _configure_customtkinter()
+        root = ctk.CTk()
+        root._murmur_window_icon = _apply_window_icon(root)
+        root.withdraw()
+        service = _SettingsWindowService(root)
+
+        def process_requests():
+            try:
+                while True:
+                    try:
+                        request = _settings_requests.get_nowait()
+                    except queue.Empty:
+                        break
+
+                    if request == "show":
+                        service.show()
+            except Exception as exc:
+                messagebox.showerror(
+                    _APP_DISPLAY_NAME, f"Failed to open settings: {exc}"
+                )
+            finally:
+                root.after(100, process_requests)
+
         root.after(0, process_requests)
         root.mainloop()
+    except Exception as exc:  # noqa: BLE001 - thread failures must not disappear
+        failure = exc
     finally:
         with _settings_thread_lock:
             if _settings_thread is threading.current_thread():
                 _settings_thread = None
+                _drain_settings_requests()
+
+    if failure is not None:
+        _report_settings_ui_failure(failure)
 
 
 def _ensure_settings_ui_thread():
@@ -269,6 +294,7 @@ def _ensure_settings_ui_thread():
         if _settings_thread is not None and _settings_thread.is_alive():
             return
 
+        _drain_settings_requests()
         _settings_thread = threading.Thread(
             target=_run_settings_ui,
             name="MurmurSettingsUI",
