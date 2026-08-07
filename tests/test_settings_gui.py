@@ -1,5 +1,5 @@
-from types import SimpleNamespace
 import queue
+from types import SimpleNamespace
 
 import pytest
 
@@ -63,6 +63,74 @@ class FakeLogger:
     def purge_all(self):
         self.purge_calls += 1
         return self.summary.file_count
+
+
+def test_settings_ui_startup_failure_resets_thread_and_reports_error(
+    monkeypatch, capsys
+):
+    requests = queue.Queue()
+    requests.put("show")
+    notifications = []
+    current_thread = settings_module.threading.current_thread()
+
+    monkeypatch.setattr(settings_module, "_settings_requests", requests)
+    monkeypatch.setattr(settings_module, "_settings_thread", current_thread)
+    monkeypatch.setattr(
+        settings_module, "_configure_windows_app_identity", lambda: None
+    )
+    monkeypatch.setattr(settings_module, "_configure_customtkinter", lambda: None)
+    monkeypatch.setattr(
+        settings_module.ctk,
+        "CTk",
+        lambda: (_ for _ in ()).throw(RuntimeError("Tk unavailable")),
+    )
+    monkeypatch.setattr(
+        settings_module,
+        "get_notification_manager",
+        lambda: SimpleNamespace(notify_error=notifications.append),
+    )
+
+    settings_module._run_settings_ui()
+
+    assert settings_module._settings_thread is None
+    assert requests.empty()
+    assert notifications == ["Failed to open settings: Tk unavailable"]
+    assert "Failed to open settings: Tk unavailable" in capsys.readouterr().err
+
+
+def test_next_settings_click_discards_stale_requests_and_queues_one(monkeypatch):
+    requests = queue.Queue()
+    requests.put("show")
+    thread_starts = []
+
+    class FakeThread:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def is_alive(self):
+            return False
+
+        def start(self):
+            thread_starts.append(self)
+
+    monkeypatch.setattr(settings_module, "_settings_requests", requests)
+    monkeypatch.setattr(
+        settings_module,
+        "_settings_thread",
+        SimpleNamespace(is_alive=lambda: False),
+    )
+    monkeypatch.setattr(settings_module.threading, "Thread", FakeThread)
+
+    settings_module.show_settings()
+
+    assert requests.qsize() == 1
+    assert requests.get_nowait() == "show"
+    assert len(thread_starts) == 1
+    assert thread_starts[0].kwargs == {
+        "target": settings_module._run_settings_ui,
+        "name": "MurmurSettingsUI",
+        "daemon": True,
+    }
 
 
 def test_settings_window_service_focuses_existing_window_and_recreates_closed(
