@@ -2,8 +2,9 @@
 System tray management for Murmur.
 """
 
-from PIL import Image
 import threading
+
+from PIL import Image
 
 from .assets import get_logo_path
 from .config import get_config

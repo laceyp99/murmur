@@ -1,5 +1,5 @@
-from types import SimpleNamespace
 import queue
+from types import SimpleNamespace
 
 import pytest
 

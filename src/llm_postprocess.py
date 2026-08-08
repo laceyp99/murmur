@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from typing import Any
 
 try:
     from ollama import Client as OllamaPackageClient
@@ -39,7 +40,7 @@ class OllamaClient:
         endpoint: str,
         model_name: str,
         timeout: float = 5.0,
-        client: Optional[Any] = None,
+        client: Any | None = None,
     ):
         self.endpoint = endpoint
         self.model_name = model_name
@@ -59,7 +60,7 @@ class OllamaClient:
         prompt: str,
         max_tokens: int = 256,
         temperature: float = 0.0,
-        system: Optional[str] = None,
+        system: str | None = None,
     ) -> str:
         """Generate a deterministic cleanup response from Ollama."""
         response = self._client.generate(
@@ -204,7 +205,7 @@ class LLMPostProcessor:
     def __init__(
         self,
         client: OllamaClient,
-        user_vocab: Optional[Mapping[str, str]] = None,
+        user_vocab: Mapping[str, str] | None = None,
     ):
         self.client = client
         self.user_vocab = dict(user_vocab or {})
@@ -278,10 +279,9 @@ class LLMPostProcessor:
         if len(re.findall(r"(?m)^\s*(?:[-*]|\d+\.)\s+", output_text)) >= 1:
             return False
 
-        if re.search(r"(?im)^\s*(user|assistant|system|transcript):", output_text):
-            return False
-
-        return True
+        return not re.search(
+            r"(?im)^\s*(user|assistant|system|transcript):", output_text
+        )
 
     def build_messages(self, text: str) -> list[dict[str, str]]:
         """Build few-shot chat history for the final transcript cleanup pass."""

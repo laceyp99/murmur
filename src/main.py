@@ -6,10 +6,15 @@ Orchestrates audio recording, transcription, and clipboard operations.
 import sys
 import threading
 import time
-from typing import Optional
 
-from .config import ConfigError, DEFAULT_CONFIG, get_config
-from .audio import AudioRecorder, AudioData
+from .audio import AudioData, AudioRecorder
+from .autostart import set_autostart
+from .clipboard import copy_to_clipboard
+from .config import DEFAULT_CONFIG, ConfigError, get_config
+from .hotkey import HotkeyManager, HotkeyState, is_hotkey_valid
+from .logger import get_logger
+from .media_control import get_media_controller
+from .notifications import get_notification_manager
 from .transcription import Transcriber
 from .transcription_live import (
     LiveSegmentMetrics,
@@ -17,19 +22,13 @@ from .transcription_live import (
     TranscriptAccumulator,
     TranscriptChunk,
 )
+from .tray import TrayManager
 from .vad import (
     LiveSpeechSegment,
     LiveVADSegmentationWorker,
     VADSettings,
     WebRTCVADSegmenter,
 )
-from .clipboard import copy_to_clipboard
-from .hotkey import HotkeyManager, HotkeyState, is_hotkey_valid
-from .notifications import get_notification_manager
-from .logger import get_logger
-from .tray import TrayManager
-from .autostart import set_autostart
-from .media_control import get_media_controller
 
 
 class MurmurApp:
@@ -55,10 +54,10 @@ class MurmurApp:
         self.recorder = AudioRecorder()
         self._set_recording_limit_callback()
         self.transcriber = Transcriber()
-        self.segmenter: Optional[WebRTCVADSegmenter] = None
-        self.live_segmenter: Optional[LiveVADSegmentationWorker] = None
-        self.live_transcription_worker: Optional[LiveTranscriptionWorker] = None
-        self.live_transcript_accumulator: Optional[TranscriptAccumulator] = None
+        self.segmenter: WebRTCVADSegmenter | None = None
+        self.live_segmenter: LiveVADSegmentationWorker | None = None
+        self.live_transcription_worker: LiveTranscriptionWorker | None = None
+        self.live_transcript_accumulator: TranscriptAccumulator | None = None
         self.hotkey_manager = HotkeyManager()
         self.notifications = get_notification_manager()
         self.logger = get_logger()
@@ -67,10 +66,10 @@ class MurmurApp:
 
         self._running = False
         self._was_media_playing = False
-        self._vad_disabled_reason: Optional[str] = None
-        self._live_vad_disabled_reason: Optional[str] = None
+        self._vad_disabled_reason: str | None = None
+        self._live_vad_disabled_reason: str | None = None
         self._live_pipeline_degraded = False
-        self._live_pipeline_degraded_reason: Optional[str] = None
+        self._live_pipeline_degraded_reason: str | None = None
         self._recording_limit_stop_started = False
         self._recording_limit_stop_lock = threading.Lock()
 
@@ -153,7 +152,7 @@ class MurmurApp:
 
         self.notifications.notify("murmur", "Ready! Press hotkey to start recording.")
 
-    def _recover_failed_hotkey_registration(self) -> tuple[Optional[str], bool]:
+    def _recover_failed_hotkey_registration(self) -> tuple[str | None, bool]:
         """Recover from invalid or unregistrable configured hotkeys."""
         configured_hotkey = self.config.hotkey
         fallback_hotkey = DEFAULT_CONFIG["hotkey"]
@@ -229,12 +228,9 @@ class MurmurApp:
         # Check and pause media if playing (when enabled)
         if self.config.pause_media_while_recording:
             self._was_media_playing = self.media_controller.is_media_playing()
-            if self._was_media_playing:
-                if not self.media_controller.pause():
-                    print("⚠️ Failed to pause media playback")
-                    self.notifications.notify(
-                        "murmur", "Could not pause media playback"
-                    )
+            if self._was_media_playing and not self.media_controller.pause():
+                print("⚠️ Failed to pause media playback")
+                self.notifications.notify("murmur", "Could not pause media playback")
 
         try:
             self._start_live_transcription()
@@ -459,14 +455,14 @@ class MurmurApp:
             f"max_latency={max_latency}"
         )
 
-    def _format_optional_seconds(self, value: Optional[float]) -> str:
+    def _format_optional_seconds(self, value: float | None) -> str:
         """Format optional second values for content-safe stdout metrics."""
         if value is None:
             return "n/a"
 
         return f"{value:.2f}s"
 
-    def _get_segmenter(self, sample_rate: int) -> Optional[WebRTCVADSegmenter]:
+    def _get_segmenter(self, sample_rate: int) -> WebRTCVADSegmenter | None:
         """Return a cached segmenter, or disable VAD if initialization fails."""
         if self._vad_disabled_reason is not None:
             return None

@@ -2,6 +2,7 @@
 Auto-start management for Murmur on Windows.
 """
 
+import contextlib
 import os
 import sys
 
@@ -44,10 +45,8 @@ def set_autostart(enabled: bool):
         if enabled:
             winreg.SetValueEx(reg_key, app_name, 0, winreg.REG_SZ, cmd)
         else:
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 winreg.DeleteValue(reg_key, app_name)
-            except FileNotFoundError:
-                pass
         winreg.CloseKey(reg_key)
     except Exception as e:
         print(f"Failed to update autostart registry: {e}")

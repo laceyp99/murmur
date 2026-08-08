@@ -2,11 +2,12 @@
 Audio recording functionality for Murmur.
 """
 
-import numpy as np
 import threading
 import time
-from typing import Callable, Optional
+from collections.abc import Callable
 from dataclasses import dataclass
+
+import numpy as np
 
 try:
     import sounddevice as sd
@@ -14,7 +15,6 @@ except (ImportError, OSError):
     sd = None
 
 from .config import Config, get_config
-
 
 DEFAULT_MAX_RECORDING_DURATION = 300
 
@@ -31,7 +31,7 @@ class AudioData:
 class AudioRecorder:
     """Records audio from the microphone."""
 
-    def __init__(self, config: Optional[Config] = None):
+    def __init__(self, config: Config | None = None):
         self.config = config or get_config()
         self.sample_rate = self.config.get("sample_rate", 16000)
         self.max_recording_duration = self._parse_max_recording_duration(
@@ -45,10 +45,10 @@ class AudioRecorder:
         self._audio_data = []
         self._lock = threading.RLock()
         self._stream = None
-        self._recording_start: Optional[float] = None
-        self._block_callback: Optional[Callable[[np.ndarray], None]] = None
-        self._on_block_callback_error: Optional[Callable[[Exception], None]] = None
-        self._on_recording_limit: Optional[Callable[[float], None]] = None
+        self._recording_start: float | None = None
+        self._block_callback: Callable[[np.ndarray], None] | None = None
+        self._on_block_callback_error: Callable[[Exception], None] | None = None
+        self._on_recording_limit: Callable[[float], None] | None = None
         self._block_callback_failed = False
         self._recording_limit_reached = False
 
@@ -66,7 +66,7 @@ class AudioRecorder:
 
     def set_block_callback(
         self,
-        callback: Optional[Callable[[np.ndarray], None]],
+        callback: Callable[[np.ndarray], None] | None,
     ) -> None:
         """Register a lightweight per-block callback used during recording."""
         with self._lock:
@@ -74,7 +74,7 @@ class AudioRecorder:
 
     def set_block_callback_error_handler(
         self,
-        handler: Optional[Callable[[Exception], None]],
+        handler: Callable[[Exception], None] | None,
     ) -> None:
         """Register a handler for the first per-block callback failure."""
         with self._lock:
@@ -82,7 +82,7 @@ class AudioRecorder:
 
     def set_recording_limit_callback(
         self,
-        callback: Optional[Callable[[float], None]],
+        callback: Callable[[float], None] | None,
     ) -> None:
         """Register a callback fired when max recording duration is reached."""
         with self._lock:
@@ -114,7 +114,7 @@ class AudioRecorder:
         )
         self._stream.start()
 
-    def stop_recording(self) -> Optional[AudioData]:
+    def stop_recording(self) -> AudioData | None:
         """
         Stop recording and return the audio data.
 
@@ -152,11 +152,11 @@ class AudioRecorder:
         if status:
             pass  # Ignore status messages
 
-        audio_block: Optional[np.ndarray] = None
-        block_callback: Optional[Callable[[np.ndarray], None]] = None
-        error_handler: Optional[Callable[[Exception], None]] = None
-        recording_limit_callback: Optional[Callable[[float], None]] = None
-        recording_limit_duration: Optional[float] = None
+        audio_block: np.ndarray | None = None
+        block_callback: Callable[[np.ndarray], None] | None = None
+        error_handler: Callable[[Exception], None] | None = None
+        recording_limit_callback: Callable[[float], None] | None = None
+        recording_limit_duration: float | None = None
         with self._lock:
             if not self._recording:
                 return

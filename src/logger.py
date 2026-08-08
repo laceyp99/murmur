@@ -6,14 +6,14 @@ Logs audio recordings and transcriptions for fine-tuning datasets.
 import json
 import shutil
 import wave
-import numpy as np
-from pathlib import Path
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Optional
-from dataclasses import dataclass, asdict
+from pathlib import Path
 
-from .config import get_config, get_training_data_dir
+import numpy as np
+
 from .audio import AudioData
+from .config import get_config, get_training_data_dir
 from .transcription_live import LiveSegmentMetrics
 
 
@@ -28,8 +28,8 @@ class TranscriptionLog:
     model: str
     processing_time: float
     live_segment_count: int
-    live_segment_latency_avg_seconds: Optional[float]
-    live_segment_latency_max_seconds: Optional[float]
+    live_segment_latency_avg_seconds: float | None
+    live_segment_latency_max_seconds: float | None
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,7 @@ class DataLogger:
     - Transcription metadata as JSON
     """
 
-    def __init__(self, log_dir: Optional[Path] = None):
+    def __init__(self, log_dir: Path | None = None):
         self.config = get_config()
 
         if log_dir is None:
@@ -66,8 +66,8 @@ class DataLogger:
         audio_data: AudioData,
         transcription: str,
         processing_time: float,
-        live_segment_metrics: Optional[LiveSegmentMetrics] = None,
-    ) -> Optional[TranscriptionLog]:
+        live_segment_metrics: LiveSegmentMetrics | None = None,
+    ) -> TranscriptionLog | None:
         """
         Log an audio recording and its transcription.
 
@@ -201,7 +201,7 @@ class DataLogger:
         if not self.metadata_file.exists():
             return 0
 
-        with open(self.metadata_file, "r", encoding="utf-8") as f:
+        with open(self.metadata_file, encoding="utf-8") as f:
             return sum(1 for _ in f)
 
     def get_total_duration(self) -> float:
@@ -210,7 +210,7 @@ class DataLogger:
             return 0.0
 
         total = 0.0
-        with open(self.metadata_file, "r", encoding="utf-8") as f:
+        with open(self.metadata_file, encoding="utf-8") as f:
             for line in f:
                 try:
                     entry = json.loads(line)
@@ -222,7 +222,7 @@ class DataLogger:
 
 
 # Global logger instance
-_logger: Optional[DataLogger] = None
+_logger: DataLogger | None = None
 
 
 def get_logger() -> DataLogger:

@@ -3,11 +3,13 @@ Hotkey handling module for Murmur.
 Manages global hotkey registration and callbacks.
 """
 
-import keyboard
+import contextlib
 import threading
-from typing import Optional, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+
+import keyboard
 
 from .config import ConfigError, get_config
 
@@ -56,18 +58,18 @@ class HotkeyManager:
     def __init__(self):
         self.config = get_config()
         self._state: HotkeyState = HotkeyState.IDLE
-        self._on_start: Optional[Callable[[], None]] = None
-        self._on_stop: Optional[Callable[[], None]] = None
-        self._on_state_change: Optional[Callable[[HotkeyState], None]] = None
+        self._on_start: Callable[[], None] | None = None
+        self._on_stop: Callable[[], None] | None = None
+        self._on_state_change: Callable[[HotkeyState], None] | None = None
         self._hotkey_registered: bool = False
-        self._last_registration_error: Optional[str] = None
+        self._last_registration_error: str | None = None
         self._lock = threading.Lock()
 
     def register(
         self,
-        on_start: Optional[Callable[[], None]] = None,
-        on_stop: Optional[Callable[[], None]] = None,
-        on_state_change: Optional[Callable[[HotkeyState], None]] = None,
+        on_start: Callable[[], None] | None = None,
+        on_stop: Callable[[], None] | None = None,
+        on_state_change: Callable[[HotkeyState], None] | None = None,
     ) -> bool:
         """
         Register the global hotkey.
@@ -103,14 +105,12 @@ class HotkeyManager:
     def unregister(self) -> None:
         """Unregister the global hotkey."""
         if self._hotkey_registered:
-            try:
+            with contextlib.suppress(Exception):
                 keyboard.remove_hotkey(self.config.hotkey)
-            except Exception:
-                pass
             self._hotkey_registered = False
         self._last_registration_error = None
 
-    def get_last_registration_error(self) -> Optional[str]:
+    def get_last_registration_error(self) -> str | None:
         """Return the last registration failure message, if any."""
         return self._last_registration_error
 
@@ -193,7 +193,5 @@ def wait_for_exit() -> None:
     hotkeys are being processed in the background.
     """
     print("\nmurmur is running. Press Escape or Ctrl+C to exit.\n")
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         keyboard.wait("escape")
-    except KeyboardInterrupt:
-        pass
