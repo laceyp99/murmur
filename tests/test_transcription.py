@@ -1,12 +1,11 @@
 import numpy as np
 import pytest
 
-
 pytest.importorskip("torch")
 pytest.importorskip("whisper")
 
-from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
 from src.audio import AudioData
+from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
 from src.transcription import (
     LOGPROB_THRESHOLD,
     NO_SPEECH_THRESHOLD,

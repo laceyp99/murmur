@@ -4,7 +4,7 @@ Provides user feedback through Windows toast notifications.
 """
 
 import threading
-from typing import Any, Optional
+from typing import Any
 
 try:
     from win10toast import ToastNotifier
@@ -25,7 +25,7 @@ class NotificationManager:
 
     def __init__(self):
         self.config = get_config()
-        self._toaster: Optional[Any] = None
+        self._toaster: Any | None = None
         self._fallback_reason = "toast unavailable"
 
         if TOAST_AVAILABLE:
@@ -121,7 +121,7 @@ class NotificationManager:
 
 
 # Global notification manager instance
-_notification_manager: Optional[NotificationManager] = None
+_notification_manager: NotificationManager | None = None
 
 
 def get_notification_manager() -> NotificationManager:

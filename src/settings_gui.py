@@ -1,19 +1,20 @@
 """Settings GUI for Murmur using customtkinter."""
 
+import contextlib
 import ctypes
 import queue
 import threading
 import tkinter as tk
 import weakref
+from ctypes import wintypes
 from datetime import datetime
 from tkinter import messagebox
-from ctypes import wintypes
 
 import customtkinter as ctk
 from PIL import Image
 
-from .autostart import set_autostart
 from .assets import get_app_icon_path, get_logo_path
+from .autostart import set_autostart
 from .config import ConfigError, get_config, get_training_data_dir
 from .hotkey import is_hotkey_valid
 from .llm_postprocess import check_ollama_connection
@@ -56,7 +57,7 @@ def _restart_compare_value(value, setting):
     """Coerce without clamping so restart warnings catch clamped or repaired saves."""
     if setting.control == "number":
         try:
-            return int(round(float(value)))
+            return round(float(value))
         except (TypeError, ValueError, OverflowError):
             return _INVALID_RESTART_COMPARE_VALUE
     if setting.control == "select":
@@ -72,7 +73,7 @@ def _slider_number_of_steps(setting):
         or setting.step <= 0
     ):
         return None
-    return int(round((setting.max_value - setting.min_value) / setting.step))
+    return round((setting.max_value - setting.min_value) / setting.step)
 
 
 class _SettingsWindowService:
@@ -134,25 +135,19 @@ def _apply_window_icon(window):
         nonlocal native_icons
 
         if icon_path is not None:
-            try:
+            with contextlib.suppress(tk.TclError):
                 window.iconbitmap(default=str(icon_path))
-            except tk.TclError:
-                pass
             native_icons = _apply_native_window_icon(
                 window, icon_path, native_icons=native_icons
             )
 
         if logo_path is not None:
             if not icon_images:
-                try:
+                with contextlib.suppress(tk.TclError):
                     icon_images.append(tk.PhotoImage(file=str(logo_path)))
-                except tk.TclError:
-                    pass
             if icon_images:
-                try:
+                with contextlib.suppress(tk.TclError):
                     window.iconphoto(True, icon_images[0])
-                except tk.TclError:
-                    pass
 
     apply_once()
 
@@ -693,10 +688,8 @@ class SettingsWindow:
         except queue.Empty:
             pass
 
-        try:
+        with contextlib.suppress(tk.TclError):
             self.root.after(100, self._poll_ollama_connection_test_result)
-        except tk.TclError:
-            pass
 
     def _test_ollama_connection(self):
         timeout_setting = SETTINGS_BY_KEY["ollama_timeout_seconds"]
@@ -849,7 +842,9 @@ class SettingsWindow:
         restart_settings = self._changed_restart_settings(updated_values)
 
         if previous_logging != new_logging:
-            updated_values["logging_consent_updated_at"] = datetime.now().isoformat()
+            updated_values["logging_consent_updated_at"] = (
+                datetime.now().astimezone().isoformat()
+            )
             updated_values["logging_consent_source"] = "settings"
 
         updated_values["start_with_windows"] = new_autostart

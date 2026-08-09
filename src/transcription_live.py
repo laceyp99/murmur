@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from queue import Empty, Queue
 import threading
 import time
-from typing import Callable, Dict, List, Optional, Protocol
+from collections.abc import Callable
+from dataclasses import dataclass
+from queue import Empty, Queue
+from typing import Protocol
 
 
 class LiveSegmentLike(Protocol):
@@ -36,11 +37,11 @@ class LiveSegmentMetrics:
     """Summary metrics for live chunks that contributed transcript text."""
 
     segment_count: int
-    latency_avg_seconds: Optional[float]
-    latency_max_seconds: Optional[float]
+    latency_avg_seconds: float | None
+    latency_max_seconds: float | None
 
     @classmethod
-    def empty(cls) -> "LiveSegmentMetrics":
+    def empty(cls) -> LiveSegmentMetrics:
         """Return the default summary when no live chunks contributed text."""
         return cls(
             segment_count=0,
@@ -53,7 +54,7 @@ class TranscriptAccumulator:
     """Store completed transcript chunks and expose them in segment order."""
 
     def __init__(self):
-        self._chunks: Dict[int, TranscriptChunk] = {}
+        self._chunks: dict[int, TranscriptChunk] = {}
         self._lock = threading.RLock()
 
     def add_chunk(self, chunk: TranscriptChunk) -> bool:
@@ -65,7 +66,7 @@ class TranscriptAccumulator:
             self._chunks[chunk.segment_id] = chunk
             return True
 
-    def ordered_chunks(self) -> List[TranscriptChunk]:
+    def ordered_chunks(self) -> list[TranscriptChunk]:
         """Return chunks in ascending segment order."""
         with self._lock:
             return [self._chunks[key] for key in sorted(self._chunks)]
@@ -95,13 +96,12 @@ class LiveTranscriptionWorker:
         self,
         transcriber: LiveTranscriberLike,
         accumulator: TranscriptAccumulator,
-        on_segment_queued: Optional[Callable[[LiveSegmentLike], None]] = None,
-        on_segment_failed: Optional[
-            Callable[[LiveSegmentLike, Exception, int], None]
-        ] = None,
-        on_segment_transcribed: Optional[Callable[[TranscriptChunk], None]] = None,
-        on_chunk_appended: Optional[Callable[[TranscriptChunk, str], None]] = None,
-        on_worker_degraded: Optional[Callable[[str], None]] = None,
+        on_segment_queued: Callable[[LiveSegmentLike], None] | None = None,
+        on_segment_failed: Callable[[LiveSegmentLike, Exception, int], None]
+        | None = None,
+        on_segment_transcribed: Callable[[TranscriptChunk], None] | None = None,
+        on_chunk_appended: Callable[[TranscriptChunk, str], None] | None = None,
+        on_worker_degraded: Callable[[str], None] | None = None,
         queue_timeout_seconds: float = 0.1,
         max_segment_retries: int = 1,
     ):
@@ -114,13 +114,13 @@ class LiveTranscriptionWorker:
         self.on_worker_degraded = on_worker_degraded
         self.queue_timeout_seconds = queue_timeout_seconds
         self.max_segment_retries = max_segment_retries
-        self._queue: Queue[Optional[LiveSegmentLike]] = Queue()
-        self._thread: Optional[threading.Thread] = None
+        self._queue: Queue[LiveSegmentLike | None] = Queue()
+        self._thread: threading.Thread | None = None
         self._running = False
         self._state_lock = threading.RLock()
         self.has_failures = False
         self.failure_count = 0
-        self.last_error: Optional[str] = None
+        self.last_error: str | None = None
         self._degraded_notified = False
 
     def start(self) -> None:
@@ -186,8 +186,8 @@ class LiveTranscriptionWorker:
     def _transcribe_segment_with_retry(
         self,
         segment: LiveSegmentLike,
-    ) -> Optional[TranscriptChunk]:
-        last_error: Optional[Exception] = None
+    ) -> TranscriptChunk | None:
+        last_error: Exception | None = None
 
         for attempt_count in range(1, self.max_segment_retries + 2):
             start_time = time.time()
@@ -246,6 +246,6 @@ class LiveTranscriptionWorker:
         with self._state_lock:
             return self.has_failures
 
-    def get_last_error(self) -> Optional[str]:
+    def get_last_error(self) -> str | None:
         with self._state_lock:
             return self.last_error

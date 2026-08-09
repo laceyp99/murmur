@@ -5,10 +5,10 @@ import pytest
 
 import src.config as config_module
 from src.config import (
-    Config,
     DEFAULT_CONFIG,
     DEFAULT_OLLAMA_MODEL_NAME,
     DEFAULT_OLLAMA_TIMEOUT_SECONDS,
+    Config,
 )
 
 

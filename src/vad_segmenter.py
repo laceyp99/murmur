@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -26,8 +26,8 @@ class WebRTCVADSegmenter:
 
     def __init__(
         self,
-        settings: Optional[VADSettings] = None,
-        vad: Optional[object] = None,
+        settings: VADSettings | None = None,
+        vad: object | None = None,
         **kwargs,
     ):
         if settings is not None and kwargs:
@@ -54,7 +54,7 @@ class WebRTCVADSegmenter:
         self.merge_gap_samples = self.settings.merge_gap_samples
         self._vad = vad or _create_vad(self.aggressiveness)
 
-    def segment_audio(self, audio: np.ndarray) -> List[SpeechSegment]:
+    def segment_audio(self, audio: np.ndarray) -> list[SpeechSegment]:
         """Return merged speech segments extracted from the provided audio."""
         mono_audio = np.asarray(audio, dtype=np.float32).reshape(-1)
         if mono_audio.size == 0:
@@ -95,7 +95,7 @@ class WebRTCVADSegmenter:
         self,
         segments: Sequence[_SegmentBounds],
         total_samples: int,
-    ) -> List[_SegmentBounds]:
+    ) -> list[_SegmentBounds]:
         """Map analysis-domain segment bounds back to the original waveform."""
         if self.sample_rate == self.vad_sample_rate:
             return [
@@ -107,7 +107,7 @@ class WebRTCVADSegmenter:
             ]
 
         sample_ratio = self.sample_rate / self.vad_sample_rate
-        mapped_segments: List[_SegmentBounds] = []
+        mapped_segments: list[_SegmentBounds] = []
         for segment in segments:
             start_sample = max(0, int(np.floor(segment.start_sample * sample_ratio)))
             end_sample = min(
@@ -126,11 +126,11 @@ class WebRTCVADSegmenter:
         self,
         frames: Sequence[AudioFrame],
         total_samples: int,
-    ) -> List[_SegmentBounds]:
+    ) -> list[_SegmentBounds]:
         """Build raw segment bounds from per-frame VAD decisions."""
-        segments: List[_SegmentBounds] = []
-        current_start: Optional[int] = None
-        last_speech_end: Optional[int] = None
+        segments: list[_SegmentBounds] = []
+        current_start: int | None = None
+        last_speech_end: int | None = None
         silence_run_samples = 0
 
         for frame in frames:
@@ -180,12 +180,12 @@ class WebRTCVADSegmenter:
 
     def _merge_segments(
         self, segments: Sequence[_SegmentBounds]
-    ) -> List[_SegmentBounds]:
+    ) -> list[_SegmentBounds]:
         """Merge padded segments whose remaining gap is still small."""
         if not segments:
             return []
 
-        merged: List[_SegmentBounds] = [segments[0]]
+        merged: list[_SegmentBounds] = [segments[0]]
         for segment in segments[1:]:
             previous = merged[-1]
             gap_samples = segment.start_sample - previous.end_sample

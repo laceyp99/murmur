@@ -5,7 +5,6 @@ from pathlib import Path
 
 from PIL import Image
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_ICON_FILENAME = "murmur.ico"
 

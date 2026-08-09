@@ -8,7 +8,6 @@ from typing import Any, Literal
 
 from .config import DEFAULT_CONFIG
 
-
 TAB_ORDER = (
     "General",
     "VAD",
@@ -234,7 +233,7 @@ def clamp_number(value: float, setting: SettingMetadata) -> int:
         value = max(setting.min_value, value)
     if setting.max_value is not None:
         value = min(setting.max_value, value)
-    return int(round(value))
+    return round(value)
 
 
 def parse_numeric_text(text: str, setting: SettingMetadata) -> int:

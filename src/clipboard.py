@@ -4,7 +4,6 @@ Handles copying transcribed text to the system clipboard.
 """
 
 import pyperclip
-from typing import Optional
 
 
 class ClipboardManager:
@@ -13,7 +12,7 @@ class ClipboardManager:
     """
 
     def __init__(self):
-        self._last_copied: Optional[str] = None
+        self._last_copied: str | None = None
 
     def copy(self, text: str) -> bool:
         """
@@ -36,11 +35,11 @@ class ClipboardManager:
             print("Failed to copy to clipboard.")
             return False
 
-    def get_last_copied(self) -> Optional[str]:
+    def get_last_copied(self) -> str | None:
         """Get the last text that was copied."""
         return self._last_copied
 
-    def get_current(self) -> Optional[str]:
+    def get_current(self) -> str | None:
         """Get the current clipboard content."""
         try:
             return pyperclip.paste()
@@ -57,7 +56,7 @@ class ClipboardManager:
 
 
 # Global clipboard manager instance
-_clipboard_manager: Optional[ClipboardManager] = None
+_clipboard_manager: ClipboardManager | None = None
 
 
 def get_clipboard_manager() -> ClipboardManager:

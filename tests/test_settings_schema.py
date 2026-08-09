@@ -1,3 +1,5 @@
+import pytest
+
 from src.config import DEFAULT_CONFIG
 from src.settings_schema import (
     SETTINGS,
@@ -81,23 +83,19 @@ def test_numeric_text_entry_allows_values_between_slider_steps():
 def test_non_numeric_text_raises_for_save_parsing():
     timeout = SETTINGS_BY_KEY["ollama_timeout_seconds"]
 
-    try:
+    with pytest.raises(NumericSettingError) as exc_info:
         parse_numeric_text("abc", timeout)
-    except NumericSettingError as exc:
-        assert str(exc) == "ollama_timeout_seconds"
-    else:
-        raise AssertionError("expected NumericSettingError")
+
+    assert str(exc_info.value) == "ollama_timeout_seconds"
 
 
 def test_non_finite_numeric_text_raises_for_save_parsing():
     timeout = SETTINGS_BY_KEY["ollama_timeout_seconds"]
 
-    try:
+    with pytest.raises(NumericSettingError) as exc_info:
         parse_numeric_text("inf", timeout)
-    except NumericSettingError as exc:
-        assert str(exc) == "ollama_timeout_seconds"
-    else:
-        raise AssertionError("expected NumericSettingError")
+
+    assert str(exc_info.value) == "ollama_timeout_seconds"
 
 
 def test_non_finite_numeric_config_normalizes_to_default():
@@ -119,9 +117,8 @@ def test_numeric_config_raises_clear_error_when_default_is_invalid():
         step=1,
     )
 
-    try:
+    with pytest.raises(
+        ValueError,
+        match=r"^Setting 'demo_timeout' has an unparseable default: 'auto'$",
+    ):
         normalize_value("bad", setting)
-    except ValueError as exc:
-        assert str(exc) == "Setting 'demo_timeout' has an unparseable default: 'auto'"
-    else:
-        raise AssertionError("expected ValueError")

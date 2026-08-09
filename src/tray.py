@@ -2,8 +2,9 @@
 System tray management for Murmur.
 """
 
-from PIL import Image
 import threading
+
+from PIL import Image
 
 from .assets import get_logo_path
 from .config import get_config
@@ -28,14 +29,12 @@ class TrayManager:
             try:
                 image = Image.open(logo_path)
                 # Resize for tray (usually 16x16 or 32x32, but Pillow handles scaling)
-                image = image.resize((64, 64), Image.Resampling.LANCZOS)
-                return image
+                return image.resize((64, 64), Image.Resampling.LANCZOS)
             except Exception as e:
                 print(f"Error loading tray icon: {e}")
 
         # Fallback: Create a simple colored square if no image found
-        image = Image.new("RGB", (64, 64), color=(73, 109, 137))
-        return image
+        return Image.new("RGB", (64, 64), color=(73, 109, 137))
 
     def set_status(self, status: str):
         """Update the status text in the tray menu."""
@@ -60,7 +59,7 @@ class TrayManager:
         """Start the system tray icon loop."""
         try:
             import pystray
-            from pystray import MenuItem as item
+            from pystray import MenuItem
         except Exception as exc:
             print(f"Tray unavailable: {exc}")
             self.icon = None
@@ -68,14 +67,14 @@ class TrayManager:
 
         try:
             menu = pystray.Menu(
-                item(
+                MenuItem(
                     lambda text: f"Status: {self._status_text}",
                     lambda: None,
                     enabled=False,
                 ),
                 pystray.Menu.SEPARATOR,
-                item("Settings", self._on_settings),
-                item("Exit", self._on_exit),
+                MenuItem("Settings", self._on_settings),
+                MenuItem("Exit", self._on_exit),
             )
 
             self.icon = pystray.Icon("murmur", self._create_image(), "murmur", menu)

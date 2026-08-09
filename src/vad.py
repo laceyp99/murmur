@@ -7,11 +7,11 @@ from .vad_segmenter import WebRTCVADSegmenter
 from .vad_types import AudioFrame, LiveSpeechSegment, SpeechSegment, _SegmentBounds
 
 __all__ = [
-    "AudioFrame",
     "DEFAULT_VAD_SAMPLE_RATE",
+    "SUPPORTED_VAD_SAMPLE_RATES",
+    "AudioFrame",
     "LiveSpeechSegment",
     "LiveVADSegmentationWorker",
-    "SUPPORTED_VAD_SAMPLE_RATES",
     "SpeechSegment",
     "VADSettings",
     "WebRTCVADSegmenter",
