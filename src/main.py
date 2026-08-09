@@ -626,7 +626,7 @@ class MurmurApp:
 
     def _on_state_change(self, state: HotkeyState) -> None:
         """Handle state changes."""
-        pass  # State logging is handled in other methods
+        # State logging is handled in other methods
 
 
 def main():

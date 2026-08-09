@@ -29,14 +29,12 @@ class TrayManager:
             try:
                 image = Image.open(logo_path)
                 # Resize for tray (usually 16x16 or 32x32, but Pillow handles scaling)
-                image = image.resize((64, 64), Image.Resampling.LANCZOS)
-                return image
+                return image.resize((64, 64), Image.Resampling.LANCZOS)
             except Exception as e:
                 print(f"Error loading tray icon: {e}")
 
         # Fallback: Create a simple colored square if no image found
-        image = Image.new("RGB", (64, 64), color=(73, 109, 137))
-        return image
+        return Image.new("RGB", (64, 64), color=(73, 109, 137))
 
     def set_status(self, status: str):
         """Update the status text in the tray menu."""

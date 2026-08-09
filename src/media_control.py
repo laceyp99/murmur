@@ -110,9 +110,7 @@ class MediaController:
                 return False
 
             status = playback_info.playback_status
-            is_playing = status == PlaybackStatus.PLAYING
-            # print(f"[MediaControl] Status: {status}, is_playing: {is_playing}")
-            return is_playing
+            return status == PlaybackStatus.PLAYING
 
         except Exception as e:
             print(f"[MediaControl] Error checking playback status: {e}")
@@ -140,9 +138,7 @@ class MediaController:
                 print("[MediaControl] No session to pause")
                 return False
 
-            result = await session.try_pause_async()
-            # print(f"[MediaControl] Pause result: {result}")
-            return result
+            return await session.try_pause_async()
 
         except Exception as e:
             print(f"[MediaControl] Error pausing: {e}")

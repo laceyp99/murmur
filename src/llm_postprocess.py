@@ -285,7 +285,7 @@ class LLMPostProcessor:
 
     def build_messages(self, text: str) -> list[dict[str, str]]:
         """Build few-shot chat history for the final transcript cleanup pass."""
-        messages = [
+        return [
             {
                 "role": "system",
                 "content": DEFAULT_SYSTEM_PROMPT,
@@ -305,8 +305,6 @@ class LLMPostProcessor:
                 "content": self._build_user_prompt(text),
             },
         ]
-
-        return messages
 
     def _build_user_prompt(self, text: str) -> str:
         """Build the user turn content for transcript cleanup."""

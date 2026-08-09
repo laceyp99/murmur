@@ -825,7 +825,9 @@ class SettingsWindow:
         restart_settings = self._changed_restart_settings(updated_values)
 
         if previous_logging != new_logging:
-            updated_values["logging_consent_updated_at"] = datetime.now().isoformat()
+            updated_values["logging_consent_updated_at"] = (
+                datetime.now().astimezone().isoformat()
+            )
             updated_values["logging_consent_source"] = "settings"
 
         updated_values["start_with_windows"] = new_autostart

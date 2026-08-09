@@ -298,8 +298,7 @@ class Transcriber:
             return ""
 
         cleaned_text = self._fix_common_issues(text.strip())
-        cleaned_text = re.sub(r"(?:\.\.\.)+$", "", cleaned_text).strip()
-        return cleaned_text
+        return re.sub(r"(?:\.\.\.)+$", "", cleaned_text).strip()
 
     def _post_process_document(self, text: str) -> str:
         """
@@ -319,9 +318,7 @@ class Transcriber:
             text += "."
 
         # Fix common issues
-        text = self._fix_common_issues(text)
-
-        return text
+        return self._fix_common_issues(text)
 
     def _join_segment_texts(self, segment_texts: Sequence[str]) -> str:
         """Join Whisper chunks while neutralizing artificial VAD boundaries."""

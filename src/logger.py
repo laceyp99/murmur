@@ -93,7 +93,7 @@ class DataLogger:
             self.audio_dir.mkdir(parents=True, exist_ok=True)
 
             # Generate timestamp-based filename
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S_%f")
             audio_filename = f"{timestamp}.wav"
             audio_path = self.audio_dir / audio_filename
 
@@ -102,7 +102,7 @@ class DataLogger:
 
             # Create log entry
             log_entry = TranscriptionLog(
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.now().astimezone().isoformat(),
                 audio_file=audio_filename,
                 transcription=transcription,
                 duration=audio_data.duration,

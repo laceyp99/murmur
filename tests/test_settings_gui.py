@@ -201,7 +201,11 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
         settings_module,
         "datetime",
         SimpleNamespace(
-            now=lambda: SimpleNamespace(isoformat=lambda: "2026-05-25T12:00:00")
+            now=lambda: SimpleNamespace(
+                astimezone=lambda: SimpleNamespace(
+                    isoformat=lambda: "2026-05-25T12:00:00-04:00"
+                )
+            )
         ),
     )
 
@@ -245,7 +249,7 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
         ("vad_silence_duration_ms", 400),
         ("max_recording_duration", 300),
         ("ollama_timeout_seconds", 60),
-        ("logging_consent_updated_at", "2026-05-25T12:00:00"),
+        ("logging_consent_updated_at", "2026-05-25T12:00:00-04:00"),
         ("logging_consent_source", "settings"),
         ("start_with_windows", True),
     ]

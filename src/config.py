@@ -73,7 +73,7 @@ class Config:
     def _make_corrupt_backup_path(self) -> Path:
         """Build a unique backup path for an invalid config file."""
         while True:
-            suffix = datetime.now().strftime("%Y%m%d%H%M%S%f")
+            suffix = datetime.now().astimezone().strftime("%Y%m%d%H%M%S%f")
             backup_file = self.config_dir / f"config.corrupt-{suffix}.json"
             if not backup_file.exists():
                 return backup_file

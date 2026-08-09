@@ -219,6 +219,6 @@ class AudioRecorder:
         with self._lock:
             if self._recording_start and self._recording:
                 return time.time() - self._recording_start
-            elif self._audio_data:
+            if self._audio_data:
                 return len(np.concatenate(self._audio_data)) / self.sample_rate
             return 0.0
