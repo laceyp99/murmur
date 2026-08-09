@@ -6,7 +6,6 @@ Allows pausing/resuming system media (Spotify, YouTube, VLC, etc.) during record
 import asyncio
 import threading
 from importlib.util import find_spec
-from typing import Optional
 
 
 class MediaController:
@@ -18,7 +17,7 @@ class MediaController:
     """
 
     def __init__(self):
-        self._available: Optional[bool] = None
+        self._available: bool | None = None
 
     def is_available(self) -> bool:
         """
@@ -88,6 +87,8 @@ class MediaController:
         """
         from winrt.windows.media.control import (
             GlobalSystemMediaTransportControlsSessionManager as MediaManager,
+        )
+        from winrt.windows.media.control import (
             GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
         )
 
@@ -109,9 +110,7 @@ class MediaController:
                 return False
 
             status = playback_info.playback_status
-            is_playing = status == PlaybackStatus.PLAYING
-            # print(f"[MediaControl] Status: {status}, is_playing: {is_playing}")
-            return is_playing
+            return status == PlaybackStatus.PLAYING
 
         except Exception as e:
             print(f"[MediaControl] Error checking playback status: {e}")
@@ -139,9 +138,7 @@ class MediaController:
                 print("[MediaControl] No session to pause")
                 return False
 
-            result = await session.try_pause_async()
-            # print(f"[MediaControl] Pause result: {result}")
-            return result
+            return await session.try_pause_async()
 
         except Exception as e:
             print(f"[MediaControl] Error pausing: {e}")
@@ -230,7 +227,7 @@ class MediaController:
 
 
 # Global instance for convenience
-_media_controller: Optional[MediaController] = None
+_media_controller: MediaController | None = None
 
 
 def get_media_controller() -> MediaController:

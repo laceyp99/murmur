@@ -3,20 +3,20 @@ Transcription module for Murmur.
 Handles Whisper model loading and speech-to-text transcription.
 """
 
-from dataclasses import dataclass
 import re
 import time
-from typing import List, Mapping, Optional, Protocol, Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Protocol
 
 import numpy as np
 import torch
 import whisper
 
-from .config import get_config
 from .audio import AudioData
+from .config import get_config
 from .llm_postprocess import LLMPostProcessor, OllamaClient
 from .user_vocab import load_user_vocab
-
 
 NO_SPEECH_THRESHOLD = 0.4
 LOGPROB_THRESHOLD = -0.6
@@ -76,7 +76,7 @@ class TranscriptionResult:
     """Combined segment outputs and the final cleaned document text."""
 
     text: str
-    segments: List[SegmentTranscription]
+    segments: list[SegmentTranscription]
 
 
 class Transcriber:
@@ -89,12 +89,12 @@ class Transcriber:
     def __init__(
         self,
         config=None,
-        model: Optional[whisper.Whisper] = None,
-        device: Optional[str] = None,
-        llm_post_processor: Optional[LLMPostProcessor] = None,
+        model: whisper.Whisper | None = None,
+        device: str | None = None,
+        llm_post_processor: LLMPostProcessor | None = None,
     ):
         self.config = config or get_config()
-        self._model: Optional[whisper.Whisper] = model
+        self._model: whisper.Whisper | None = model
         self._device: str = device or self._get_device()
         self._llm_post_processor = llm_post_processor
 
@@ -149,7 +149,7 @@ class Transcriber:
         """Apply boundary-aware segment joining before document-level cleanup."""
         return self.finalize_text(self._join_segment_texts(segment_texts))
 
-    def _get_llm_post_processor(self) -> Optional[LLMPostProcessor]:
+    def _get_llm_post_processor(self) -> LLMPostProcessor | None:
         """Build the optional final-pass LLM post-processor lazily."""
         if self._llm_post_processor is not None:
             return self._llm_post_processor
@@ -197,7 +197,7 @@ class Transcriber:
         if self._model is None:
             self.load_model()
 
-        segment_results: List[SegmentTranscription] = []
+        segment_results: list[SegmentTranscription] = []
         for index, segment in enumerate(segments):
             start_time = time.time()
             text = self._transcribe_segment_audio(segment.audio)
@@ -255,7 +255,7 @@ class Transcriber:
         if not isinstance(segments, list) or not segments:
             return self._get_whisper_text(result)
 
-        accepted_texts: List[str] = []
+        accepted_texts: list[str] = []
         found_filter_metadata = False
         for segment in segments:
             if not isinstance(segment, dict):
@@ -298,8 +298,7 @@ class Transcriber:
             return ""
 
         cleaned_text = self._fix_common_issues(text.strip())
-        cleaned_text = re.sub(r"(?:\.\.\.)+$", "", cleaned_text).strip()
-        return cleaned_text
+        return re.sub(r"(?:\.\.\.)+$", "", cleaned_text).strip()
 
     def _post_process_document(self, text: str) -> str:
         """
@@ -319,13 +318,11 @@ class Transcriber:
             text += "."
 
         # Fix common issues
-        text = self._fix_common_issues(text)
-
-        return text
+        return self._fix_common_issues(text)
 
     def _join_segment_texts(self, segment_texts: Sequence[str]) -> str:
         """Join Whisper chunks while neutralizing artificial VAD boundaries."""
-        normalized_segments: List[str] = []
+        normalized_segments: list[str] = []
         cleaned_segments = [self._fix_common_issues(text) for text in segment_texts]
         cleaned_segments = [text for text in cleaned_segments if text]
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections import deque
-from queue import Empty, Queue
 import threading
-from typing import Callable, Deque, List, Optional, Sequence
+from collections import deque
+from collections.abc import Callable, Sequence
+from queue import Empty, Queue
 
 import numpy as np
 
@@ -18,10 +18,10 @@ class LiveVADSegmentationWorker:
 
     def __init__(
         self,
-        settings: Optional[VADSettings] = None,
-        on_segment: Optional[Callable[[LiveSpeechSegment], None]] = None,
-        on_worker_degraded: Optional[Callable[[str], None]] = None,
-        vad: Optional[object] = None,
+        settings: VADSettings | None = None,
+        on_segment: Callable[[LiveSpeechSegment], None] | None = None,
+        on_worker_degraded: Callable[[str], None] | None = None,
+        vad: object | None = None,
         queue_timeout_seconds: float = 0.1,
         **kwargs,
     ):
@@ -50,23 +50,23 @@ class LiveVADSegmentationWorker:
         self.queue_timeout_seconds = queue_timeout_seconds
         self.on_worker_degraded = on_worker_degraded
         self._vad = vad or _create_vad(self.settings.aggressiveness)
-        self._queue: Queue[Optional[np.ndarray]] = Queue()
-        self._thread: Optional[threading.Thread] = None
+        self._queue: Queue[np.ndarray | None] = Queue()
+        self._thread: threading.Thread | None = None
         self._running = False
         self._state_lock = threading.RLock()
         self._degraded = False
-        self._last_error: Optional[str] = None
+        self._last_error: str | None = None
         self._degraded_notified = False
         self._next_segment_id = 0
         self._processed_samples = 0
         self._pending_block = np.array([], dtype=np.float32)
-        self._pre_speech_frames: Deque[AudioFrame] = deque(
+        self._pre_speech_frames: deque[AudioFrame] = deque(
             maxlen=self.start_padding_frames
         )
-        self._current_frames: List[AudioFrame] = []
-        self._pending_segment: Optional[LiveSpeechSegment] = None
-        self._pending_gap_frames: List[AudioFrame] = []
-        self._last_speech_index: Optional[int] = None
+        self._current_frames: list[AudioFrame] = []
+        self._pending_segment: LiveSpeechSegment | None = None
+        self._pending_gap_frames: list[AudioFrame] = []
+        self._last_speech_index: int | None = None
         self._silence_run_frames = 0
 
     def start(self) -> None:
@@ -110,7 +110,7 @@ class LiveVADSegmentationWorker:
         with self._state_lock:
             return self._degraded
 
-    def get_last_error(self) -> Optional[str]:
+    def get_last_error(self) -> str | None:
         """Return the last content-safe live VAD degradation message."""
         with self._state_lock:
             return self._last_error

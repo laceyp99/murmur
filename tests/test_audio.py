@@ -33,7 +33,7 @@ class FakeSoundDevice:
     def __init__(self):
         self.streams = []
 
-    def InputStream(self, **kwargs):
+    def InputStream(self, **kwargs):  # noqa: N802 - mirror sounddevice's API
         stream = FakeInputStream(**kwargs)
         self.streams.append(stream)
         return stream

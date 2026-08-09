@@ -5,8 +5,8 @@ import pytest
 
 from src.vad import (
     LiveVADSegmentationWorker,
-    _SegmentBounds,
     WebRTCVADSegmenter,
+    _SegmentBounds,
     float32_to_pcm16,
     generate_frames,
 )

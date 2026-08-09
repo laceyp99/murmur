@@ -5,7 +5,6 @@ from typing import Any
 
 import numpy as np
 
-
 SUPPORTED_VAD_SAMPLE_RATES = (8000, 16000, 32000, 48000)
 DEFAULT_VAD_SAMPLE_RATE = 16000
 
@@ -120,7 +119,7 @@ class VADSettings:
         )
 
     @classmethod
-    def from_app_config(cls, config: Any, sample_rate: int) -> "VADSettings":
+    def from_app_config(cls, config: Any, sample_rate: int) -> VADSettings:
         """Build runtime VAD settings from the application config."""
         end_padding_ms = config.vad_padding_ms
         start_padding_ms = round(end_padding_ms * 0.6)
