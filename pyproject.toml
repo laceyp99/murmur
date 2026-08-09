@@ -20,6 +20,7 @@ dependencies = [
     "customtkinter>=5.2.2",
     "pystray>=0.19.5",
     "Pillow>=10.0.0",
+    'setuptools<82; platform_system == "Windows"',
     'win10toast>=0.9; platform_system == "Windows"',
     'winrt-runtime>=3.0.0; platform_system == "Windows"',
     'winrt-Windows.Foundation>=3.0.0; platform_system == "Windows"',
