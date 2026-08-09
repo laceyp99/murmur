@@ -118,7 +118,7 @@ class DataLogger:
             )
 
             # Append to JSONL file
-            with open(self.metadata_file, "a", encoding="utf-8") as f:
+            with self.metadata_file.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(asdict(log_entry), ensure_ascii=False) + "\n")
 
             print(f"📁 Logged to {audio_filename}")
@@ -201,7 +201,7 @@ class DataLogger:
         if not self.metadata_file.exists():
             return 0
 
-        with open(self.metadata_file, encoding="utf-8") as f:
+        with self.metadata_file.open(encoding="utf-8") as f:
             return sum(1 for _ in f)
 
     def get_total_duration(self) -> float:
@@ -210,7 +210,7 @@ class DataLogger:
             return 0.0
 
         total = 0.0
-        with open(self.metadata_file, encoding="utf-8") as f:
+        with self.metadata_file.open(encoding="utf-8") as f:
             for line in f:
                 try:
                     entry = json.loads(line)

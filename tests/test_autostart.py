@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -49,14 +50,9 @@ def test_set_autostart_uses_pythonw_and_registry(monkeypatch):
     monkeypatch.setattr(autostart_module, "winreg", fake_winreg)
     monkeypatch.setattr(autostart_module.sys, "executable", r"C:\Python312\python.exe")
     monkeypatch.setattr(
-        autostart_module.os.path,
-        "dirname",
-        lambda _: r"C:\Users\Patrick\Desktop\PROJECTS\murmur\src",
-    )
-    monkeypatch.setattr(
-        autostart_module.os.path,
-        "abspath",
-        lambda _: r"C:\Users\Patrick\Desktop\PROJECTS\murmur\run.py",
+        autostart_module,
+        "Path",
+        lambda _: Path(r"C:\test\murmur\src\autostart.py"),
     )
 
     autostart_module.set_autostart(True)
@@ -72,7 +68,7 @@ def test_set_autostart_uses_pythonw_and_registry(monkeypatch):
         "Murmur",
         0,
         fake_winreg.REG_SZ,
-        '"c:\\python312\\pythonw.exe" "C:\\Users\\Patrick\\Desktop\\PROJECTS\\murmur\\run.py"',
+        '"c:\\python312\\pythonw.exe" "C:\\test\\murmur\\run.py"',
     )
     assert captured["close_key"] is not None
     assert "delete_value" not in captured

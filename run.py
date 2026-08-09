@@ -4,11 +4,11 @@ Murmur - Local Speech-to-Text Hotkey App
 Run this script to start Murmur.
 """
 
-import os
 import sys
+from pathlib import Path
 
 # Add the project root to the path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from src.main import main
 

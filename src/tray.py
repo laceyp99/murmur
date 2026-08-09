@@ -59,7 +59,7 @@ class TrayManager:
         """Start the system tray icon loop."""
         try:
             import pystray
-            from pystray import MenuItem as item
+            from pystray import MenuItem
         except Exception as exc:
             print(f"Tray unavailable: {exc}")
             self.icon = None
@@ -67,14 +67,14 @@ class TrayManager:
 
         try:
             menu = pystray.Menu(
-                item(
+                MenuItem(
                     lambda text: f"Status: {self._status_text}",
                     lambda: None,
                     enabled=False,
                 ),
                 pystray.Menu.SEPARATOR,
-                item("Settings", self._on_settings),
-                item("Exit", self._on_exit),
+                MenuItem("Settings", self._on_settings),
+                MenuItem("Exit", self._on_exit),
             )
 
             self.icon = pystray.Icon("murmur", self._create_image(), "murmur", menu)

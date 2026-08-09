@@ -3,8 +3,8 @@ Auto-start management for Murmur on Windows.
 """
 
 import contextlib
-import os
 import sys
+from pathlib import Path
 
 try:
     import winreg
@@ -31,9 +31,7 @@ def set_autostart(enabled: bool):
     else:
         python_exe = current_python
 
-    script_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "run.py")
-    )
+    script_path = Path(__file__).resolve().parent.parent / "run.py"
     cmd = f'"{python_exe}" "{script_path}"'
 
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"

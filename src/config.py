@@ -83,7 +83,7 @@ class Config:
         backup_file = self._make_corrupt_backup_path()
 
         try:
-            os.replace(self.config_file, backup_file)
+            self.config_file.replace(backup_file)
         except OSError as exc:
             raise ConfigError("Failed to preserve corrupt config file") from exc
 
@@ -100,9 +100,9 @@ class Config:
             temp_file = self.config_dir / f"config.{os.getpid()}.tmp"
 
             try:
-                with open(temp_file, "w", encoding="utf-8") as file_handle:
+                with temp_file.open("w", encoding="utf-8") as file_handle:
                     json.dump(config_data, file_handle, indent=2)
-                os.replace(temp_file, self.config_file)
+                temp_file.replace(self.config_file)
             except OSError as exc:
                 with contextlib.suppress(OSError):
                     temp_file.unlink(missing_ok=True)
@@ -126,7 +126,7 @@ class Config:
             return
 
         try:
-            with open(self.config_file, encoding="utf-8") as file_handle:
+            with self.config_file.open(encoding="utf-8") as file_handle:
                 loaded_config = json.load(file_handle)
         except (json.JSONDecodeError, UnicodeDecodeError):
             self._recover_from_invalid_file()

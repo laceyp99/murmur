@@ -52,4 +52,4 @@ line-length = 88
 line-ending = "lf"
 
 [tool.ruff.lint]
-select = ["A", "ASYNC", "B", "C4", "DTZ", "E4", "E7", "E9", "F", "FLY", "FURB", "I", "NPY", "PERF", "PGH", "PIE", "PT", "RET", "RSE", "RUF", "SIM", "UP", "W605"]
+select = ["A", "ASYNC", "B", "C4", "DTZ", "E4", "E7", "E9", "F", "FLY", "FURB", "I", "N", "NPY", "PERF", "PGH", "PIE", "PT", "PTH", "RET", "RSE", "RUF", "SIM", "UP", "W605"]
