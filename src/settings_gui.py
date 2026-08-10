@@ -1,5 +1,6 @@
 """Settings GUI for Murmur using customtkinter."""
 
+import contextlib
 import ctypes
 import queue
 import sys
@@ -58,7 +59,7 @@ def _restart_compare_value(value, setting):
     """Coerce without clamping so restart warnings catch clamped or repaired saves."""
     if setting.control == "number":
         try:
-            return int(round(float(value)))
+            return round(float(value))
         except (TypeError, ValueError, OverflowError):
             return _INVALID_RESTART_COMPARE_VALUE
     if setting.control == "select":
@@ -74,7 +75,7 @@ def _slider_number_of_steps(setting):
         or setting.step <= 0
     ):
         return None
-    return int(round((setting.max_value - setting.min_value) / setting.step))
+    return round((setting.max_value - setting.min_value) / setting.step)
 
 
 class _SettingsWindowService:
@@ -150,25 +151,19 @@ def _apply_window_icon(window):
         nonlocal native_icons
 
         if icon_path is not None:
-            try:
+            with contextlib.suppress(tk.TclError):
                 window.iconbitmap(default=str(icon_path))
-            except tk.TclError:
-                pass
             native_icons = _apply_native_window_icon(
                 window, icon_path, native_icons=native_icons
             )
 
         if logo_path is not None:
             if not icon_images:
-                try:
+                with contextlib.suppress(tk.TclError):
                     icon_images.append(tk.PhotoImage(file=str(logo_path)))
-                except tk.TclError:
-                    pass
             if icon_images:
-                try:
+                with contextlib.suppress(tk.TclError):
                     window.iconphoto(True, icon_images[0])
-                except tk.TclError:
-                    pass
 
     apply_once()
 
@@ -649,6 +644,7 @@ class SettingsWindow:
                 messagebox.showerror(
                     _APP_DISPLAY_NAME,
                     f"Please enter a number for {setting.label}.",
+                    parent=self.root,
                 )
                 return None
             variable.set(str(parsed_value))
@@ -697,9 +693,9 @@ class SettingsWindow:
     def _finish_ollama_connection_test(self, result):
         self._set_ollama_test_button_busy(False)
         if result.ok:
-            messagebox.showinfo(_APP_DISPLAY_NAME, result.message)
+            messagebox.showinfo(_APP_DISPLAY_NAME, result.message, parent=self.root)
         else:
-            messagebox.showerror(_APP_DISPLAY_NAME, result.message)
+            messagebox.showerror(_APP_DISPLAY_NAME, result.message, parent=self.root)
 
     def _poll_ollama_connection_test_result(self):
         if not self._ollama_test_in_progress:
@@ -718,10 +714,8 @@ class SettingsWindow:
         except queue.Empty:
             pass
 
-        try:
+        with contextlib.suppress(tk.TclError):
             self.root.after(100, self._poll_ollama_connection_test_result)
-        except tk.TclError:
-            pass
 
     def _test_ollama_connection(self):
         timeout_setting = SETTINGS_BY_KEY["ollama_timeout_seconds"]
@@ -754,7 +748,11 @@ class SettingsWindow:
     def _purge_training_data(self):
         summary = self.logger.get_storage_summary()
         if summary.file_count == 0:
-            messagebox.showinfo(_APP_DISPLAY_NAME, "No logged training data was found.")
+            messagebox.showinfo(
+                _APP_DISPLAY_NAME,
+                "No logged training data was found.",
+                parent=self.root,
+            )
             return
 
         if not messagebox.askyesno(
@@ -764,6 +762,7 @@ class SettingsWindow:
                 f"training data folder?\n\nFiles: {summary.file_count}\n"
                 f"Approximate size: {_format_bytes(summary.total_bytes)}"
             ),
+            parent=self.root,
         ):
             return
 
@@ -771,7 +770,9 @@ class SettingsWindow:
             removed_files = self.logger.purge_all()
         except Exception as exc:
             messagebox.showerror(
-                _APP_DISPLAY_NAME, f"Failed to delete logged data: {exc}"
+                _APP_DISPLAY_NAME,
+                f"Failed to delete logged data: {exc}",
+                parent=self.root,
             )
             return
 
@@ -779,15 +780,22 @@ class SettingsWindow:
             messagebox.showinfo(
                 _APP_DISPLAY_NAME,
                 f"Deleted {removed_files} logged file(s) from {get_training_data_dir()}.",
+                parent=self.root,
             )
         else:
-            messagebox.showinfo(_APP_DISPLAY_NAME, "No logged training data was found.")
+            messagebox.showinfo(
+                _APP_DISPLAY_NAME,
+                "No logged training data was found.",
+                parent=self.root,
+            )
 
     def _save(self):
         new_hotkey = self.hotkey_var.get().strip()
         if not is_hotkey_valid(new_hotkey):
             messagebox.showerror(
-                _APP_DISPLAY_NAME, "Please enter a valid hotkey before saving settings."
+                _APP_DISPLAY_NAME,
+                "Please enter a valid hotkey before saving settings.",
+                parent=self.root,
             )
             return
 
@@ -817,6 +825,7 @@ class SettingsWindow:
             confirmed = messagebox.askyesno(
                 "Enable training data logging",
                 "Enabling this stores raw WAV audio and transcript text locally under the training data folder. Do you want to enable it?",
+                parent=self.root,
             )
             if not confirmed:
                 self.logging_var.set(False)
@@ -835,6 +844,7 @@ class SettingsWindow:
             messagebox.showerror(
                 _APP_DISPLAY_NAME,
                 "Please enter an Ollama endpoint and model before enabling cleanup.",
+                parent=self.root,
             )
             return
 
@@ -858,7 +868,9 @@ class SettingsWindow:
         restart_settings = self._changed_restart_settings(updated_values)
 
         if previous_logging != new_logging:
-            updated_values["logging_consent_updated_at"] = datetime.now().isoformat()
+            updated_values["logging_consent_updated_at"] = (
+                datetime.now().astimezone().isoformat()
+            )
             updated_values["logging_consent_source"] = "settings"
 
         updated_values["start_with_windows"] = new_autostart
@@ -866,7 +878,11 @@ class SettingsWindow:
         try:
             self.config.update(updated_values)
         except ConfigError as exc:
-            messagebox.showerror(_APP_DISPLAY_NAME, f"Failed to save settings: {exc}")
+            messagebox.showerror(
+                _APP_DISPLAY_NAME,
+                f"Failed to save settings: {exc}",
+                parent=self.root,
+            )
             return
 
         self.logger.set_enabled(new_logging)
@@ -880,9 +896,14 @@ class SettingsWindow:
                 _APP_DISPLAY_NAME,
                 "Settings saved. Restart murmur for these changes to fully apply: "
                 + ", ".join(restart_settings),
+                parent=self.root,
             )
         else:
-            messagebox.showinfo(_APP_DISPLAY_NAME, "Settings saved.")
+            messagebox.showinfo(
+                _APP_DISPLAY_NAME,
+                "Settings saved.",
+                parent=self.root,
+            )
         self._close()
 
     def is_open(self):

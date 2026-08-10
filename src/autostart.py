@@ -2,8 +2,9 @@
 Auto-start management for Murmur on Windows.
 """
 
-import os
+import contextlib
 import sys
+from pathlib import Path
 
 try:
     import winreg
@@ -30,9 +31,7 @@ def set_autostart(enabled: bool):
     else:
         python_exe = current_python
 
-    script_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "run.py")
-    )
+    script_path = Path(__file__).resolve().parent.parent / "run.py"
     cmd = f'"{python_exe}" "{script_path}"'
 
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -44,10 +43,8 @@ def set_autostart(enabled: bool):
         if enabled:
             winreg.SetValueEx(reg_key, app_name, 0, winreg.REG_SZ, cmd)
         else:
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 winreg.DeleteValue(reg_key, app_name)
-            except FileNotFoundError:
-                pass
         winreg.CloseKey(reg_key)
     except Exception as e:
         print(f"Failed to update autostart registry: {e}")

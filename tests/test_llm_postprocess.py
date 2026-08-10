@@ -7,7 +7,6 @@ from src.llm_postprocess import (
     check_ollama_connection,
 )
 
-
 MODEL_NAME = DEFAULT_OLLAMA_MODEL_NAME
 TIMEOUT_SECONDS = float(DEFAULT_OLLAMA_TIMEOUT_SECONDS)
 

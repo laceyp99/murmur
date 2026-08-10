@@ -5,7 +5,6 @@ import pytest
 
 from src.config import DEFAULT_CONFIG
 
-
 main_module = pytest.importorskip("src.main")
 AudioData = main_module.AudioData
 MurmurApp = main_module.MurmurApp

@@ -2,14 +2,14 @@
 Configuration management for Murmur.
 """
 
+import contextlib
 import json
 import os
 import threading
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
-
+from typing import Any
 
 APP_DIR_NAME = "murmur"
 
@@ -66,14 +66,14 @@ class Config:
         self.config_dir = get_app_data_dir()
         self.config_file = self.config_dir / "config.json"
         self._lock = threading.RLock()
-        self._config: Dict[str, Any] = {}
-        self._startup_notice: Optional[str] = None
+        self._config: dict[str, Any] = {}
+        self._startup_notice: str | None = None
         self._load()
 
     def _make_corrupt_backup_path(self) -> Path:
         """Build a unique backup path for an invalid config file."""
         while True:
-            suffix = datetime.now().strftime("%Y%m%d%H%M%S%f")
+            suffix = datetime.now().astimezone().strftime("%Y%m%d%H%M%S%f")
             backup_file = self.config_dir / f"config.corrupt-{suffix}.json"
             if not backup_file.exists():
                 return backup_file
@@ -83,7 +83,7 @@ class Config:
         backup_file = self._make_corrupt_backup_path()
 
         try:
-            os.replace(self.config_file, backup_file)
+            self.config_file.replace(backup_file)
         except OSError as exc:
             raise ConfigError("Failed to preserve corrupt config file") from exc
 
@@ -94,20 +94,18 @@ class Config:
             f"The original file was backed up to '{backup_file.name}'."
         )
 
-    def _save_config(self, config_data: Dict[str, Any]) -> None:
+    def _save_config(self, config_data: dict[str, Any]) -> None:
         """Write config data atomically to disk."""
         with self._lock:
             temp_file = self.config_dir / f"config.{os.getpid()}.tmp"
 
             try:
-                with open(temp_file, "w", encoding="utf-8") as file_handle:
+                with temp_file.open("w", encoding="utf-8") as file_handle:
                     json.dump(config_data, file_handle, indent=2)
-                os.replace(temp_file, self.config_file)
+                temp_file.replace(self.config_file)
             except OSError as exc:
-                try:
+                with contextlib.suppress(OSError):
                     temp_file.unlink(missing_ok=True)
-                except OSError:
-                    pass
                 raise ConfigError("Failed to write config file") from exc
 
     def _load(self):
@@ -128,7 +126,7 @@ class Config:
             return
 
         try:
-            with open(self.config_file, "r", encoding="utf-8") as file_handle:
+            with self.config_file.open(encoding="utf-8") as file_handle:
                 loaded_config = json.load(file_handle)
         except (json.JSONDecodeError, UnicodeDecodeError):
             self._recover_from_invalid_file()
@@ -165,12 +163,12 @@ class Config:
             self._save_config(updated_config)
             self._config = updated_config
 
-    def get_all(self) -> Dict[str, Any]:
+    def get_all(self) -> dict[str, Any]:
         """Get all configuration values."""
         with self._lock:
             return self._config.copy()
 
-    def consume_startup_notice(self) -> Optional[str]:
+    def consume_startup_notice(self) -> str | None:
         """Return and clear any startup notice generated during config load."""
         with self._lock:
             notice = self._startup_notice
@@ -188,7 +186,7 @@ class Config:
         return self.get("model", "small")
 
     @property
-    def language(self) -> Optional[str]:
+    def language(self) -> str | None:
         """Get the language setting."""
         return self.get("language", None)
 

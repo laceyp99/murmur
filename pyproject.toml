@@ -20,6 +20,7 @@ dependencies = [
     "customtkinter>=5.2.2",
     "pystray>=0.19.5",
     "Pillow>=10.0.0",
+    'setuptools<82; platform_system == "Windows"',
     'win10toast>=0.9; platform_system == "Windows"',
     'winrt-runtime>=3.0.0; platform_system == "Windows"',
     'winrt-Windows.Foundation>=3.0.0; platform_system == "Windows"',
@@ -30,7 +31,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
-    "ruff>=0.6.0",
+    "ruff==0.16.2",
 ]
 
 [project.scripts]
@@ -46,3 +47,9 @@ include = ["src*"]
 [tool.ruff]
 target-version = "py312"
 line-length = 88
+
+[tool.ruff.format]
+line-ending = "lf"
+
+[tool.ruff.lint]
+select = ["A", "ASYNC", "B", "C4", "DTZ", "E4", "E7", "E9", "F", "FLY", "FURB", "I", "N", "NPY", "PERF", "PGH", "PIE", "PT", "PTH", "RET", "RSE", "RUF", "SIM", "UP", "W605"]
