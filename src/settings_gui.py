@@ -270,7 +270,7 @@ def _run_settings_ui():
 
         root.after(0, process_requests)
         root.mainloop()
-    except Exception as exc:  # noqa: BLE001 - thread failures must not disappear
+    except Exception as exc:
         failure = exc
     finally:
         with _settings_thread_lock:
