@@ -45,7 +45,9 @@ The VAD timing model starts with `VADSettings`. In normal app runtime,
 
 `start_padding_ms` is derived from the user-facing `vad_padding_ms` setting in
 the app config. The configured value becomes end padding, and start padding is
-roughly 60 percent of that value.
+roughly 60 percent of that value. The current app defaults therefore produce
+132 ms of start padding, 220 ms of end padding, a 400 ms silence close window,
+and a 20 ms WebRTC frame size.
 
 ## Segment State Machine
 
@@ -114,15 +116,20 @@ flowchart LR
 Offline VAD can resample unsupported source rates for analysis and then map
 segment bounds back to the original waveform. Live VAD currently requires a
 WebRTC-supported sample rate because it processes frames continuously as audio
-arrives.
+arrives. If live VAD cannot start, recording continues with the full audio
+buffer and the stop-time offline fallback.
+
+WebRTC VAD decisions are only used to close speech segments; they do not stop a
+recording. The overall recording ends at the stop hotkey or the configured
+`max_recording_duration` limit.
 
 ## Practical Reading
 
 When inspecting a VAD behavior change, read in this order:
 
-1. [`src/vad_config.py`](../src/vad_config.py) for timing values.
-2. [`src/vad_audio.py`](../src/vad_audio.py) for frame generation and PCM
+1. [`src/vad_config.py`](https://github.com/laceyp99/murmur/blob/main/src/vad_config.py) for timing values.
+2. [`src/vad_audio.py`](https://github.com/laceyp99/murmur/blob/main/src/vad_audio.py) for frame generation and PCM
    conversion.
-3. [`src/vad_live.py`](../src/vad_live.py) for live worker state.
-4. [`src/vad_segmenter.py`](../src/vad_segmenter.py) for offline segmentation.
-5. [`tests/test_vad.py`](../tests/test_vad.py) for expected edge cases.
+3. [`src/vad_live.py`](https://github.com/laceyp99/murmur/blob/main/src/vad_live.py) for live worker state.
+4. [`src/vad_segmenter.py`](https://github.com/laceyp99/murmur/blob/main/src/vad_segmenter.py) for offline segmentation.
+5. [`tests/test_vad.py`](https://github.com/laceyp99/murmur/blob/main/tests/test_vad.py) for expected edge cases.

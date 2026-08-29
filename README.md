@@ -1,13 +1,13 @@
 # murmur: local speech-to-text hotkey app
 
-![header](murmur_pipeline.png "murmur pipeline")
+![header]()
 
-A lightweight Windows application that enables dictation anywhere on your system. Press a global hotkey to record your voice, and murmur will segment speech in real time, transcribe sealed chunks with OpenAI's Whisper model running locally on your machine, and finalize the cleaned document to your clipboard when you stop.
+A lightweight Windows application that enables dictation anywhere on your system. Press a global hotkey to record your voice, and murmur will segment speech in real time, transcribe sealed chunks with OpenAI's Whisper model running locally on your machine, and finalize the cleaned document to your clipboard when you stop. See the [architecture and process docs](docs/index.md) for the implementation-level flow.
 
 ## Features
 
 - 🎤 **Global Hotkey** - Works across all Windows applications
-- 🔒 **100% Local** - No internet required, all processing on your machine
+- 🔒 **Local Inference** - Whisper runs locally; Ollama is local by default, with remote endpoints opt-in
 - 🚀 **GPU Accelerated** - Fast transcription with CUDA support
 - ✂️ **Live VAD Segmentation** - Detects speech chunks while you are still recording
 - ⏱️ **Lower Stop Latency** - Starts serial Whisper work before you release the hotkey
@@ -23,8 +23,10 @@ A lightweight Windows application that enables dictation anywhere on your system
 
 - **OS**: Windows 10/11
 - **Python**: 3.12
-- **GPU**: NVIDIA GPU with CUDA support 
-- **CPU**: Works without GPU, but transcription will be slower
+- **GPU**: Optional NVIDIA GPU with CUDA support
+- **CPU**: Supported, but transcription will be slower
+- **Audio**: Microphone input and FFmpeg on `PATH`
+- **Optional cleanup**: Ollama installed locally with the configured model
 
 ## Installation
 
@@ -52,12 +54,11 @@ For NVIDIA GPU acceleration, install the official PyTorch CUDA wheels before
 installing murmur:
 
 ```powershell
-venv\Scripts\python.exe -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+venv\Scripts\python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cu121
 ```
 
-This project only needs `torch`, but installing the matching `torchvision` and
-`torchaudio` wheels keeps the local PyTorch stack consistent. If you are setting
-up a new machine, check the current selector at
+This project only needs `torch`. If you are setting up a new machine, check the
+current selector at
 [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/) and
 use the Windows + Pip + CUDA command it recommends.
 
@@ -78,7 +79,7 @@ If `torch.cuda.is_available()` is `False`, update your NVIDIA driver and
 reinstall the PyTorch CUDA wheels in the venv:
 
 ```powershell
-venv\Scripts\python.exe -m pip install --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+venv\Scripts\python.exe -m pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cu121
 ```
 
 For CPU-only installation, skip this step and let the project dependencies
@@ -89,7 +90,7 @@ install Torch from PyPI.
 Use the editable install so local code changes are picked up immediately:
 
 ```powershell
-venv\Scripts\python.exe -m pip install -e .[dev]
+venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
 This installs murmur, the runtime dependencies, Ruff, and pytest. The editable
@@ -98,25 +99,66 @@ install should not replace an already-installed CUDA Torch wheel because
 
 ### 5. Install FFmpeg (Required by Whisper)
 
-Whisper requires FFmpeg. You can install it via manual installation. Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH.
+Whisper requires the FFmpeg executable. Download it from [ffmpeg.org](https://ffmpeg.org/download.html), extract it, and add its `bin` directory to `PATH`. Open a new PowerShell window after changing `PATH`.
+
+### 6. Optional: install Ollama for final cleanup
+
+Ollama is not required for transcription. It is enabled by default for the
+final punctuation and light correction pass, but murmur falls back to local
+cleanup when Ollama is unavailable. Install Ollama separately, then make the
+configured model available:
+
+```powershell
+ollama pull granite4.1:3b
+```
+
+The default endpoint is `http://localhost:11434`. Start Ollama using its normal
+desktop service or `ollama serve` before launching murmur. To keep all transcript
+text on this computer, leave the endpoint local; a remote endpoint receives the
+final transcript sent for cleanup.
 
 ## Usage
 
 ### Starting murmur
 
-Run the application:
+Run the application with the repository virtual environment:
 
-```bash
-python run.py
+```powershell
+venv\Scripts\python.exe run.py
 ```
 
 To run in the background without a console window, use:
 
-```bash
-pythonw run.py
+```powershell
+venv\Scripts\pythonw.exe run.py
 ```
 
-Or double-click `run_background.vbs`.
+Or double-click `run_background.vbs`; it prefers `venv\Scripts\pythonw.exe` when
+the repository virtual environment exists. The editable install also exposes
+the `murmur` console entry point, and `python -m src` runs the same application
+entry point.
+
+### Startup and recording flow
+
+```mermaid
+flowchart LR
+    Launch["Launch run.py / python -m src"] --> Config["Load %APPDATA%\\murmur\\config.json"]
+    Config --> Resources["Load Whisper and optionally warm Ollama"]
+    Resources --> Hotkey["Register global toggle hotkey"]
+    Hotkey --> Tray["Run system tray loop"]
+    Tray --> Start["Start hotkey"]
+    Start --> Capture["Record full audio and segment live"]
+    Capture --> Stop["Stop hotkey or max duration"]
+    Stop --> Finalize["Drain live work or recompute from full audio"]
+    Finalize --> Cleanup["Local cleanup, optional Ollama cleanup"]
+    Cleanup --> Clipboard["Copy final text to clipboard"]
+```
+
+At startup, a missing config file is created with defaults. An unreadable or
+wrong-shaped config is moved to a timestamped `config.corrupt-*.json` backup and
+replaced with defaults. If the configured hotkey is invalid or cannot be
+registered, murmur attempts to reset it to `ctrl+shift+space`; if registration
+still cannot succeed, startup exits with an error.
 
 ### Using murmur
 
@@ -127,13 +169,20 @@ Or double-click `run_background.vbs`.
 5. **Wait briefly while murmur finalizes** any last live segment and document cleanup
 6. **Paste** with `Ctrl+V` anywhere
 
+Murmur does not auto-stop because of silence; silence only closes individual VAD
+segments. Capture stops when you press the hotkey again or when
+`max_recording_duration` is reached.
+
 ### How transcription works
 
 - murmur captures audio in lightweight 100 ms recorder blocks.
 - A background WebRTC VAD worker reframes those blocks into 20 ms speech frames.
 - Completed speech segments are transcribed serially in the background while you are still recording.
 - Before accepting Whisper output, murmur filters likely non-speech segments using Whisper metadata. Segments with `no_speech_prob > 0.4` and `avg_logprob <= -0.6` are skipped, while high-confidence speech is kept even when the no-speech probability is elevated. These are private defaults for now; very quiet speech may need future tuning.
-- If the live VAD or live transcription path fails mid-recording, murmur logs the failure and falls back to finalizing from the full recorded audio when you stop.
+- If live VAD initialization is unavailable, murmur continues recording and uses
+  the offline path at stop. If live VAD, the recorder callback, or live
+  transcription degrades during recording, murmur ignores partial live output
+  and falls back to the full recorded audio when you stop.
 - When you stop, murmur flushes any pending speech, drains the live transcription queue, applies one final document cleanup pass, and copies the final text to the clipboard.
 - If a recording reaches `max_recording_duration`, murmur stops capture automatically, shows a notification, then finalizes the captured audio.
 
@@ -141,7 +190,8 @@ Or double-click `run_background.vbs`.
 
 - After Whisper completes the final document text, murmur runs one optional final-pass cleanup through a local Ollama model.
 - The Ollama pass is enabled by default and runs only once per completed recording, not on every live chunk.
-- On startup, murmur attempts to warm the configured Ollama model when `ollama_preload_model` is true.
+- On startup, murmur checks for the configured model and attempts to warm it when
+  `ollama_preload_model` is true; warmup does not download a missing model.
 - If Ollama is unavailable, times out, or returns invalid-looking output, murmur falls back to the pre-LLM cleaned transcript instead of failing the recording.
 - When Ollama is disabled or unavailable, murmur applies only minimal local cleanup, so fallback transcript punctuation and capitalization may be rougher than the final LLM-cleaned output.
 - The acceptance gate is intentionally conservative: murmur rejects empty output, obvious assistant preambles, length explosions, and chat/list-shaped responses.
@@ -164,7 +214,10 @@ Create a repo-root `user_vocab.json` file to provide preferred spellings or corr
 
 ### First Run
 
-On the first run, murmur will download the Whisper model (this may take a few minutes depending on the model size).
+On the first run, murmur downloads the configured Whisper model if it is not in
+Whisper's cache. This needs internet access once; subsequent Whisper inference
+runs locally. If Ollama cleanup is enabled, the configured Ollama model must be
+installed separately.
 
 ### Whisper Model Sizes
 
@@ -178,7 +231,8 @@ On the first run, murmur will download the Whisper model (this may take a few mi
 
 ## Configuration
 
-Configuration is stored in `%APPDATA%\murmur\config.json`:
+Configuration is stored in `%APPDATA%\murmur\config.json` and is created on
+first launch:
 
 ```json
 {
@@ -223,9 +277,17 @@ Each tab has **Reset This Tab**, which resets only that tab's current UI values
 to defaults. Reset values are not written until you click **Save**. **Cancel**
 and the window close button discard unsaved edits.
 
-Some changes, such as Whisper model/device, language, VAD timing, max recording
-duration, Ollama endpoint/model, or preload behavior, may require restarting
-murmur before the running recorder/transcription pipeline fully reflects them.
+Settings that affect cached startup components are marked as restart-required in
+the save confirmation: hotkey, Whisper model/device, language, VAD timing,
+maximum recording duration, Ollama endpoint/model, and Ollama preload behavior.
+Restart murmur after changing those values. Notification, logging, media-pause,
+and Windows-startup changes are applied by the settings save path; autostart is
+updated in the current user's Windows Run registry key.
+
+`sample_rate` is not exposed in the settings window. If you edit it directly,
+restart murmur afterward. Live VAD requires one of 8,000, 16,000, 32,000, or
+48,000 Hz; offline VAD can resample other rates for analysis and maps its
+segments back to the recorded waveform.
 
 ### Configuration Options
 
@@ -240,7 +302,7 @@ murmur before the running recorder/transcription pipeline fully reflects them.
 | `vad_padding_ms` | Speech end padding in ms, bounded to `50-800` in Settings; start padding is derived asymmetrically from this value | `220` |
 | `vad_silence_duration_ms` | Silence duration in ms required to close a speech segment, bounded to `100-1500` in Settings | `400` |
 | `max_recording_duration` | Maximum recording length in seconds before murmur auto-stops, notifies, and finalizes; bounded to `30-1800` in Settings | `300` |
-| `enable_logging` | Save raw audio/transcriptions for training after explicit opt-in | `false` |
+| `enable_logging` | Save non-empty completed recordings as raw audio plus transcript metadata after explicit opt-in | `false` |
 | `enable_notifications` | Show Windows toast notifications | `true` |
 | `start_with_windows` | Automatically start on login | `true` |
 | `pause_media_while_recording` | Pause system media during recording | `true` |
@@ -304,13 +366,14 @@ pass entirely, turn off **Enable Ollama cleanup** in Settings or set
 
 Training data logging is disabled by default. To enable it, open **Settings** from the tray icon, turn on **Enable Training Data Logging**, and confirm the privacy prompt.
 
-When `enable_logging` is true, murmur saves all recordings for fine-tuning:
+When `enable_logging` is true, murmur saves each completed recording that
+produces non-empty final text:
 
 **Location:** `%APPDATA%\murmur\training_data\`
 
 ```
 training_data/
-├── audio/                # WAV files (16kHz mono)
+├── audio/                # 16-bit mono WAV at the configured sample rate
 │   └── 20241206_143022_123456.wav
 └── transcriptions.jsonl  # Metadata
 ```
@@ -331,7 +394,8 @@ is `0` and the latency fields are `null`.
 
 Privacy notes:
 
-- Raw WAV audio and transcript text are only stored after you opt in.
+- Raw WAV audio and transcript text are only stored after you opt in and a
+  non-empty transcript is produced.
 - Normal console status output does not include transcript text.
 - You can disable logging at any time from Settings.
 - You can delete existing logged data from Settings with **Delete Logged Data**; murmur shows the file count and approximate size before confirmation.

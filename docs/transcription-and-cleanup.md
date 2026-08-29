@@ -1,9 +1,9 @@
 # Transcription And Cleanup
 
-Murmur uses Whisper for speech-to-text and an optional local Ollama model for a
-single final cleanup pass. Segment transcription and document cleanup are kept
-separate so the live path can transcribe chunks early without asking the LLM to
-rewrite partial text.
+Murmur uses Whisper for speech-to-text and an optional Ollama model—local by
+default—for a single final cleanup pass. Segment transcription and document
+cleanup are kept separate so the live path can transcribe chunks early without
+asking the LLM to rewrite partial text.
 
 ## Whisper Model Ownership
 
@@ -25,6 +25,13 @@ flowchart TB
 The live worker calls `transcribe_segment()`, which returns segment text without
 document-level cleanup. The offline path calls `transcribe_segments()`, which
 transcribes each segment, joins the text, and then calls `finalize_text()`.
+
+The configured `device` selects CUDA only when it is requested and available;
+otherwise `Transcriber` uses CPU. Whisper calls are made with `task="transcribe"`
+and the configured language (or automatic detection when language is empty or
+`null`). Before text is accepted, Whisper result segments with both metadata
+fields are filtered when `no_speech_prob > 0.4` and `avg_logprob <= -0.6`.
+Segments with missing filter metadata are retained.
 
 ## Live Accumulation
 
@@ -49,12 +56,22 @@ flowchart LR
 `TranscriptAccumulator` stores chunks by `segment_id` and returns them in sorted
 order. This makes the output stable even if callback timing changes.
 
+At stop time, the app calls `finalize_segment_texts()` once on the ordered live
+chunk texts. That joins chunks while neutralizing punctuation and capitalization
+artifacts at artificial VAD boundaries, then applies document cleanup.
+
 ## Final Cleanup
 
 Final cleanup has two layers:
 
 1. Local cleanup in `Transcriber._post_process_document()`.
 2. Optional Ollama cleanup in `LLMPostProcessor.process()`.
+
+The Ollama processor is constructed lazily on the first finalization that needs
+it. Startup warmup only checks for the configured installed model and attempts
+to load it into memory; it does not download a missing model. If the client
+cannot be built, the request fails, or the response fails the acceptance gate,
+the local cleanup result is returned.
 
 ```mermaid
 flowchart TB
@@ -102,10 +119,10 @@ allowing the local cleanup model to prefer them.
 
 | Concern | Code |
 | --- | --- |
-| Whisper model loading | [`src/transcription.py`](../src/transcription.py) |
-| Segment transcription | [`src/transcription.py`](../src/transcription.py) |
-| Live transcription queue | [`src/transcription_live.py`](../src/transcription_live.py) |
-| Transcript ordering and metrics | [`src/transcription_live.py`](../src/transcription_live.py) |
-| Ollama client wrapper | [`src/llm_postprocess.py`](../src/llm_postprocess.py) |
-| LLM prompt and acceptance gate | [`src/llm_postprocess.py`](../src/llm_postprocess.py) |
-| User vocabulary loading | [`src/user_vocab.py`](../src/user_vocab.py) |
+| Whisper model loading | [`src/transcription.py`](https://github.com/laceyp99/murmur/blob/main/src/transcription.py) |
+| Segment transcription | [`src/transcription.py`](https://github.com/laceyp99/murmur/blob/main/src/transcription.py) |
+| Live transcription queue | [`src/transcription_live.py`](https://github.com/laceyp99/murmur/blob/main/src/transcription_live.py) |
+| Transcript ordering and metrics | [`src/transcription_live.py`](https://github.com/laceyp99/murmur/blob/main/src/transcription_live.py) |
+| Ollama client wrapper | [`src/llm_postprocess.py`](https://github.com/laceyp99/murmur/blob/main/src/llm_postprocess.py) |
+| LLM prompt and acceptance gate | [`src/llm_postprocess.py`](https://github.com/laceyp99/murmur/blob/main/src/llm_postprocess.py) |
+| User vocabulary loading | [`src/user_vocab.py`](https://github.com/laceyp99/murmur/blob/main/src/user_vocab.py) |

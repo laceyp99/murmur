@@ -51,10 +51,10 @@ sequenceDiagram
     Recorder-->>App: AudioData
     App->>LiveVAD: stop() and flush pending speech
     App->>LiveWhisper: stop() and drain queued segments
-    App->>Accumulator: get_text()
+    App->>Accumulator: ordered_chunks()
 
     alt Live transcript is usable
-        App->>Transcriber: finalize_text(live_text)
+        App->>Transcriber: finalize_segment_texts(chunk texts)
         Transcriber-->>App: final text
         App->>Clipboard: copy_to_clipboard(final text)
     else Live path degraded or empty
@@ -101,6 +101,17 @@ The live transcription worker owns:
 Serial transcription matters because it avoids multiple Whisper calls competing
 for the same local model and keeps output ordering predictable.
 
+If live VAD cannot be initialized—for example, because the configured sample
+rate is not supported by WebRTC—the recorder still starts without a live VAD
+callback. The stop path then uses the offline fallback. A callback or worker
+failure marks the live pipeline degraded; Murmur keeps capturing the full audio
+but ignores partial live output during finalization.
+
+Stopping is deliberately ordered: the recorder is stopped first, then live VAD
+is stopped and flushed, then the live transcription queue is drained. This lets
+the final VAD segment enter the transcription queue before the transcription
+worker receives its shutdown sentinel.
+
 ## State Summary
 
 ```mermaid
@@ -114,7 +125,7 @@ stateDiagram-v2
     Capturing --> Finalizing: stop hotkey or max duration
     LiveSegmenting --> Finalizing: stop flushes pending segment
     LiveTranscribing --> Finalizing: stop drains queue
-    Finalizing --> Ready: clipboard copied or no speech
+    Finalizing --> Ready: completion handled
     Ready --> Idle
 
     Capturing --> Degraded: live callback or worker failure
