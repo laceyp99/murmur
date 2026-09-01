@@ -36,6 +36,7 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Settings And Privacy: settings-and-privacy.md
+  - Troubleshooting: troubleshooting.md
   - Pipeline:
       - Overview: pipeline.md
       - Live Pipeline: live-pipeline.md
