@@ -1,6 +1,5 @@
-# murmur: local speech-to-text hotkey app
+# murmur: local dictation hotkey app
 
-![header]()
 
 A lightweight Windows application that enables dictation anywhere on your
 system. Press a global hotkey to record your voice, and murmur segments speech
