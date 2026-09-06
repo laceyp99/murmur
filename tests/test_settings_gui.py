@@ -7,6 +7,32 @@ from src import settings_gui as settings_module
 from src.config import DEFAULT_CONFIG
 
 
+@pytest.mark.parametrize(
+    ("work_size", "decorations", "scaling", "size", "minimum"),
+    [
+        ((1920, 1040), (16, 39), 1.0, (760, 700), (700, 640)),
+        ((2560, 1400), (24, 59), 1.5, (760, 700), (700, 640)),
+        ((1366, 728), (16, 39), 1.0, (760, 673), (700, 640)),
+        ((1366, 708), (24, 59), 1.5, (760, 422), (700, 422)),
+        ((1000, 708), (24, 59), 1.5, (640, 422), (640, 422)),
+        ((1366, 728), (20, 49), 1.25, (760, 530), (700, 530)),
+    ],
+)
+def test_settings_window_dimensions_fit_work_area(
+    work_size, decorations, scaling, size, minimum
+):
+    actual_size, actual_minimum = settings_module._settings_window_dimensions(
+        work_size, decorations, scaling
+    )
+
+    assert actual_size == size
+    assert actual_minimum == minimum
+    for dimension, border, available in zip(
+        actual_size, decorations, work_size, strict=True
+    ):
+        assert dimension * scaling + border <= available - 16
+
+
 class FakeValue:
     def __init__(self, value):
         self._value = value
