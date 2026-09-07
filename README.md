@@ -27,18 +27,18 @@ Then open [http://127.0.0.1:8000/](http://127.0.0.1:8000/).
 
 ## Features
 
-- 🎤 **Global Hotkey** - Works across all Windows applications
-- 🔒 **Local Inference** - Whisper runs locally; remote Ollama endpoints are opt-in
-- 🚀 **GPU Accelerated** - Fast transcription with CUDA support
-- ✂️ **Live VAD Segmentation** - Detects speech chunks while you are recording
-- ⏱️ **Lower Stop Latency** - Starts serial Whisper work before you release the hotkey
-- 📋 **Clipboard Integration** - Copies the final transcription automatically
-- 🔇 **Auto-Pause Media** - Pauses playing media during recording
-- 🖥️ **System Tray** - Runs in the background with a status icon
-- ⚙️ **Settings GUI** - Configure hotkey, model, and auto-start
-- 📁 **Training Data Logging** - Optional local-only audio/transcript capture
-- 🧠 **Final LLM Cleanup** - Optional Ollama cleanup pass for punctuation and light correction
-- 📝 **Local Vocabulary Overrides** - Use `user_vocab.json` for preferred spellings and names
+- **Global Hotkey** - Works across all Windows applications
+- **Local Inference** - Whisper runs locally; remote Ollama endpoints are opt-in
+- **GPU Accelerated** - Fast transcription with CUDA support
+- **Live VAD Segmentation** - Detects speech chunks while you are recording
+- **Lower Stop Latency** - Starts serial Whisper work before you release the hotkey
+- **Clipboard Integration** - Copies the final transcription automatically
+- **Auto-Pause Media** - Pauses playing media during recording
+- **System Tray** - Runs in the background with a status icon
+- **Settings GUI** - Configure hotkey, model, and auto-start
+- **Training Data Logging** - Optional local-only audio/transcript capture
+- **Final LLM Cleanup** - Optional Ollama cleanup pass for punctuation and light correction
+- **Local Vocabulary Overrides** - Use `user_vocab.json` for preferred spellings and names
 
 ## Quick Start
 
