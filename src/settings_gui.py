@@ -464,7 +464,10 @@ class SettingsWindow:
             tab = self.tabs.add(tab_name)
             tab.grid_columnconfigure(0, weight=1)
             tab.grid_rowconfigure(0, weight=1)
-            content = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+            content = ctk.CTkScrollableFrame(
+                tab,
+                fg_color=("gray86", "gray17"),
+            )
             if sys.platform == "win32":
                 # CTk scrolls 20 units per wheel notch; no public speed option exists.
                 content._parent_canvas.configure(yscrollincrement=3)
