@@ -2,6 +2,7 @@
 
 import contextlib
 import ctypes
+import math
 import queue
 import sys
 import threading
@@ -53,6 +54,108 @@ _ICON_SMALL = 0
 _ICON_BIG = 1
 _GCLP_HICON = -14
 _GCLP_HICONSM = -34
+
+
+class _MonitorInfo(ctypes.Structure):
+    """Receive the opening monitor's bounds and taskbar-free work area."""
+
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("rcMonitor", wintypes.RECT),
+        ("rcWork", wintypes.RECT),
+        ("dwFlags", wintypes.DWORD),
+    ]
+
+
+def _settings_window_dimensions(work_size, decoration_size, scaling):
+    """Cap logical client dimensions to the available physical work area."""
+    available = tuple(
+        max(1, math.floor((work - decoration - 16) / scaling))
+        for work, decoration in zip(work_size, decoration_size, strict=True)
+    )
+    default = tuple(map(int, _SETTINGS_WINDOW_GEOMETRY.split("x")))
+    size = tuple(
+        min(wanted, limit) for wanted, limit in zip(default, available, strict=True)
+    )
+    minimum = tuple(
+        min(wanted, limit)
+        for wanted, limit in zip(_SETTINGS_WINDOW_MIN_SIZE, available, strict=True)
+    )
+    return size, minimum
+
+
+def _fit_settings_window(window):
+    """Fit a newly laid-out Windows settings window to its monitor's work area."""
+    if sys.platform != "win32":
+        return
+
+    try:
+        window.update_idletasks()
+        user32 = ctypes.windll.user32
+        user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+        user32.GetAncestor.restype = wintypes.HWND
+        hwnd = user32.GetAncestor(window.winfo_id(), 2)  # GA_ROOT
+        user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+        user32.MonitorFromWindow.restype = wintypes.HANDLE
+        monitor = user32.MonitorFromWindow(hwnd, 2)  # MONITOR_DEFAULTTONEAREST
+        user32.GetMonitorInfoW.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(_MonitorInfo),
+        ]
+        user32.GetMonitorInfoW.restype = wintypes.BOOL
+        info = _MonitorInfo()
+        info.cbSize = ctypes.sizeof(info)
+        user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        user32.GetWindowRect.restype = wintypes.BOOL
+        user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        user32.GetClientRect.restype = wintypes.BOOL
+        outer, client = wintypes.RECT(), wintypes.RECT()
+        if not (
+            hwnd
+            and monitor
+            and user32.GetMonitorInfoW(monitor, ctypes.byref(info))
+            and user32.GetWindowRect(hwnd, ctypes.byref(outer))
+            and user32.GetClientRect(hwnd, ctypes.byref(client))
+        ):
+            return
+
+        # CustomTkinter reports logical geometry; Win32 reports physical client size.
+        # Measuring the ratio also respects CustomTkinter's custom window scaling.
+        logical_width = int(window.geometry().split("x", 1)[0])
+        if logical_width <= 0 or client.right <= 0:
+            return
+        scaling = client.right / logical_width
+        work = info.rcWork
+        size, minimum = _settings_window_dimensions(
+            (work.right - work.left, work.bottom - work.top),
+            (
+                outer.right - outer.left - client.right,
+                outer.bottom - outer.top - client.bottom,
+            ),
+            scaling,
+        )
+        window.minsize(*minimum)
+        window.geometry(f"{size[0]}x{size[1]}")
+        window.update_idletasks()
+
+        # Clamp the outer position too, including monitors with negative coordinates.
+        if user32.GetWindowRect(hwnd, ctypes.byref(outer)):
+            x = max(work.left, min(outer.left, work.right - (outer.right - outer.left)))
+            y = max(work.top, min(outer.top, work.bottom - (outer.bottom - outer.top)))
+            user32.SetWindowPos.argtypes = [
+                wintypes.HWND,
+                wintypes.HWND,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                wintypes.UINT,
+            ]
+            user32.SetWindowPos.restype = wintypes.BOOL
+            user32.SetWindowPos(hwnd, None, x, y, 0, 0, 0x0015)
+            # SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+    except (AttributeError, OSError, tk.TclError):
+        return
 
 
 def _restart_compare_value(value, setting):
@@ -324,6 +427,7 @@ class SettingsWindow:
         self._window_icon = _apply_window_icon(self.root)
 
         self._setup_ui()
+        self.root.after_idle(lambda: _fit_settings_window(self.root))
 
     def _setup_ui(self):
         self.root.grid_columnconfigure(0, weight=1)
@@ -355,9 +459,21 @@ class SettingsWindow:
 
         self.tabs = ctk.CTkTabview(self.root)
         self.tabs.grid(row=1, column=0, sticky="nsew", padx=24, pady=8)
+        tab_contents = {}
         for tab_name in TAB_ORDER:
             tab = self.tabs.add(tab_name)
             tab.grid_columnconfigure(0, weight=1)
+            tab.grid_rowconfigure(0, weight=1)
+            content = ctk.CTkScrollableFrame(
+                tab,
+                fg_color=("gray86", "gray17"),
+            )
+            if sys.platform == "win32":
+                # CTk scrolls 20 units per wheel notch; no public speed option exists.
+                content._parent_canvas.configure(yscrollincrement=3)
+            content.grid(row=0, column=0, sticky="nsew")
+            content.grid_columnconfigure(0, weight=1)
+            tab_contents[tab_name] = content
 
         self.hotkey_var = tk.StringVar(value=self.config.hotkey)
         self.model_var = tk.StringVar(
@@ -398,7 +514,7 @@ class SettingsWindow:
             }
         )
 
-        general = self.tabs.tab("General")
+        general = tab_contents["General"]
         self._add_text_row(general, 0, "Hotkey", self.hotkey_var)
         self._add_switch(general, 1, "Enable notifications", self.notify_var)
         self._add_switch(general, 2, "Start with Windows", self.autostart_var)
@@ -409,12 +525,12 @@ class SettingsWindow:
             self.pause_media_var,
         )
 
-        vad = self.tabs.tab("VAD")
+        vad = tab_contents["VAD"]
         self._add_number_row(vad, 0, SETTINGS_BY_KEY["vad_aggressiveness"])
         self._add_number_row(vad, 1, SETTINGS_BY_KEY["vad_padding_ms"])
         self._add_number_row(vad, 2, SETTINGS_BY_KEY["vad_silence_duration_ms"])
 
-        transcription = self.tabs.tab("Transcription")
+        transcription = tab_contents["Transcription"]
         self._add_select_row(
             transcription,
             0,
@@ -442,7 +558,7 @@ class SettingsWindow:
             SETTINGS_BY_KEY["max_recording_duration"],
         )
 
-        cleanup = self.tabs.tab("LLM Cleanup")
+        cleanup = tab_contents["LLM Cleanup"]
         self._add_switch(
             cleanup,
             0,
@@ -477,7 +593,7 @@ class SettingsWindow:
             row=5, column=0, sticky="w", padx=16, pady=(8, 10)
         )
 
-        privacy = self.tabs.tab("Data Privacy")
+        privacy = tab_contents["Data Privacy"]
         self._add_switch(
             privacy,
             0,
@@ -499,7 +615,7 @@ class SettingsWindow:
         ).grid(row=2, column=0, sticky="w", padx=16, pady=(4, 10))
 
         for tab_name in TAB_ORDER:
-            self._add_tab_reset_button(self.tabs.tab(tab_name), tab_name)
+            self._add_tab_reset_button(tab_contents[tab_name], tab_name)
 
         button_bar = ctk.CTkFrame(self.root, fg_color="transparent")
         button_bar.grid(row=2, column=0, sticky="ew", padx=24, pady=(8, 20))
