@@ -30,6 +30,9 @@ from .settings_schema import (
     parse_numeric_text,
     settings_for_tab,
 )
+from .windows_identity import (
+    configure_windows_app_identity as _configure_windows_app_identity,
+)
 
 
 def _format_bytes(size_bytes):
@@ -45,8 +48,6 @@ _APP_DISPLAY_NAME = "murmur"
 _SETTINGS_TITLE = "murmur settings"
 _SETTINGS_WINDOW_GEOMETRY = "760x700"
 _SETTINGS_WINDOW_MIN_SIZE = (700, 640)
-_WINDOWS_APP_USER_MODEL_ID = "murmur"
-_WINDOWS_APP_ID_SET = False
 _IMAGE_ICON = 1
 _LR_LOADFROMFILE = 0x00000010
 _WM_SETICON = 0x0080
@@ -226,21 +227,6 @@ def _configure_customtkinter():
     ctk.set_default_color_theme("blue")
 
 
-def _configure_windows_app_identity():
-    global _WINDOWS_APP_ID_SET
-
-    if _WINDOWS_APP_ID_SET:
-        return
-
-    try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            _WINDOWS_APP_USER_MODEL_ID
-        )
-        _WINDOWS_APP_ID_SET = True
-    except (AttributeError, OSError):
-        return
-
-
 def _apply_window_icon(window):
     icon_path = get_app_icon_path()
     logo_path = get_logo_path()
@@ -315,6 +301,7 @@ def _apply_native_window_icon(window, icon_path, native_icons=None):
                 None, str(icon_path), _IMAGE_ICON, 32, 32, _LR_LOADFROMFILE
             )
             if not small_icon or not big_icon:
+                _destroy_native_icons([small_icon, big_icon])
                 return None
 
             native_icons = [small_icon, big_icon]
@@ -340,6 +327,22 @@ def _apply_native_window_icon(window, icon_path, native_icons=None):
         return native_icons
     except (AttributeError, OSError, TypeError):
         return native_icons
+
+
+def _destroy_native_icons(native_icons):
+    """Release icon handles owned by a closed settings window."""
+    if not native_icons:
+        return
+
+    try:
+        destroy_icon = ctypes.windll.user32.DestroyIcon
+        destroy_icon.argtypes = [wintypes.HICON]
+        destroy_icon.restype = wintypes.BOOL
+        for icon in native_icons:
+            if icon:
+                destroy_icon(icon)
+    except (AttributeError, OSError, TypeError):
+        return
 
 
 def _run_settings_ui():
@@ -419,7 +422,6 @@ class SettingsWindow:
         self.setting_vars = {}
         self.numeric_vars = {}
         self._logo_image = None
-        self._window_icon = None
         self._ollama_test_button = None
         self._ollama_test_in_progress = False
         self._ollama_test_token = None
@@ -475,27 +477,42 @@ class SettingsWindow:
             content.grid_columnconfigure(0, weight=1)
             tab_contents[tab_name] = content
 
-        self.hotkey_var = tk.StringVar(value=self.config.hotkey)
+        self.hotkey_var = tk.StringVar(master=self.root, value=self.config.hotkey)
         self.model_var = tk.StringVar(
-            value=normalize_value(self.config.model_name, SETTINGS_BY_KEY["model"])
+            master=self.root,
+            value=normalize_value(self.config.model_name, SETTINGS_BY_KEY["model"]),
         )
         self.device_var = tk.StringVar(
-            value=normalize_value(self.config.device, SETTINGS_BY_KEY["device"])
+            master=self.root,
+            value=normalize_value(self.config.device, SETTINGS_BY_KEY["device"]),
         )
         self.lang_var = tk.StringVar(
-            value=str(self.config.language) if self.config.language else ""
+            master=self.root,
+            value=str(self.config.language) if self.config.language else "",
         )
-        self.notify_var = tk.BooleanVar(value=self.config.enable_notifications)
-        self.logging_var = tk.BooleanVar(value=self.config.enable_logging)
-        self.autostart_var = tk.BooleanVar(value=self.config.start_with_windows)
+        self.notify_var = tk.BooleanVar(
+            master=self.root, value=self.config.enable_notifications
+        )
+        self.logging_var = tk.BooleanVar(
+            master=self.root, value=self.config.enable_logging
+        )
+        self.autostart_var = tk.BooleanVar(
+            master=self.root, value=self.config.start_with_windows
+        )
         self.pause_media_var = tk.BooleanVar(
-            value=self.config.pause_media_while_recording
+            master=self.root, value=self.config.pause_media_while_recording
         )
-        self.ollama_enabled_var = tk.BooleanVar(value=self.config.ollama_enabled)
-        self.ollama_endpoint_var = tk.StringVar(value=self.config.ollama_endpoint)
-        self.ollama_model_name_var = tk.StringVar(value=self.config.ollama_model_name)
+        self.ollama_enabled_var = tk.BooleanVar(
+            master=self.root, value=self.config.ollama_enabled
+        )
+        self.ollama_endpoint_var = tk.StringVar(
+            master=self.root, value=self.config.ollama_endpoint
+        )
+        self.ollama_model_name_var = tk.StringVar(
+            master=self.root, value=self.config.ollama_model_name
+        )
         self.ollama_preload_model_var = tk.BooleanVar(
-            value=self.config.ollama_preload_model
+            master=self.root, value=self.config.ollama_preload_model
         )
         self.setting_vars.update(
             {
@@ -681,8 +698,8 @@ class SettingsWindow:
             self.config.get(setting.key, setting.default),
             setting,
         )
-        entry_var = tk.StringVar(value=str(current_value))
-        slider_var = tk.DoubleVar(value=current_value)
+        entry_var = tk.StringVar(master=self.root, value=str(current_value))
+        slider_var = tk.DoubleVar(master=self.root, value=current_value)
         self.numeric_vars[setting.key] = entry_var
         self.setting_vars[setting.key] = entry_var
 
@@ -820,6 +837,8 @@ class SettingsWindow:
         try:
             while True:
                 window_ref, token, result = _ollama_connection_test_results.get_nowait()
+                # The service permits only one settings window. If that changes,
+                # use a per-window queue instead of discarding unmatched results.
                 if window_ref() is not self or token != self._ollama_test_token:
                     continue
 
@@ -973,6 +992,7 @@ class SettingsWindow:
             "language": lang,
             "enable_notifications": self.notify_var.get(),
             "enable_logging": new_logging,
+            "start_with_windows": new_autostart,
             "pause_media_while_recording": self.pause_media_var.get(),
             "ollama_enabled": new_ollama_enabled,
             "ollama_endpoint": new_ollama_endpoint,
@@ -988,8 +1008,6 @@ class SettingsWindow:
                 datetime.now().astimezone().isoformat()
             )
             updated_values["logging_consent_source"] = "settings"
-
-        updated_values["start_with_windows"] = new_autostart
 
         try:
             self.config.update(updated_values)
@@ -1041,12 +1059,18 @@ class SettingsWindow:
             return
 
         self._closed = True
+        window_icon = getattr(self, "_window_icon", None)
         try:
             self.root.destroy()
         finally:
-            on_close = getattr(self, "_on_close", None)
-            if on_close is not None:
-                on_close(self)
+            try:
+                if window_icon is not None:
+                    _destroy_native_icons(window_icon.get("native"))
+                self._window_icon = None
+            finally:
+                on_close = getattr(self, "_on_close", None)
+                if on_close is not None:
+                    on_close(self)
 
     def show(self):
         self.focus()

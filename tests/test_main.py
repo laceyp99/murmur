@@ -389,7 +389,13 @@ def test_init_preloads_whisper_and_ollama_when_enabled(monkeypatch):
         ollama_preload_model=True,
         start_with_windows=False,
     )
+    identity_calls = []
 
+    monkeypatch.setattr(
+        main_module,
+        "configure_windows_app_identity",
+        lambda: identity_calls.append(True),
+    )
     monkeypatch.setattr(main_module, "get_config", lambda: fake_config)
     monkeypatch.setattr(main_module, "AudioRecorder", lambda: fake_recorder)
     monkeypatch.setattr(main_module, "Transcriber", lambda: fake_transcriber)
@@ -407,6 +413,7 @@ def test_init_preloads_whisper_and_ollama_when_enabled(monkeypatch):
 
     assert fake_transcriber.load_model_calls == 1
     assert fake_transcriber.warm_llm_post_processor_calls == 1
+    assert identity_calls == [True]
     assert fake_recorder.recording_limit_callback.__self__ is app
     assert (
         fake_recorder.recording_limit_callback.__func__
@@ -422,6 +429,7 @@ def test_init_skips_ollama_warmup_when_disabled(monkeypatch):
         start_with_windows=False,
     )
 
+    monkeypatch.setattr(main_module, "configure_windows_app_identity", lambda: None)
     monkeypatch.setattr(main_module, "get_config", lambda: fake_config)
     monkeypatch.setattr(main_module, "AudioRecorder", lambda: SimpleNamespace())
     monkeypatch.setattr(main_module, "Transcriber", lambda: fake_transcriber)

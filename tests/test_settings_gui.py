@@ -267,6 +267,62 @@ def test_apply_window_icon_reuses_loaded_resources_across_retries(monkeypatch):
     assert len(result["tk"]) == 1
 
 
+def test_native_icon_partial_load_releases_created_handle(monkeypatch):
+    destroyed_icons = []
+
+    class FakeCFunc:
+        def __init__(self, func):
+            self._func = func
+
+        def __call__(self, *args):
+            return self._func(*args)
+
+    class FakeUser32:
+        def __init__(self):
+            self.GetParent = FakeCFunc(lambda hwnd: 0)
+            self.LoadImageW = FakeCFunc(self._load_image)
+            self.DestroyIcon = FakeCFunc(lambda icon: destroyed_icons.append(icon))
+            self._load_count = 0
+
+        def _load_image(self, *_args):
+            self._load_count += 1
+            return 1001 if self._load_count == 1 else 0
+
+    monkeypatch.setattr(
+        settings_module.ctypes,
+        "windll",
+        SimpleNamespace(user32=FakeUser32()),
+        raising=False,
+    )
+    window = SimpleNamespace(winfo_id=lambda: 123)
+
+    assert settings_module._apply_native_window_icon(window, "C:/fake/icon.ico") is None
+    assert destroyed_icons == [1001]
+
+
+def test_close_destroys_window_before_releasing_native_icons(monkeypatch):
+    calls = []
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window._closed = False
+    window._window_icon = {"native": [1001, 1002]}
+    window._on_close = lambda closed_window: calls.append(("closed", closed_window))
+    window.root = SimpleNamespace(destroy=lambda: calls.append(("destroyed", None)))
+    monkeypatch.setattr(
+        settings_module,
+        "_destroy_native_icons",
+        lambda icons: calls.append(("released", icons)),
+    )
+
+    window._close()
+
+    assert calls == [
+        ("destroyed", None),
+        ("released", [1001, 1002]),
+        ("closed", window),
+    ]
+    assert window._window_icon is None
+
+
 def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     config = FakeConfig()
     config.device = "cuda"
@@ -333,6 +389,7 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
         ("language", None),
         ("enable_notifications", True),
         ("enable_logging", True),
+        ("start_with_windows", True),
         ("pause_media_while_recording", False),
         ("ollama_enabled", True),
         ("ollama_endpoint", "http://localhost:11434"),
@@ -345,7 +402,6 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
         ("ollama_timeout_seconds", 60),
         ("logging_consent_updated_at", "2026-05-25T12:00:00-04:00"),
         ("logging_consent_source", "settings"),
-        ("start_with_windows", True),
     ]
     assert logger.enabled_calls == [True]
     assert set_autostart_calls == [True]
