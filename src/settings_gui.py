@@ -235,6 +235,7 @@ def _apply_window_icon(window):
 
     icon_images = []
     native_icons = None
+    class_icons_before = []
 
     def apply_once():
         nonlocal native_icons
@@ -243,7 +244,10 @@ def _apply_window_icon(window):
             with contextlib.suppress(tk.TclError):
                 window.iconbitmap(default=str(icon_path))
             native_icons = _apply_native_window_icon(
-                window, icon_path, native_icons=native_icons
+                window,
+                icon_path,
+                native_icons=native_icons,
+                class_icons_before=class_icons_before,
             )
 
         if logo_path is not None:
@@ -267,10 +271,29 @@ def _apply_window_icon(window):
     return {
         "tk": icon_images,
         "native": native_icons if native_icons is not None else [],
+        "class_before": class_icons_before,
     }
 
 
-def _apply_native_window_icon(window, icon_path, native_icons=None):
+def _class_icon_handles(user32, hwnd):
+    """Read the shared class icon handles before temporarily replacing them."""
+    get_class_long = getattr(user32, "GetClassLongPtrW", None) or getattr(
+        user32, "GetClassLongW", None
+    )
+    if get_class_long is None:
+        return None
+
+    get_class_long.argtypes = [wintypes.HWND, ctypes.c_int]
+    get_class_long.restype = ctypes.c_void_p
+    return [
+        get_class_long(hwnd, _GCLP_HICONSM),
+        get_class_long(hwnd, _GCLP_HICON),
+    ]
+
+
+def _apply_native_window_icon(
+    window, icon_path, native_icons=None, class_icons_before=None
+):
     try:
         tk_hwnd = window.winfo_id()
     except tk.TclError:
@@ -318,7 +341,14 @@ def _apply_native_window_icon(window, icon_path, native_icons=None):
         user32.SendMessageW(hwnd, _WM_SETICON, _ICON_SMALL, small_icon)
         user32.SendMessageW(hwnd, _WM_SETICON, _ICON_BIG, big_icon)
 
-        set_class_long = getattr(user32, "SetClassLongPtrW", user32.SetClassLongW)
+        if class_icons_before is not None and not class_icons_before:
+            previous = _class_icon_handles(user32, hwnd)
+            if previous is not None:
+                class_icons_before.extend(previous)
+
+        set_class_long = (
+            getattr(user32, "SetClassLongPtrW", None) or user32.SetClassLongW
+        )
         set_class_long.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
         set_class_long.restype = ctypes.c_void_p
         set_class_long(hwnd, _GCLP_HICONSM, small_icon)
@@ -327,6 +357,28 @@ def _apply_native_window_icon(window, icon_path, native_icons=None):
         return native_icons
     except (AttributeError, OSError, TypeError):
         return native_icons
+
+
+def _restore_native_window_class_icons(window, class_icons_before):
+    """Restore shared class icons before releasing a settings window's handles."""
+    if not class_icons_before:
+        return
+
+    try:
+        tk_hwnd = window.winfo_id()
+        user32 = ctypes.windll.user32
+        user32.GetParent.argtypes = [wintypes.HWND]
+        user32.GetParent.restype = wintypes.HWND
+        hwnd = user32.GetParent(tk_hwnd) or tk_hwnd
+        set_class_long = (
+            getattr(user32, "SetClassLongPtrW", None) or user32.SetClassLongW
+        )
+        set_class_long.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+        set_class_long.restype = ctypes.c_void_p
+        set_class_long(hwnd, _GCLP_HICONSM, class_icons_before[0])
+        set_class_long(hwnd, _GCLP_HICON, class_icons_before[1])
+    except (AttributeError, OSError, TypeError, tk.TclError):
+        return
 
 
 def _destroy_native_icons(native_icons):
@@ -1061,6 +1113,10 @@ class SettingsWindow:
         self._closed = True
         window_icon = getattr(self, "_window_icon", None)
         try:
+            if window_icon is not None:
+                _restore_native_window_class_icons(
+                    self.root, window_icon.get("class_before")
+                )
             self.root.destroy()
         finally:
             try:

@@ -267,6 +267,61 @@ def test_apply_window_icon_reuses_loaded_resources_across_retries(monkeypatch):
     assert len(result["tk"]) == 1
 
 
+def test_native_icon_class_handles_are_restored_when_photo_icon_fails(monkeypatch):
+    class_calls = []
+
+    class FakeCFunc:
+        def __init__(self, func):
+            self._func = func
+
+        def __call__(self, *args):
+            return self._func(*args)
+
+    class FakeUser32:
+        GetParent = FakeCFunc(lambda _hwnd: 0)
+        GetClassLongPtrW = FakeCFunc(
+            lambda _hwnd, index: (
+                2001 if index == settings_module._GCLP_HICONSM else 2002
+            )
+        )
+        LoadImageW = FakeCFunc(lambda *_args: 3001)
+        SendMessageW = FakeCFunc(lambda *_args: 0)
+        SetClassLongPtrW = FakeCFunc(
+            lambda _hwnd, index, icon: class_calls.append((index, icon))
+        )
+
+    class FakeWindow:
+        def winfo_id(self):
+            return 123
+
+        def iconbitmap(self, **_kwargs):
+            return None
+
+        def iconphoto(self, *_args):
+            raise settings_module.tk.TclError("photo unavailable")
+
+        def after(self, _delay, _callback):
+            return None
+
+    monkeypatch.setattr(settings_module, "get_app_icon_path", lambda: "icon.ico")
+    monkeypatch.setattr(settings_module, "get_logo_path", lambda: "logo.png")
+    monkeypatch.setattr(settings_module.tk, "PhotoImage", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        settings_module.ctypes,
+        "windll",
+        SimpleNamespace(user32=FakeUser32()),
+        raising=False,
+    )
+
+    result = settings_module._apply_window_icon(FakeWindow())
+
+    assert result["class_before"] == [2001, 2002]
+    assert class_calls[-2:] == [
+        (settings_module._GCLP_HICONSM, 3001),
+        (settings_module._GCLP_HICON, 3001),
+    ]
+
+
 def test_native_icon_partial_load_releases_created_handle(monkeypatch):
     destroyed_icons = []
 
@@ -304,7 +359,7 @@ def test_close_destroys_window_before_releasing_native_icons(monkeypatch):
     calls = []
     window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
     window._closed = False
-    window._window_icon = {"native": [1001, 1002]}
+    window._window_icon = {"native": [1001, 1002], "class_before": [2001, 2002]}
     window._on_close = lambda closed_window: calls.append(("closed", closed_window))
     window.root = SimpleNamespace(destroy=lambda: calls.append(("destroyed", None)))
     monkeypatch.setattr(
@@ -312,10 +367,16 @@ def test_close_destroys_window_before_releasing_native_icons(monkeypatch):
         "_destroy_native_icons",
         lambda icons: calls.append(("released", icons)),
     )
+    monkeypatch.setattr(
+        settings_module,
+        "_restore_native_window_class_icons",
+        lambda root, icons: calls.append(("restored", icons)),
+    )
 
     window._close()
 
     assert calls == [
+        ("restored", [2001, 2002]),
         ("destroyed", None),
         ("released", [1001, 1002]),
         ("closed", window),
