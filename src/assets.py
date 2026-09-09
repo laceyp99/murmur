@@ -1,5 +1,6 @@
 """Shared asset path helpers."""
 
+import sys
 from pathlib import Path
 
 from PIL import Image
@@ -10,10 +11,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_ICON_FILENAME = "murmur.ico"
 
 
+def _get_resource_root() -> Path:
+    """Return the source or frozen-bundle directory containing app assets."""
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root is not None:
+        return Path(bundle_root)
+    return PROJECT_ROOT
+
+
 def get_logo_path() -> Path | None:
     """Return the preferred app logo path when it exists."""
-    for filename in ("murmur tray logo.png", "murmur.png"):
-        path = PROJECT_ROOT / filename
+    for filename in ("murmur tray logo.png", "murmur logo.png", "murmur.png"):
+        path = _get_resource_root() / filename
         if path.exists():
             return path
     return None

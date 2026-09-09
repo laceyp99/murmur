@@ -12,27 +12,31 @@ except ImportError:
     winreg = None
 
 
+def _get_launch_command() -> str:
+    """Return the current Murmur launch command for Windows startup."""
+    executable = Path(sys.executable)
+    if getattr(sys, "frozen", False):
+        return f'"{executable}"'
+
+    if executable.name.lower() == "python.exe":
+        executable = executable.with_name("pythonw.exe")
+
+    script_path = Path(__file__).resolve().parent.parent / "run.py"
+    return f'"{executable}" "{script_path}"'
+
+
 def set_autostart(enabled: bool):
     """
     Enable or disable auto-start with Windows.
-    Uses sys.executable to ensure it uses the same environment that launched the app.
+    Uses the packaged executable when frozen, otherwise the current Python
+    environment's windowless interpreter and ``run.py``.
     """
     if winreg is None:
         return
 
     app_name = "Murmur"
 
-    # sys.executable points to the current python.exe or pythonw.exe
-    current_python = sys.executable
-
-    # Ensure we use the windowless version for background startup
-    if current_python.lower().endswith("python.exe"):
-        python_exe = current_python.lower().replace("python.exe", "pythonw.exe")
-    else:
-        python_exe = current_python
-
-    script_path = Path(__file__).resolve().parent.parent / "run.py"
-    cmd = f'"{python_exe}" "{script_path}"'
+    cmd = _get_launch_command()
 
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
 

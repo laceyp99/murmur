@@ -89,8 +89,9 @@ The current default values are:
 
 The settings save operation writes a temporary file and replaces the config
 atomically. Windows autostart is stored in the current user's
-`Software\Microsoft\Windows\CurrentVersion\Run` key and launches the same
-environment's `pythonw.exe` with `run.py`.
+`Software\Microsoft\Windows\CurrentVersion\Run` key. A packaged app registers
+its own `murmur.exe`; a source launch registers the same environment's
+`pythonw.exe` with `run.py`.
 
 ## Training-data logging
 
@@ -131,10 +132,12 @@ Disabling logging stops future writes; it does not delete existing records.
 
 ## Vocabulary and network boundary
 
-An optional gitignored `user_vocab.json` in the repository root supplies
-preferred spellings to the Ollama prompt. It is loaded lazily only when the
-Ollama post-processor is built; it does not change Whisper's recognition and is
-ignored when Ollama cleanup is disabled.
+An optional `user_vocab.json` supplies preferred spellings to the Ollama prompt.
+Source launches use the gitignored file in the repository root. Packaged
+launches use `%APPDATA%\murmur\user_vocab.json` so the file remains writable and
+survives replacement of the application folder. It is loaded lazily only when
+the Ollama post-processor is built; it does not change Whisper's recognition and
+is ignored when Ollama cleanup is disabled.
 
 Whisper audio inference and the default Ollama endpoint are local. If
 `ollama_endpoint` points to another machine, the final transcript sent for

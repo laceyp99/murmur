@@ -91,8 +91,36 @@ venv\Scripts\python.exe -m src
 ```
 
 `run_background.vbs` is the convenience launcher for the background mode. It
-uses `venv\Scripts\pythonw.exe` when the repository virtual environment exists
-and otherwise falls back to `pythonw.exe` from `PATH`.
+prefers `venv\Scripts\pythonw.exe` for source development, then uses
+`dist\Murmur\murmur.exe` when a packaged build exists, and finally falls back
+to `pythonw.exe` from `PATH`.
+
+## Build a packaged release
+
+The packaged release keeps the Python source workflow above unchanged while
+providing a standalone Windows application folder. Build it from the repository
+root with PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
+```
+
+The script installs the pinned PyInstaller dependency into `venv`, generates
+Windows icon and version resources, builds Murmur, and runs a packaged dependency
+self-check. The first build can take several minutes because Whisper, Torch, and
+their native libraries are analyzed.
+
+The release is written to `dist\Murmur\`. Keep that directory together when
+copying or distributing the application, then launch `murmur.exe`. End users do
+not need a separate Python installation, but FFmpeg must still be available on
+`PATH`. The first launch can download the configured Whisper model if it is not
+already in the user's cache.
+
+For repeat local builds after dependencies are installed, skip the install step:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_windows.ps1 -SkipInstall
+```
 
 ## First launch
 
