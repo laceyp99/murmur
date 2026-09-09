@@ -1,9 +1,10 @@
 """Shared asset path helpers."""
 
-import os
 from pathlib import Path
 
 from PIL import Image
+
+from .config import get_app_data_dir
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_ICON_FILENAME = "murmur.ico"
@@ -24,7 +25,7 @@ def get_app_icon_path() -> Path | None:
     if logo_path is None:
         return None
 
-    icon_dir = Path(os.getenv("APPDATA") or Path.home() / ".murmur") / "murmur"
+    icon_dir = get_app_data_dir()
     icon_path = icon_dir / APP_ICON_FILENAME
     try:
         if (

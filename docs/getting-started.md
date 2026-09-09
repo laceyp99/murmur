@@ -98,7 +98,8 @@ and otherwise falls back to `pythonw.exe` from `PATH`.
 
 ```mermaid
 flowchart TB
-    Launch["Launch Murmur"] --> LoadConfig["Load config from %APPDATA%\\murmur\\config.json"]
+    Launch["Launch Murmur"] --> AppIdentity["Set Windows app identity"]
+    AppIdentity --> LoadConfig["Load config from %APPDATA%\\murmur\\config.json"]
     LoadConfig --> ConfigState{"Config present and valid?"}
     ConfigState -->|no file| CreateDefaults["Create default config"]
     ConfigState -->|invalid JSON or shape| BackupConfig["Back up as config.corrupt-*.json"]

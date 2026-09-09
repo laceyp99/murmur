@@ -29,6 +29,7 @@ from .vad import (
     VADSettings,
     WebRTCVADSegmenter,
 )
+from .windows_identity import configure_windows_app_identity
 
 
 class MurmurApp:
@@ -50,6 +51,7 @@ class MurmurApp:
         Args:
             preload_model: Whether to preload the Whisper model on startup.
         """
+        configure_windows_app_identity()
         self.config = get_config()
         self.recorder = AudioRecorder()
         self._set_recording_limit_callback()
