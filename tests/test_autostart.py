@@ -1,10 +1,34 @@
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from src import autostart as autostart_module
+
+
+def test_launch_command_uses_pythonw_for_source_mode(tmp_path, monkeypatch):
+    source_root = tmp_path / "murmur project"
+    module_path = source_root / "src" / "autostart.py"
+    monkeypatch.setattr(autostart_module.sys, "executable", r"C:\Python312\python.exe")
+    monkeypatch.setattr(autostart_module.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(autostart_module, "__file__", str(module_path))
+
+    assert autostart_module._get_launch_command() == (
+        f'"C:\\Python312\\pythonw.exe" "{source_root / "run.py"}"'
+    )
+
+
+def test_launch_command_uses_packaged_executable(monkeypatch):
+    monkeypatch.setattr(
+        autostart_module.sys,
+        "executable",
+        r"C:\Program Files\Murmur\murmur.exe",
+    )
+    monkeypatch.setattr(autostart_module.sys, "frozen", True, raising=False)
+
+    assert autostart_module._get_launch_command() == (
+        '"C:\\Program Files\\Murmur\\murmur.exe"'
+    )
 
 
 def test_set_autostart_noops_when_winreg_is_unavailable(monkeypatch):
@@ -48,12 +72,7 @@ def test_set_autostart_uses_pythonw_and_registry(monkeypatch):
     )
 
     monkeypatch.setattr(autostart_module, "winreg", fake_winreg)
-    monkeypatch.setattr(autostart_module.sys, "executable", r"C:\Python312\python.exe")
-    monkeypatch.setattr(
-        autostart_module,
-        "Path",
-        lambda _: Path(r"C:\test\murmur\src\autostart.py"),
-    )
+    monkeypatch.setattr(autostart_module, "_get_launch_command", lambda: "command")
 
     autostart_module.set_autostart(True)
 
@@ -68,7 +87,7 @@ def test_set_autostart_uses_pythonw_and_registry(monkeypatch):
         "Murmur",
         0,
         fake_winreg.REG_SZ,
-        '"c:\\python312\\pythonw.exe" "C:\\test\\murmur\\run.py"',
+        "command",
     )
     assert captured["close_key"] is not None
     assert "delete_value" not in captured
