@@ -21,7 +21,7 @@ def _get_resource_root() -> Path:
 
 def get_logo_path() -> Path | None:
     """Return the preferred app logo path when it exists."""
-    for filename in ("murmur tray logo.png", "murmur.png"):
+    for filename in ("murmur tray logo.png", "murmur logo.png", "murmur.png"):
         path = _get_resource_root() / filename
         if path.exists():
             return path

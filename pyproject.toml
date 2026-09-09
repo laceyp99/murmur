@@ -33,6 +33,9 @@ dev = [
     "pytest>=8.0.0",
     "ruff==0.16.2",
 ]
+packaging = [
+    "pyinstaller==6.22.2",
+]
 
 [project.scripts]
 murmur = "src.main:main"
