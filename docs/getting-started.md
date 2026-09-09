@@ -91,9 +91,9 @@ venv\Scripts\python.exe -m src
 ```
 
 `run_background.vbs` is the convenience launcher for the background mode. It
-prefers `dist\Murmur\murmur.exe` when a packaged build exists, then uses
-`venv\Scripts\pythonw.exe`, and finally falls back to `pythonw.exe` from
-`PATH`.
+prefers `venv\Scripts\pythonw.exe` for source development, then uses
+`dist\Murmur\murmur.exe` when a packaged build exists, and finally falls back
+to `pythonw.exe` from `PATH`.
 
 ## Build a packaged release
 
