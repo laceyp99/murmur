@@ -1,14 +1,27 @@
 from pathlib import Path
 
+import PyInstaller
 from PyInstaller.building import build_main
 from PyInstaller.utils.hooks import collect_data_files
 
+
+EXPECTED_PYINSTALLER_VERSION = "6.22.2"
+if PyInstaller.__version__ != EXPECTED_PYINSTALLER_VERSION:
+    raise RuntimeError(
+        "packaging/murmur.spec patches a private PyInstaller API and requires "
+        f"PyInstaller {EXPECTED_PYINSTALLER_VERSION}; found {PyInstaller.__version__}"
+    )
 
 _find_binary_dependencies = build_main.find_binary_dependencies
 
 
 def find_binary_dependencies(binaries, import_packages, symlink_suppression_patterns):
-    """Initialize Torch's DLL path once instead of importing every subpackage."""
+    """Initialize Torch's DLL path once instead of importing every subpackage.
+
+    PyInstaller 6.22.2 otherwise imports collected Torch subpackages one by one
+    during its Windows DLL scan. Torch must be first and imported only at its
+    package root to avoid repeatedly crashing PyInstaller's isolated helper.
+    """
     if any(
         package == "torch" or package.startswith("torch.")
         for package in import_packages
