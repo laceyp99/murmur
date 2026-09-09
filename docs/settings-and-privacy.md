@@ -89,8 +89,9 @@ The current default values are:
 
 The settings save operation writes a temporary file and replaces the config
 atomically. Windows autostart is stored in the current user's
-`Software\Microsoft\Windows\CurrentVersion\Run` key and launches the same
-environment's `pythonw.exe` with `run.py`.
+`Software\Microsoft\Windows\CurrentVersion\Run` key. A packaged app registers
+its own `murmur.exe`; a source launch registers the same environment's
+`pythonw.exe` with `run.py`.
 
 ## Training-data logging
 

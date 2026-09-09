@@ -54,6 +54,16 @@ venv\Scripts\python.exe run.py
 See [Getting Started](docs/getting-started.md) for CUDA installation, FFmpeg,
 Ollama setup, background launch, first-run behavior, and the recording flow.
 
+To build the standalone Windows application folder with PyInstaller:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
+```
+
+The validated output is written to `dist\Murmur\`. Distribute the complete
+folder. See [Build a packaged release](docs/getting-started.md#build-a-packaged-release)
+for requirements and repeat-build instructions.
+
 ## Development
 
 Run the project checks from the repository virtual environment:
