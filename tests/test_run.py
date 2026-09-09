@@ -1,6 +1,22 @@
+import subprocess
+import sys
 from pathlib import Path
 
 import run
+
+
+def test_import_does_not_load_desktop_runtime():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import run; raise SystemExit('src.main' in sys.modules)",
+        ],
+        cwd=Path(__file__).resolve().parent.parent,
+        check=False,
+    )
+
+    assert result.returncode == 0
 
 
 def test_packaging_self_check_returns_success(monkeypatch):

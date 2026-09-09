@@ -113,7 +113,9 @@ turn dictated text into an answer, a list, or a rewritten document.
 `user_vocab.json` is loaded lazily when the LLM post-processor is built. Entries
 are included in the prompt as preferred vocabulary and corrections. This keeps
 personal names and project-specific terms out of the codebase while still
-allowing the local cleanup model to prefer them.
+allowing the local cleanup model to prefer them. Source launches read the file
+from the repository root; packaged launches read it from
+`%APPDATA%\murmur\user_vocab.json`.
 
 ## Implementation Map
 

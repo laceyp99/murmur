@@ -12,7 +12,12 @@ from pathlib import Path
 # Add the project root to the path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from src.main import main
+
+def _run_app() -> None:
+    """Import and start the desktop runtime after handling build-only commands."""
+    from src.main import main
+
+    main()
 
 
 def _run_packaging_self_check() -> None:
@@ -23,6 +28,10 @@ def _run_packaging_self_check() -> None:
     import winrt.windows.media.control  # noqa: F401
 
     from src.assets import get_logo_path
+    from src.main import main as app_main
+
+    if not callable(app_main):
+        raise RuntimeError("Murmur desktop runtime is unavailable")
 
     audio = np.zeros(16000, dtype=np.float32)
     mel = whisper.log_mel_spectrogram(audio)
@@ -62,4 +71,4 @@ if __name__ == "__main__":
     if "--packaging-self-check" in sys.argv:
         raise SystemExit(_packaging_self_check_exit_code())
     else:
-        main()
+        _run_app()
