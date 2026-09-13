@@ -13,7 +13,6 @@ the full recording remains available as a fallback.
 | Windows 10 or 11 | Global hotkeys, tray integration, and Windows media/notification features | Yes |
 | Python 3.12 | Supported runtime | Yes |
 | Microphone | Audio capture through `sounddevice` | Yes |
-| FFmpeg on `PATH` | Audio support used by Whisper | Yes |
 | NVIDIA GPU and CUDA-enabled PyTorch | Faster Whisper inference | Optional; CPU fallback is supported |
 | Ollama server and configured model | Final punctuation/correction pass | Optional; local cleanup remains available |
 
@@ -53,9 +52,6 @@ expected:
 ```powershell
 venv\Scripts\python.exe -c "import torch; print('torch', torch.__version__); print('cuda build', torch.version.cuda); print('cuda available', torch.cuda.is_available()); print('gpu', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'n/a')"
 ```
-
-Install FFmpeg separately and add the directory containing `ffmpeg.exe` to
-`PATH`. Open a new terminal after changing `PATH`.
 
 ## Optional Ollama setup
 
@@ -112,9 +108,8 @@ their native libraries are analyzed.
 
 The release is written to `dist\Murmur\`. Keep that directory together when
 copying or distributing the application, then launch `murmur.exe`. End users do
-not need a separate Python installation, but FFmpeg must still be available on
-`PATH`. The first launch can download the configured Whisper model if it is not
-already in the user's cache.
+not need a separate Python or FFmpeg installation. The first launch can download
+the configured Whisper model if it is not already in the user's cache.
 
 For repeat local builds after dependencies are installed, skip the install step:
 
