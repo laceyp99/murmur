@@ -107,9 +107,22 @@ self-check. The first build can take several minutes because Whisper, Torch, and
 their native libraries are analyzed.
 
 The release is written to `dist\murmur\`. Keep that directory together when
-copying or distributing the application, then launch `murmur.exe`. End users do
-not need a separate Python or FFmpeg installation. The first launch can download
-the configured Whisper model if it is not already in the user's cache.
+copying or distributing the application. For a manual per-user installation,
+copy or extract the complete folder to:
+
+```text
+%LOCALAPPDATA%\Programs\murmur
+```
+
+Launch `murmur.exe` from that folder. Do not move the executable out of the
+folder or distribute it by itself. An optional Desktop shortcut can point to
+`murmur.exe` while leaving the application files together. The **Start with
+Windows** setting in murmur controls automatic launch and does not require a
+Desktop or Start Menu shortcut.
+
+End users do not need a separate Python or FFmpeg installation. The first
+launch can download the configured Whisper model if it is not already in the
+user's cache.
 
 For repeat local builds after dependencies are installed, skip the install step:
 

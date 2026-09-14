@@ -61,8 +61,11 @@ powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
 ```
 
 The validated output is written to `dist\murmur\`. Distribute the complete
-folder. See [Build a packaged release](docs/getting-started.md#build-a-packaged-release)
-for requirements and repeat-build instructions.
+folder. For manual per-user use, extract it to
+`%LOCALAPPDATA%\Programs\murmur` and optionally create a Desktop shortcut to
+`murmur.exe`. Keep the application files together. See [Build a packaged
+release](docs/getting-started.md#build-a-packaged-release) for requirements and
+repeat-build instructions.
 
 ## Development
 
