@@ -13,6 +13,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
+def _ensure_output_streams() -> None:
+    """Discard windowless progress output without writing user data to a log."""
+    # Like normal stdio, these streams stay open for the process lifetime.
+    if sys.stdout is None:
+        sys.stdout = Path(os.devnull).open("w", encoding="utf-8")  # noqa: SIM115
+    if sys.stderr is None:
+        sys.stderr = Path(os.devnull).open("w", encoding="utf-8")  # noqa: SIM115
+
+
 def _run_app() -> None:
     """Import and start the desktop runtime after handling build-only commands."""
     from src.main import main
@@ -56,6 +65,10 @@ def _run_packaging_self_check() -> None:
     if get_logo_path() is None:
         raise RuntimeError("Packaged Murmur logo is unavailable")
 
+    # Opt in to a real first-download check without touching the user's cache.
+    if model_cache := os.environ.get("MURMUR_PACKAGING_SELF_CHECK_MODEL_CACHE"):
+        whisper.load_model("tiny", device="cpu", download_root=model_cache)
+
 
 def _packaging_self_check_exit_code() -> int:
     try:
@@ -68,6 +81,7 @@ def _packaging_self_check_exit_code() -> int:
 
 
 if __name__ == "__main__":
+    _ensure_output_streams()
     if "--packaging-self-check" in sys.argv:
         raise SystemExit(_packaging_self_check_exit_code())
     else:

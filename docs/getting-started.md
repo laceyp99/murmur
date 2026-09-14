@@ -117,6 +117,9 @@ For repeat local builds after dependencies are installed, skip the install step:
 powershell -ExecutionPolicy Bypass -File .\build_windows.ps1 -SkipInstall
 ```
 
+For maintainers investigating a packaged app that fails to load its model,
+see [Diagnose packaged model loading](troubleshooting.md#diagnose-packaged-model-loading-maintainers).
+
 ## First launch
 
 ```mermaid
