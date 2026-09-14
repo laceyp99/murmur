@@ -7,7 +7,7 @@ _WINDOWS_APP_ID_SET = False
 
 
 def configure_windows_app_identity() -> None:
-    """Set Murmur's Windows identity once, before it creates any UI."""
+    """Set murmur's Windows identity once, before it creates any UI."""
     global _WINDOWS_APP_ID_SET
 
     if _WINDOWS_APP_ID_SET:

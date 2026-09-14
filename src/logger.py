@@ -1,5 +1,5 @@
 """
-Data logging module for Murmur.
+Data logging module for murmur.
 Logs audio recordings and transcriptions for fine-tuning datasets.
 """
 

@@ -48,4 +48,4 @@ def test_prepare_build_generates_icon_and_version_info(tmp_path):
     assert (output_dir / "murmur.ico").is_file()
     version_info = (output_dir / "version_info.txt").read_text(encoding="utf-8")
     assert "filevers=(1, 2, 3, 0)" in version_info
-    assert "StringStruct(u'ProductName', u'Murmur')" in version_info
+    assert "StringStruct(u'ProductName', u'murmur')" in version_info

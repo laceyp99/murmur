@@ -1,6 +1,6 @@
 # Pipeline Overview
 
-Murmur has one user-visible workflow: press the hotkey, speak, press the hotkey
+murmur has one user-visible workflow: press the hotkey, speak, press the hotkey
 again, and paste the final transcript. Internally, that workflow is split into a
 live path and a fallback path.
 
@@ -8,7 +8,7 @@ The live path starts VAD segmentation and Whisper transcription while recording
 is still active. This lowers stop-time latency because many sealed speech
 segments have already been transcribed before the user releases the hotkey.
 
-The fallback path keeps the system reliable. Murmur still records the full audio
+The fallback path keeps the system reliable. murmur still records the full audio
 clip, so if live VAD or live transcription degrades—or produces no usable text—
 finalization can recompute the transcript from the full recording.
 
@@ -82,16 +82,16 @@ segment order by `segment_id`.
 
 ### Finalization
 
-When recording stops, Murmur stops capture, flushes pending VAD state, drains
+When recording stops, murmur stops capture, flushes pending VAD state, drains
 queued live transcription work, and first checks the per-recording degraded flag.
 If the live path is healthy and its accumulator contains text,
 `finalize_segment_texts()` joins the ordered chunks and performs the final
 cleanup pass.
 
-If the live path degraded or produced no text, Murmur falls back to the full
+If the live path degraded or produced no text, murmur falls back to the full
 recorded clip. The fallback path runs offline VAD segmentation and then Whisper
 transcription over the resulting speech segments. If offline VAD is unavailable
-or finds no speech, Murmur transcribes the full clip directly. Both the segmented
+or finds no speech, murmur transcribes the full clip directly. Both the segmented
 fallback and full-clip path perform final cleanup through
 `transcribe_segments()`; a completed recording receives one final cleanup path,
 not one cleanup call per live chunk.

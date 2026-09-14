@@ -1,5 +1,5 @@
 """
-Transcription module for Murmur.
+Transcription module for murmur.
 Handles Whisper model loading and speech-to-text transcription.
 """
 

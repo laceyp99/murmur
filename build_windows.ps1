@@ -7,13 +7,13 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 if ($env:OS -ne "Windows_NT") {
-    throw "The Murmur release build must run on Windows."
+    throw "The murmur release build must run on Windows."
 }
 
 $repoRoot = $PSScriptRoot
 $pythonPath = Join-Path $repoRoot "venv\Scripts\python.exe"
 $generatedPath = Join-Path $repoRoot "build\windows"
-$executablePath = Join-Path $repoRoot "dist\Murmur\murmur.exe"
+$executablePath = Join-Path $repoRoot "dist\murmur\murmur.exe"
 
 if (-not (Test-Path -LiteralPath $pythonPath -PathType Leaf)) {
     throw "Create the repository venv before building: py -3.12 -m venv venv"
@@ -24,7 +24,7 @@ try {
     if (-not $SkipInstall) {
         & $pythonPath -m pip install -e ".[packaging]"
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed to install Murmur packaging dependencies."
+            throw "Failed to install murmur packaging dependencies."
         }
     }
 
@@ -37,7 +37,7 @@ try {
 
     & $pythonPath -m PyInstaller --noconfirm --clean packaging\murmur.spec
     if ($LASTEXITCODE -ne 0) {
-        throw "PyInstaller failed to build Murmur."
+            throw "PyInstaller failed to build murmur."
     }
 
     if (-not (Test-Path -LiteralPath $executablePath -PathType Leaf)) {
@@ -46,9 +46,9 @@ try {
 
     $versionInfo = (Get-Item -LiteralPath $executablePath).VersionInfo
     $expectedMetadata = @{
-        FileDescription = "Murmur - Local Speech-to-Text Hotkey App"
+        FileDescription = "murmur - Local Speech-to-Text Hotkey App"
         OriginalFilename = "murmur.exe"
-        ProductName = "Murmur"
+        ProductName = "murmur"
     }
     foreach ($field in $expectedMetadata.Keys) {
         if ($versionInfo.$field -ne $expectedMetadata[$field]) {

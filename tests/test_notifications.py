@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import src.notifications as notifications_module
@@ -110,6 +111,41 @@ def test_toast_failure_stdout_suppresses_transcript_preview(monkeypatch, capsys)
     assert "message suppressed" in stdout
     assert "private dictated text" not in stdout
     assert "leaked in toast failure" not in stdout
+
+
+def test_toast_uses_murmur_app_icon(monkeypatch):
+    calls = []
+
+    class RecordingToaster:
+        def show_toast(self, title, message, icon_path, duration, threaded):
+            calls.append((title, message, icon_path, duration, threaded))
+
+    monkeypatch.setattr(notifications_module, "TOAST_AVAILABLE", True)
+    monkeypatch.setattr(
+        notifications_module,
+        "ToastNotifier",
+        lambda: RecordingToaster(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        notifications_module,
+        "get_app_icon_path",
+        lambda: Path(r"C:\Users\Pat\AppData\murmur.ico"),
+    )
+    enable_notifications(monkeypatch)
+    manager = notifications_module.NotificationManager()
+
+    manager.notify("murmur", "Ready", threaded=False)
+
+    assert calls == [
+        (
+            "murmur",
+            "Ready",
+            r"C:\Users\Pat\AppData\murmur.ico",
+            3,
+            False,
+        )
+    ]
 
 
 def test_toast_initialization_failure_uses_safe_stdout_fallback(

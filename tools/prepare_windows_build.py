@@ -57,12 +57,12 @@ def _write_version_info(destination: Path, version: str) -> None:
         u'040904B0',
         [
           StringStruct(u'CompanyName', u'laceyp99'),
-          StringStruct(u'FileDescription', u'Murmur - Local Speech-to-Text Hotkey App'),
+          StringStruct(u'FileDescription', u'murmur - Local Speech-to-Text Hotkey App'),
           StringStruct(u'FileVersion', u'{version}'),
           StringStruct(u'InternalName', u'murmur'),
           StringStruct(u'LegalCopyright', u'Copyright (c) laceyp99'),
           StringStruct(u'OriginalFilename', u'murmur.exe'),
-          StringStruct(u'ProductName', u'Murmur'),
+          StringStruct(u'ProductName', u'murmur'),
           StringStruct(u'ProductVersion', u'{version}')
         ]
       )

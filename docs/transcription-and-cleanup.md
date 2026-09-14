@@ -1,6 +1,6 @@
 # Transcription And Cleanup
 
-Murmur uses Whisper for speech-to-text and an optional Ollama model—local by
+murmur uses Whisper for speech-to-text and an optional Ollama model—local by
 default—for a single final cleanup pass. Segment transcription and document
 cleanup are kept separate so the live path can transcribe chunks early without
 asking the LLM to rewrite partial text.

@@ -1,5 +1,5 @@
 """
-Configuration management for Murmur.
+Configuration management for murmur.
 """
 
 import contextlib
@@ -46,11 +46,11 @@ _config_instance = None
 
 
 class ConfigError(RuntimeError):
-    """Raised when Murmur cannot read or write its config safely."""
+    """Raised when murmur cannot read or write its config safely."""
 
 
 def get_app_data_dir() -> Path:
-    """Get the canonical Murmur AppData directory."""
+    """Get the canonical murmur AppData directory."""
     return Path(os.environ.get("APPDATA", ".")) / APP_DIR_NAME
 
 

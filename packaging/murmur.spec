@@ -116,5 +116,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="Murmur",
+    name="murmur",
 )

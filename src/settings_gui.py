@@ -1,4 +1,4 @@
-"""Settings GUI for Murmur using customtkinter."""
+"""Settings GUI for murmur using customtkinter."""
 
 import contextlib
 import ctypes
@@ -457,7 +457,7 @@ def _ensure_settings_ui_thread():
 
 
 class SettingsWindow:
-    """A tabbed customtkinter window for editing Murmur configuration."""
+    """A tabbed customtkinter window for editing murmur configuration."""
 
     def __init__(self, master=None, on_close=None):
         self.config = get_config()

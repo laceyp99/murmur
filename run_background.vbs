@@ -8,7 +8,7 @@ Dim packagedPath
 ' Get absolute path to the current directory
 strPath = fso.GetParentFolderName(WScript.ScriptFullName)
 scriptPath = Chr(34) & strPath & "\run.py" & Chr(34)
-packagedPath = strPath & "\dist\Murmur\murmur.exe"
+packagedPath = strPath & "\dist\murmur\murmur.exe"
 
 ' Prefer source mode for development, then fall back to a packaged release
 If fso.FileExists(strPath & "\venv\Scripts\pythonw.exe") Then

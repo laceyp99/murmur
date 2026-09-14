@@ -1,5 +1,5 @@
 """
-Auto-start management for Murmur on Windows.
+Auto-start management for murmur on Windows.
 """
 
 import contextlib
@@ -13,7 +13,7 @@ except ImportError:
 
 
 def _get_launch_command() -> str:
-    """Return the current Murmur launch command for Windows startup."""
+    """Return the current murmur launch command for Windows startup."""
     executable = Path(sys.executable)
     if getattr(sys, "frozen", False):
         return f'"{executable}"'
@@ -34,7 +34,7 @@ def set_autostart(enabled: bool):
     if winreg is None:
         return
 
-    app_name = "Murmur"
+    app_name = "murmur"
 
     cmd = _get_launch_command()
 
@@ -60,7 +60,7 @@ def is_autostart_enabled() -> bool:
         return False
 
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-    app_name = "Murmur"
+    app_name = "murmur"
 
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ)

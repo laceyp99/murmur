@@ -42,7 +42,7 @@ Then open [http://127.0.0.1:8000/](http://127.0.0.1:8000/).
 
 ## Quick Start
 
-Murmur supports Windows 10/11 and Python 3.12. A microphone is required; an
+murmur supports Windows 10/11 and Python 3.12. A microphone is required; an
 NVIDIA GPU and Ollama are optional.
 
 ```powershell
@@ -60,7 +60,7 @@ To build the standalone Windows application folder with PyInstaller:
 powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
 ```
 
-The validated output is written to `dist\Murmur\`. Distribute the complete
+The validated output is written to `dist\murmur\`. Distribute the complete
 folder. See [Build a packaged release](docs/getting-started.md#build-a-packaged-release)
 for requirements and repeat-build instructions.
 

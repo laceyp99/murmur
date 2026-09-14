@@ -1,5 +1,5 @@
 """
-Main application module for Murmur.
+Main application module for murmur.
 Orchestrates audio recording, transcription, and clipboard operations.
 """
 
@@ -46,7 +46,7 @@ class MurmurApp:
 
     def __init__(self, preload_model: bool = True):
         """
-        Initialize the Murmur application.
+        Initialize the murmur application.
 
         Args:
             preload_model: Whether to preload the Whisper model on startup.

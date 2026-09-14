@@ -14,7 +14,7 @@ def test_save_user_vocab_round_trips_json_mapping(tmp_path):
     vocab_path = tmp_path / "user_vocab.json"
     vocab = {
         "brew ridge": "Blue Ridge Data",
-        "murmer": "Murmur",
+        "murmer": "murmur",
     }
 
     save_user_vocab(vocab, vocab_path)
@@ -35,7 +35,7 @@ def test_default_vocab_path_uses_app_data_when_frozen(tmp_path, monkeypatch):
     monkeypatch.setattr(user_vocab.sys, "frozen", True, raising=False)
     monkeypatch.setattr(user_vocab, "get_app_data_dir", lambda: app_data_dir)
 
-    save_user_vocab({"murmer": "Murmur"})
+    save_user_vocab({"murmer": "murmur"})
 
-    assert load_user_vocab() == {"murmer": "Murmur"}
+    assert load_user_vocab() == {"murmer": "murmur"}
     assert (app_data_dir / "user_vocab.json").is_file()

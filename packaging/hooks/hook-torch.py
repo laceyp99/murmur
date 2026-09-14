@@ -1,4 +1,4 @@
-"""Bundle Torch for Murmur without collecting unrelated training toolchains."""
+"""Bundle Torch for murmur without collecting unrelated training toolchains."""
 
 from PyInstaller.utils.hooks import (
     PY_DYLIB_PATTERNS,

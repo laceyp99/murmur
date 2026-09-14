@@ -6,7 +6,7 @@
 
 - Another application may already use the configured hotkey.
 - Try a different hotkey combination from **Settings**.
-- If registration continues to fail, try running Murmur as Administrator.
+- If registration continues to fail, try running murmur as Administrator.
 
 ### No speech detected
 
@@ -18,14 +18,14 @@
 ### Clipboard copy failed
 
 - Retry the recording if you still need the transcript on your clipboard.
-- When training-data logging is disabled, Murmur does not store the transcript
+- When training-data logging is disabled, murmur does not store the transcript
   for recovery.
 - When logging is enabled and saving succeeds, the transcript remains in the
   local training-data area even if clipboard copy fails.
 
 ### There is a short pause after stopping
 
-Murmur transcribes completed speech segments during recording, but it still
+murmur transcribes completed speech segments during recording, but it still
 performs a final flush, transcript cleanup, and optional Ollama request after
 the stop hotkey. The remaining delay is usually the last queued segment and
 those finalization steps. Lower `vad_silence_duration_ms` carefully if segments
@@ -36,7 +36,7 @@ are taking too long to close.
 - Confirm Ollama is running at the configured `ollama_endpoint`.
 - Confirm the configured model is installed locally.
 - Increase `ollama_timeout_seconds` if model startup is slow.
-- Murmur falls back to the locally cleaned transcript when Ollama is unavailable.
+- murmur falls back to the locally cleaned transcript when Ollama is unavailable.
 
 ### Slow transcription
 
@@ -63,7 +63,7 @@ $previousCheckLog = $env:MURMUR_PACKAGING_SELF_CHECK_LOG
 try {
     $env:MURMUR_PACKAGING_SELF_CHECK_MODEL_CACHE = Join-Path $modelCheckDir "models"
     $env:MURMUR_PACKAGING_SELF_CHECK_LOG = Join-Path $modelCheckDir "error.txt"
-    $check = Start-Process -FilePath .\dist\Murmur\murmur.exe `
+    $check = Start-Process -FilePath .\dist\murmur\murmur.exe `
         -ArgumentList "--packaging-self-check" -WindowStyle Hidden -Wait -PassThru
     if ($check.ExitCode -ne 0) {
         throw "Model check failed. Inspect $modelCheckDir\error.txt"
@@ -86,6 +86,6 @@ afterward.
 ## Failure and fallback behavior
 
 For implementation details and the full fallback ladder, see
-[Fallbacks and Failure Modes](failure-and-fallbacks.md). Murmur keeps the full
+[Fallbacks and Failure Modes](failure-and-fallbacks.md). murmur keeps the full
 recording in memory, so live VAD or live transcription failures generally
 degrade to offline processing instead of losing the recording.

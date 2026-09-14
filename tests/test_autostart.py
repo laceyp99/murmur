@@ -23,12 +23,12 @@ def test_launch_command_uses_packaged_executable(monkeypatch):
     monkeypatch.setattr(
         autostart_module.sys,
         "executable",
-        r"C:\Program Files\Murmur\murmur.exe",
+        r"C:\Program Files\murmur\murmur.exe",
     )
     monkeypatch.setattr(autostart_module.sys, "frozen", True, raising=False)
 
     assert autostart_module._get_launch_command() == (
-        '"C:\\Program Files\\Murmur\\murmur.exe"'
+        '"C:\\Program Files\\murmur\\murmur.exe"'
     )
 
 
@@ -85,7 +85,7 @@ def test_set_autostart_uses_pythonw_and_registry(monkeypatch):
     )
     assert captured["set_value_ex"] == (
         registry_key,
-        "Murmur",
+        "murmur",
         0,
         fake_winreg.REG_SZ,
         "command",

@@ -1,5 +1,5 @@
 """
-System tray management for Murmur.
+System tray management for murmur.
 """
 
 import threading
@@ -12,7 +12,7 @@ from .config import get_config
 
 class TrayManager:
     """
-    Manages the system tray icon and menu for Murmur.
+    Manages the system tray icon and menu for murmur.
     """
 
     def __init__(self, on_exit_callback=None):
