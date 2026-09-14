@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover - exercised when dependency is missing.
 def _create_vad(aggressiveness: int) -> object:
     """Construct a WebRTC VAD instance or fail with a clear message."""
     if webrtcvad is None:
-        raise RuntimeError("webrtcvad-wheels is required to use Murmur VAD")
+        raise RuntimeError("webrtcvad-wheels is required to use murmur VAD")
     return webrtcvad.Vad(aggressiveness)
 
 

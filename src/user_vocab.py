@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Mapping
 from pathlib import Path
+
+from .config import get_app_data_dir
 
 DEFAULT_USER_VOCAB_PATH = Path(__file__).resolve().parents[1] / "user_vocab.json"
 
 
+def _get_default_user_vocab_path() -> Path:
+    """Return a writable vocabulary path for the current launch mode."""
+    if getattr(sys, "frozen", False):
+        return get_app_data_dir() / "user_vocab.json"
+    return DEFAULT_USER_VOCAB_PATH
+
+
 def load_user_vocab(path: Path | None = None) -> dict[str, str]:
     """Return user vocabulary overrides from disk, or an empty mapping."""
-    vocab_path = Path(path) if path is not None else DEFAULT_USER_VOCAB_PATH
+    vocab_path = Path(path) if path is not None else _get_default_user_vocab_path()
     if not vocab_path.exists():
         return {}
 
@@ -36,7 +46,7 @@ def load_user_vocab(path: Path | None = None) -> dict[str, str]:
 
 def save_user_vocab(vocab: Mapping[str, str], path: Path | None = None) -> None:
     """Persist user vocabulary overrides to disk."""
-    vocab_path = Path(path) if path is not None else DEFAULT_USER_VOCAB_PATH
+    vocab_path = Path(path) if path is not None else _get_default_user_vocab_path()
     vocab_path.parent.mkdir(parents=True, exist_ok=True)
     normalized_vocab = {str(source): str(target) for source, target in vocab.items()}
 

@@ -111,7 +111,7 @@ def test_llm_post_processor_builds_prompt_with_vocab_and_returns_cleaned_text():
             model_name=MODEL_NAME,
             client=fake_client,
         ),
-        user_vocab={"q win": "Qwen", "murmer": "Murmur"},
+        user_vocab={"q win": "Qwen", "murmer": "murmur"},
     )
 
     result = processor.process(
@@ -149,7 +149,7 @@ def test_llm_post_processor_builds_prompt_with_vocab_and_returns_cleaned_text():
     assert messages[3]["role"] == "user"
     assert "Preferred vocabulary and corrections:" in messages[3]["content"]
     assert "- q win -> Qwen" in messages[3]["content"]
-    assert "- murmer -> Murmur" in messages[3]["content"]
+    assert "- murmer -> murmur" in messages[3]["content"]
 
 
 def test_llm_post_processor_returns_original_text_on_failure():

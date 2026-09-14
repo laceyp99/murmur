@@ -1,6 +1,6 @@
 # Settings And Privacy
 
-Murmur exposes user-facing settings through the **Settings** item in the
+murmur exposes user-facing settings through the **Settings** item in the
 system-tray menu. The window is owned by a persistent CustomTkinter UI thread;
 the tray callback places a request on that thread instead of creating a second
 independent UI loop.
@@ -54,10 +54,10 @@ and can be changed only by editing `config.json`; restart after doing so.
 
 ## Persistent configuration
 
-The configuration file is `%APPDATA%\murmur\config.json`. Murmur creates the
+The configuration file is `%APPDATA%\murmur\config.json`. murmur creates the
 directory and file on first launch. Missing keys receive values from
 `DEFAULT_CONFIG`. If the file is malformed, invalid UTF-8, or not a JSON object,
-Murmur moves it to a timestamped `config.corrupt-*.json` backup, writes defaults,
+murmur moves it to a timestamped `config.corrupt-*.json` backup, writes defaults,
 and shows a startup notice.
 
 The current default values are:
@@ -89,13 +89,14 @@ The current default values are:
 
 The settings save operation writes a temporary file and replaces the config
 atomically. Windows autostart is stored in the current user's
-`Software\Microsoft\Windows\CurrentVersion\Run` key and launches the same
-environment's `pythonw.exe` with `run.py`.
+`Software\Microsoft\Windows\CurrentVersion\Run` key. A packaged app registers
+its own `murmur.exe`; a source launch registers the same environment's
+`pythonw.exe` with `run.py`.
 
 ## Training-data logging
 
 Logging is disabled by default and enabling it requires confirmation in the
-privacy tab. Murmur logs only when final text is non-empty and logging is
+privacy tab. murmur logs only when final text is non-empty and logging is
 enabled. The logger runs after the clipboard attempt and writes:
 
 ```mermaid
@@ -131,15 +132,17 @@ Disabling logging stops future writes; it does not delete existing records.
 
 ## Vocabulary and network boundary
 
-An optional gitignored `user_vocab.json` in the repository root supplies
-preferred spellings to the Ollama prompt. It is loaded lazily only when the
-Ollama post-processor is built; it does not change Whisper's recognition and is
-ignored when Ollama cleanup is disabled.
+An optional `user_vocab.json` supplies preferred spellings to the Ollama prompt.
+Source launches use the gitignored file in the repository root. Packaged
+launches use `%APPDATA%\murmur\user_vocab.json` so the file remains writable and
+survives replacement of the application folder. It is loaded lazily only when
+the Ollama post-processor is built; it does not change Whisper's recognition and
+is ignored when Ollama cleanup is disabled.
 
 Whisper audio inference and the default Ollama endpoint are local. If
 `ollama_endpoint` points to another machine, the final transcript sent for
 cleanup leaves the local computer. The Ollama cleanup result is accepted only
-when it remains transcript-like; otherwise Murmur keeps the locally cleaned
+when it remains transcript-like; otherwise murmur keeps the locally cleaned
 text.
 
 ## Source map

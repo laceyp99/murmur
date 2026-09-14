@@ -45,5 +45,8 @@ user_vocab.json
 .ruff_cache/
 .pytest_cache/
 
+# mkdocs build output
+site/
+
 
 # Whisper models are cached in user directory, not in project

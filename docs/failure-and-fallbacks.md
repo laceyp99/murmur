@@ -1,6 +1,6 @@
 # Fallbacks And Failure Modes
 
-Murmur treats the live pipeline as an optimization, not the only source of
+murmur treats the live pipeline as an optimization, not the only source of
 truth. The full recording remains available until finalization, so most live
 failures degrade to a slower full-recording path instead of losing the user's
 dictation. A recording with no captured audio or a final transcription exception
@@ -49,7 +49,7 @@ flowchart LR
     Disabled --> FullFallback
 ```
 
-A degraded live path does not mean the recording failed. It means Murmur should
+A degraded live path does not mean the recording failed. It means murmur should
 ignore partial live output and rebuild the final transcript from the full
 recording. Live VAD initialization failure is handled as a disabled optimization
 and leads to the same fallback when no live text is available.
@@ -72,7 +72,7 @@ flowchart TB
 ```
 
 Both `transcribe_segments()` and `transcribe()` perform the local document
-cleanup and optional Ollama pass before returning. This gives Murmur three
+cleanup and optional Ollama pass before returning. This gives murmur three
 chances to produce useful text:
 
 1. Use the live transcript accumulated during recording.
@@ -82,7 +82,7 @@ chances to produce useful text:
 ## Clipboard And Logging Outcomes
 
 Finalization can still succeed even if clipboard copy fails. In that case,
-Murmur reports the copy failure. The logger runs after the clipboard attempt, so
+murmur reports the copy failure. The logger runs after the clipboard attempt, so
 if training data logging is enabled and the log write succeeds, the transcript
 and source audio are still saved locally in the opt-in training-data area.
 

@@ -42,8 +42,8 @@ Then open [http://127.0.0.1:8000/](http://127.0.0.1:8000/).
 
 ## Quick Start
 
-Murmur supports Windows 10/11 and Python 3.12. A microphone and FFmpeg on
-`PATH` are required; an NVIDIA GPU and Ollama are optional.
+murmur supports Windows 10/11 and Python 3.12. A microphone is required; an
+NVIDIA GPU and Ollama are optional.
 
 ```powershell
 py -3.12 -m venv venv
@@ -51,8 +51,21 @@ venv\Scripts\python.exe -m pip install -e ".[dev]"
 venv\Scripts\python.exe run.py
 ```
 
-See [Getting Started](docs/getting-started.md) for CUDA installation, FFmpeg,
-Ollama setup, background launch, first-run behavior, and the recording flow.
+See [Getting Started](docs/getting-started.md) for CUDA installation, Ollama
+setup, background launch, first-run behavior, and the recording flow.
+
+To build the standalone Windows application folder with PyInstaller:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
+```
+
+The validated output is written to `dist\murmur\`. Distribute the complete
+folder. For manual per-user use, extract it to
+`%LOCALAPPDATA%\Programs\murmur` and optionally create a Desktop shortcut to
+`murmur.exe`. Keep the application files together. See [Build a packaged
+release](docs/getting-started.md#build-a-packaged-release) for requirements and
+repeat-build instructions.
 
 ## Development
 

@@ -1,6 +1,6 @@
-# Murmur Pipeline Docs
+# murmur Pipeline Docs
 
-This directory documents Murmur's setup, runtime behavior, audio processing
+This directory documents murmur's setup, runtime behavior, audio processing
 pipeline, and privacy boundaries in more detail than the root README. The
 diagrams are written as Mermaid blocks inside Markdown so they are easy to edit,
 review, and keep in sync with code changes.
@@ -19,7 +19,7 @@ review, and keep in sync with code changes.
    WebRTC VAD frames and speech segments.
 6. [Transcription And Cleanup](transcription-and-cleanup.md) covers Whisper,
    transcript accumulation, local cleanup, and optional Ollama cleanup.
-7. [Fallbacks And Failure Modes](failure-and-fallbacks.md) shows how Murmur
+7. [Fallbacks And Failure Modes](failure-and-fallbacks.md) shows how murmur
    recovers when live processing degrades.
 
 ## Diagram Editing

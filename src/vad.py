@@ -1,4 +1,4 @@
-"""Public VAD surface for Murmur."""
+"""Public VAD surface for murmur."""
 
 from .vad_audio import float32_to_pcm16, generate_frames, resample_audio
 from .vad_config import DEFAULT_VAD_SAMPLE_RATE, SUPPORTED_VAD_SAMPLE_RATES, VADSettings

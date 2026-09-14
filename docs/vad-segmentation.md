@@ -1,6 +1,6 @@
 # VAD Segmentation
 
-Murmur uses WebRTC VAD to convert continuous audio into speech segments. The
+murmur uses WebRTC VAD to convert continuous audio into speech segments. The
 same timing settings drive both live segmentation and offline segmentation, but
 the two paths differ in how they receive audio:
 

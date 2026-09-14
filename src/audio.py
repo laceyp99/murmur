@@ -1,5 +1,5 @@
 """
-Audio recording functionality for Murmur.
+Audio recording functionality for murmur.
 """
 
 import threading

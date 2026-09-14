@@ -1,4 +1,4 @@
-"""Metadata and value helpers for the Murmur settings panel."""
+"""Metadata and value helpers for the murmur settings panel."""
 
 from __future__ import annotations
 

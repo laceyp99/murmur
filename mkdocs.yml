@@ -1,5 +1,5 @@
-site_name: Murmur Docs
-site_description: Visual documentation for Murmur's local audio processing pipeline.
+site_name: murmur Docs
+site_description: Visual documentation for murmur's local audio processing pipeline.
 repo_url: https://github.com/laceyp99/murmur
 repo_name: laceyp99/murmur
 

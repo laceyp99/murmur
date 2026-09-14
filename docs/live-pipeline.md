@@ -104,7 +104,7 @@ for the same local model and keeps output ordering predictable.
 If live VAD cannot be initialized—for example, because the configured sample
 rate is not supported by WebRTC—the recorder still starts without a live VAD
 callback. The stop path then uses the offline fallback. A callback or worker
-failure marks the live pipeline degraded; Murmur keeps capturing the full audio
+failure marks the live pipeline degraded; murmur keeps capturing the full audio
 but ignores partial live output during finalization.
 
 Stopping is deliberately ordered: the recorder is stopped first, then live VAD

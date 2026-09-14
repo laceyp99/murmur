@@ -1,5 +1,5 @@
 """
-Clipboard module for Murmur.
+Clipboard module for murmur.
 Handles copying transcribed text to the system clipboard.
 """
 

@@ -1,5 +1,5 @@
 """
-Hotkey handling module for Murmur.
+Hotkey handling module for murmur.
 Manages global hotkey registration and callbacks.
 """
 

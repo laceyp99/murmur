@@ -1,5 +1,5 @@
 """
-Entry point for running Murmur as a module.
+Entry point for running murmur as a module.
 Usage: python -m src
 """
 

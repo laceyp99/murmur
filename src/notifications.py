@@ -1,5 +1,5 @@
 """
-Notification module for Murmur.
+Notification module for murmur.
 Provides user feedback through Windows toast notifications.
 """
 
@@ -13,6 +13,7 @@ try:
 except ImportError:
     TOAST_AVAILABLE = False
 
+from .assets import get_app_icon_path
 from .config import get_config
 
 
@@ -80,7 +81,14 @@ class NotificationManager:
             return
 
         try:
-            toaster.show_toast(title, message, duration=duration, threaded=False)
+            icon_path = get_app_icon_path()
+            toaster.show_toast(
+                title,
+                message,
+                icon_path=str(icon_path) if icon_path is not None else None,
+                duration=duration,
+                threaded=False,
+            )
         except Exception:
             self._print_fallback(title, "toast delivery failed")
 
