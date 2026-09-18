@@ -90,9 +90,12 @@ def test_ollama_client_chat_uses_messages_and_options():
             "model": MODEL_NAME,
             "messages": [{"role": "user", "content": "input text"}],
             "stream": False,
+            "think": False,
+            "keep_alive": "10m",
             "options": {
                 "temperature": 0.0,
                 "num_predict": 42,
+                "num_ctx": 4096,
             },
         }
     ]

@@ -86,9 +86,12 @@ class OllamaClient:
             model=self.model_name,
             messages=messages,
             stream=False,
+            think=False,
+            keep_alive="10m",
             options={
                 "temperature": temperature,
                 "num_predict": max_tokens,
+                "num_ctx": 4096,
             },
         )
 
