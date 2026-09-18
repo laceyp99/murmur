@@ -60,13 +60,17 @@ record-transcribe-copy workflow. Install Ollama separately and pull the model
 matching the default settings:
 
 ```powershell
-ollama pull granite4.1:3b
+ollama pull qwen3.5:4b-q4_K_M
 ```
 
 Start Ollama using its desktop service or with `ollama serve`. If the service,
 model, or request is unavailable, murmur keeps the locally cleaned transcript
 and continues finalization. Use **Settings > LLM Cleanup > Test Ollama
 Connection** to check an endpoint and model.
+
+New configurations use `qwen3.5:4b-q4_K_M`. murmur never replaces a model saved
+in an existing configuration. Existing users who want the evaluated model must
+select it manually under **Settings > LLM Cleanup** after pulling it.
 
 ## Launch
 

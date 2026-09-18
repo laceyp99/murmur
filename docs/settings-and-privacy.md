@@ -81,11 +81,21 @@ The current default values are:
   "logging_consent_source": null,
   "ollama_enabled": true,
   "ollama_endpoint": "http://localhost:11434",
-  "ollama_model_name": "granite4.1:3b",
+  "ollama_model_name": "qwen3.5:4b-q4_K_M",
   "ollama_timeout_seconds": 60,
   "ollama_preload_model": true
 }
 ```
+
+The Qwen model is the default only for new or regenerated configurations.
+murmur never migrates a saved model choice. Existing users can switch manually
+under **Settings > LLM Cleanup** after pulling the model with
+`ollama pull qwen3.5:4b-q4_K_M`.
+
+Every configured model uses the same cleanup profile: thinking disabled, a
+4,096-token context, temperature `0`, and a 10-minute keep-alive. Only
+`qwen3.5:4b-q4_K_M` has been evaluated with this profile and the bundled prompt;
+custom models remain an advanced override.
 
 The settings save operation writes a temporary file and replaces the config
 atomically. Windows autostart is stored in the current user's
