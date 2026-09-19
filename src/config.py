@@ -13,7 +13,7 @@ from typing import Any
 
 APP_DIR_NAME = "murmur"
 
-DEFAULT_OLLAMA_MODEL_NAME = "qwen3.5:4b-q4_K_M"
+DEFAULT_OLLAMA_MODEL_NAME = "qwen3.5:4b"
 DEFAULT_OLLAMA_TIMEOUT_SECONDS = 60
 
 

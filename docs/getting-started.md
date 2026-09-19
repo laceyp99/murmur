@@ -68,10 +68,6 @@ model, or request is unavailable, murmur keeps the locally cleaned transcript
 and continues finalization. Use **Settings > LLM Cleanup > Test Ollama
 Connection** to check an endpoint and model.
 
-New configurations use `qwen3.5:4b-q4_K_M`. murmur never replaces a model saved
-in an existing configuration. Existing users who want the evaluated model must
-select it manually under **Settings > LLM Cleanup** after pulling it.
-
 ## Launch
 
 The supported launch options all call the same `src.main:main` entry point:

@@ -74,8 +74,7 @@ cannot be built, the request fails, or the response fails the acceptance gate,
 the local cleanup result is returned.
 
 All configured models receive the same request profile: thinking disabled,
-`num_ctx=4096`, temperature `0`, and a 10-minute keep-alive. Only
-`qwen3.5:4b-q4_K_M` has been evaluated with the bundled cleanup prompt.
+`num_ctx=4096`, temperature `0`, and a 10-minute keep-alive.
 
 Before sending a request, murmur conservatively estimates the complete message
 token count as the larger of words divided by `0.75` or characters divided by

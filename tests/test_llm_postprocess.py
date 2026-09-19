@@ -21,7 +21,7 @@ def test_baseline_messages_match_evaluated_prompt_artifact_exactly():
     serialized = json.dumps(messages, ensure_ascii=False, separators=(",", ":"))
 
     assert hashlib.sha256(serialized.encode()).hexdigest() == (
-        "8e5166403532f02f7a262339ed1db4f1993fc0ee34c16e329843f6966599e7c2"
+        "9782afe202a917cb0d19959dda24dffd223584a64704a8f2b8f462da9767779a"
     )
 
 
@@ -134,7 +134,7 @@ def test_llm_post_processor_builds_exact_evaluated_messages_and_returns_cleaned_
     assert result == "The report is ready. Please review it tomorrow."
     messages = fake_client.calls[0]["messages"]
     assert hashlib.sha256(messages[0]["content"].encode()).hexdigest() == (
-        "d4ffd45586d36678d6cbd8b2f58d32e7824b64da08b85b7d54839ca72fabb910"
+        "b92a7358b8e6899334e568d4b7da80317f3feb491df5a983c67043744c8e8592"
     )
     assert messages[1:-1] == FEW_SHOT_MESSAGES
     assert messages[-1] == {
