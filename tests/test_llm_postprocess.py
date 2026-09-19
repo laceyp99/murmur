@@ -1,7 +1,11 @@
+import hashlib
+import json
 from types import SimpleNamespace
 
 from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
 from src.llm_postprocess import (
+    DEFAULT_SYSTEM_PROMPT,
+    FEW_SHOT_MESSAGES,
     LLMPostProcessor,
     OllamaClient,
     check_ollama_connection,
@@ -9,6 +13,16 @@ from src.llm_postprocess import (
 
 MODEL_NAME = DEFAULT_OLLAMA_MODEL_NAME
 TIMEOUT_SECONDS = float(DEFAULT_OLLAMA_TIMEOUT_SECONDS)
+
+
+def test_baseline_messages_match_evaluated_prompt_artifact_exactly():
+    processor = LLMPostProcessor(client=object())
+    messages = processor.build_messages("{{input}}")
+    serialized = json.dumps(messages, ensure_ascii=False, separators=(",", ":"))
+
+    assert hashlib.sha256(serialized.encode()).hexdigest() == (
+        "9782afe202a917cb0d19959dda24dffd223584a64704a8f2b8f462da9767779a"
+    )
 
 
 class FakeOllamaPackageClient:
@@ -90,20 +104,21 @@ def test_ollama_client_chat_uses_messages_and_options():
             "model": MODEL_NAME,
             "messages": [{"role": "user", "content": "input text"}],
             "stream": False,
+            "think": False,
+            "keep_alive": "10m",
             "options": {
                 "temperature": 0.0,
                 "num_predict": 42,
+                "num_ctx": 4096,
             },
         }
     ]
 
 
-def test_llm_post_processor_builds_prompt_with_vocab_and_returns_cleaned_text():
+def test_llm_post_processor_builds_exact_evaluated_messages_and_returns_cleaned_text():
     fake_client = FakeOllamaPackageClient({"response": "ignored"})
     fake_client.chat_response = {
-        "message": {
-            "content": "Quick recap: We met with Jane from Blue Ridge Data about the pilot. Jane asked if Noah can send the intake link and the Loom walkthrough by Friday."
-        }
+        "message": {"content": "The report is ready. Please review it tomorrow."}
     }
     processor = LLMPostProcessor(
         client=OllamaClient(
@@ -111,45 +126,67 @@ def test_llm_post_processor_builds_prompt_with_vocab_and_returns_cleaned_text():
             model_name=MODEL_NAME,
             client=fake_client,
         ),
-        user_vocab={"q win": "Qwen", "murmer": "murmur"},
     )
 
-    result = processor.process(
-        "quick recap we met with jane from blue ridge data about the pilot the transcript may say brew ridge or blue rich but it should be blue ridge data jane asked if noah can send the intake link and the loom walkthrough by friday"
-    )
+    raw_transcript = "  The report is ready. Please review it tomorrow.  "
+    result = processor.process(raw_transcript)
 
-    assert (
-        result
-        == "Quick recap: We met with Jane from Blue Ridge Data about the pilot. Jane asked if Noah can send the intake link and the Loom walkthrough by Friday."
-    )
+    assert result == "The report is ready. Please review it tomorrow."
     messages = fake_client.calls[0]["messages"]
-    assert messages[0]["role"] == "system"
-    assert "Return only the cleaned transcript text." in messages[0]["content"]
-    assert messages[1]["role"] == "user"
-    assert (
-        "Clean this transcript while preserving meaning and wording."
-        in messages[1]["content"]
+    assert hashlib.sha256(messages[0]["content"].encode()).hexdigest() == (
+        "b92a7358b8e6899334e568d4b7da80317f3feb491df5a983c67043744c8e8592"
     )
-    assert (
-        "Ignore stray ellipses or repeated trailing periods from transcription artifacts when deciding punctuation and capitalization."
-        in messages[1]["content"]
-    )
-    assert (
-        "Return only the cleaned transcript text with no preamble or commentary."
-        in messages[1]["content"]
-    )
-    assert (
-        "Transcript to clean:\nquick recap we met with jane from blue ridge data about the pilot the transcript may say brew ridge or blue rich but it should be blue ridge data jane asked if noah can send the intake link and the loom walkthrough by friday"
-        in messages[1]["content"]
-    )
-    assert messages[2] == {
-        "role": "assistant",
-        "content": "Quick recap: We met with Jane from Blue Ridge Data about the pilot. Jane asked if Noah can send the intake link and the Loom walkthrough by Friday.",
+    assert messages[1:-1] == FEW_SHOT_MESSAGES
+    assert messages[-1] == {
+        "role": "user",
+        "content": "The report is ready. Please review it tomorrow.",
     }
-    assert messages[3]["role"] == "user"
-    assert "Preferred vocabulary and corrections:" in messages[3]["content"]
-    assert "- q win -> Qwen" in messages[3]["content"]
-    assert "- murmer -> murmur" in messages[3]["content"]
+
+
+def test_llm_post_processor_appends_vocab_only_to_system_message():
+    processor = LLMPostProcessor(
+        client=object(), user_vocab={"q win": "Qwen", "murmer": "murmur"}
+    )
+
+    messages = processor.build_messages("  raw transcript  ")
+
+    assert messages[0]["content"] == (
+        f"{DEFAULT_SYSTEM_PROMPT}\n\nAdditional user vocabulary:\n"
+        "- q win -> Qwen\n- murmer -> murmur"
+    )
+    assert messages[1:-1] == FEW_SHOT_MESSAGES
+    assert messages[-1] == {"role": "user", "content": "raw transcript"}
+
+
+def test_llm_post_processor_context_budget_boundary():
+    max_tokens = 256
+    at_limit = [{"role": "user", "content": "a" * ((3686 - max_tokens) * 4)}]
+    over_limit = [{"role": "user", "content": at_limit[0]["content"] + "a"}]
+
+    assert LLMPostProcessor._estimate_tokens(at_limit) == 3686 - max_tokens
+    assert LLMPostProcessor._fits_context(at_limit, max_tokens) is True
+    assert LLMPostProcessor._fits_context(over_limit, max_tokens) is False
+
+
+def test_llm_post_processor_skips_oversize_input_without_calling_client(capsys):
+    private_text = "private dictated phrase " * 1000
+    fake_client = FakeOllamaPackageClient({"response": "ignored"})
+    processor = LLMPostProcessor(
+        client=OllamaClient(
+            endpoint="http://localhost:11434",
+            model_name=MODEL_NAME,
+            client=fake_client,
+        )
+    )
+
+    assert processor.process(private_text) == private_text.strip()
+    assert fake_client.calls == []
+    stdout = capsys.readouterr().out
+    assert (
+        "cleanup skipped because the estimated request exceeded the context budget"
+        in stdout
+    )
+    assert "private dictated phrase" not in stdout
 
 
 def test_llm_post_processor_returns_original_text_on_failure():

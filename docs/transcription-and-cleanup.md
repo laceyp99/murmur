@@ -73,6 +73,16 @@ to load it into memory; it does not download a missing model. If the client
 cannot be built, the request fails, or the response fails the acceptance gate,
 the local cleanup result is returned.
 
+All configured models receive the same request profile: thinking disabled,
+`num_ctx=4096`, temperature `0`, and a 10-minute keep-alive.
+
+Before sending a request, murmur conservatively estimates the complete message
+token count as the larger of words divided by `0.75` or characters divided by
+`4`, rounded up. It also reserves the configured output allowance and keeps 10%
+of the context unused. Requests that exceed that budget bypass Ollama and return
+the locally cleaned transcript. This fallback emits a content-safe operational
+log message without transcript text or a desktop warning.
+
 ```mermaid
 flowchart TB
     RawText["Joined transcript text"] --> LocalCleanup["Local cleanup<br/>spacing, punctuation, capitalization"]
@@ -84,7 +94,9 @@ flowchart TB
     BuildProcessor --> Available{"Processor available?"}
     Available -->|no| ReturnLocal
     Available -->|yes| BuildMessages["Build system, examples, vocab, transcript prompt"]
-    BuildMessages --> Ollama["Ollama chat request"]
+    BuildMessages --> Budget{"Fits context budget?"}
+    Budget -->|no| ReturnLocal
+    Budget -->|yes| Ollama["Ollama chat request"]
     Ollama --> Normalize["Normalize model output"]
     Normalize --> Gate{"Acceptable output?"}
     Gate -->|yes| ReturnLLM["Return LLM cleaned text"]

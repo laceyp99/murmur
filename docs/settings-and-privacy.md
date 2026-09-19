@@ -81,7 +81,7 @@ The current default values are:
   "logging_consent_source": null,
   "ollama_enabled": true,
   "ollama_endpoint": "http://localhost:11434",
-  "ollama_model_name": "granite4.1:3b",
+  "ollama_model_name": "qwen3.5:4b",
   "ollama_timeout_seconds": 60,
   "ollama_preload_model": true
 }

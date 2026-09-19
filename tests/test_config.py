@@ -15,6 +15,7 @@ from src.config import (
 def test_config_defaults(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     cfg = Config()
+    assert DEFAULT_OLLAMA_MODEL_NAME == "qwen3.5:4b"
     assert cfg.ollama_enabled is True
     assert cfg.ollama_endpoint == "http://localhost:11434"
     assert cfg.ollama_model_name == DEFAULT_OLLAMA_MODEL_NAME
