@@ -60,7 +60,7 @@ record-transcribe-copy workflow. Install Ollama separately and pull the model
 matching the default settings:
 
 ```powershell
-ollama pull qwen3.5:4b-q4_K_M
+ollama pull qwen3.5:4b
 ```
 
 Start Ollama using its desktop service or with `ollama serve`. If the service,
