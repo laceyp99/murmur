@@ -202,6 +202,9 @@ class OverlayWindow:
         self._canvas.pack(fill="both", expand=True)
         window.update_idletasks()
         self._hwnd = _make_passive(window)
+        if sys.platform == "win32" and self._hwnd is None:
+            window.destroy()
+            raise RuntimeError("Could not make recording overlay passive")
         self._geometry = None
         self._visible = False
 

@@ -207,6 +207,53 @@ def test_window_creation_failure_logs_once_and_disables_overlay(capsys):
     assert "secret text" not in err
 
 
+def test_failed_passive_style_destroys_window_instead_of_showing_it(monkeypatch):
+    class FakeWindow:
+        destroyed = False
+
+        def withdraw(self):
+            pass
+
+        def overrideredirect(self, _value):
+            pass
+
+        def attributes(self, *_args):
+            pass
+
+        def configure(self, **_kwargs):
+            pass
+
+        def winfo_fpixels(self, _value):
+            return 96
+
+        def update_idletasks(self):
+            pass
+
+        def destroy(self):
+            self.destroyed = True
+
+    window = FakeWindow()
+
+    class FakeCanvas:
+        def pack(self, **_kwargs):
+            pass
+
+    monkeypatch.setattr(overlay_module.sys, "platform", "win32")
+    monkeypatch.setattr(overlay_module.tk, "Toplevel", lambda _master: window)
+    monkeypatch.setattr(overlay_module.tkfont, "Font", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        overlay_module.tk,
+        "Canvas",
+        lambda *_args, **_kwargs: FakeCanvas(),
+    )
+    monkeypatch.setattr(overlay_module, "_make_passive", lambda _window: None)
+
+    with pytest.raises(RuntimeError, match="passive"):
+        overlay_module.OverlayWindow(object())
+
+    assert window.destroyed is True
+
+
 def test_animation_failure_disables_and_destroys_window(capsys):
     overlay, master, views = make_overlay()
     overlay.request(RECORDING, session=1)

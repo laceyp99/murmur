@@ -513,9 +513,9 @@ def _run_settings_ui(return_focus=False):
         # Overlay-only startups fail quietly; dictation must not surface a
         # settings error the user never asked for.
         overlay_pending = any(request != _SHOW_SETTINGS_REQUEST for request in pending)
-        if _SHOW_SETTINGS_REQUEST in pending or not overlay_pending:
+        if _SHOW_SETTINGS_REQUEST in pending or not (return_focus or overlay_pending):
             _report_settings_ui_failure(failure)
-        if overlay_pending:
+        if return_focus or overlay_pending:
             _report_overlay_unavailable(failure)
 
 
@@ -1126,6 +1126,7 @@ class SettingsWindow:
             return
 
         old_autostart = self.config.start_with_windows
+        old_overlay_enabled = self.config.show_recording_overlay
         new_autostart = self.autostart_var.get()
         updated_values = {
             "hotkey": new_hotkey,
@@ -1161,6 +1162,9 @@ class SettingsWindow:
                 parent=self.root,
             )
             return
+
+        if old_overlay_enabled and not self.overlay_var.get():
+            close_overlay()
 
         self.logger.set_enabled(new_logging)
 

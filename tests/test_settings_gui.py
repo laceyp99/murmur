@@ -48,6 +48,7 @@ class FakeConfig:
     def __init__(self):
         self.enable_logging = False
         self.start_with_windows = False
+        self.show_recording_overlay = True
         self.set_calls = []
 
     def set(self, key, value):
@@ -235,6 +236,36 @@ def test_overlay_only_startup_failure_is_quiet_and_disables_overlay(
 
     assert started == []
     assert requests.empty()
+
+
+def test_overlay_startup_failure_before_request_is_quiet(monkeypatch, capsys):
+    requests = queue.Queue()
+    notifications = []
+    monkeypatch.setattr(settings_module, "_settings_requests", requests)
+    monkeypatch.setattr(
+        settings_module, "_settings_thread", settings_module.threading.current_thread()
+    )
+    monkeypatch.setattr(settings_module, "_overlay_unavailable", False)
+    monkeypatch.setattr(
+        settings_module, "_configure_windows_app_identity", lambda: None
+    )
+    monkeypatch.setattr(settings_module, "_configure_customtkinter", lambda: None)
+    monkeypatch.setattr(
+        settings_module.ctk,
+        "CTk",
+        lambda: (_ for _ in ()).throw(RuntimeError("Tk unavailable")),
+    )
+    monkeypatch.setattr(
+        settings_module,
+        "get_notification_manager",
+        lambda: SimpleNamespace(notify_error=notifications.append),
+    )
+
+    settings_module._run_settings_ui(return_focus=True)
+
+    assert notifications == []
+    assert settings_module._overlay_unavailable is True
+    assert "Recording overlay unavailable (RuntimeError)." in capsys.readouterr().err
 
 
 def test_ui_requests_route_to_settings_and_overlay():
@@ -541,6 +572,10 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     logger = FakeLogger()
     set_autostart_calls = []
     info_calls = []
+    close_calls = []
+    monkeypatch.setattr(
+        settings_module, "close_overlay", lambda: close_calls.append(True)
+    )
 
     monkeypatch.setattr(settings_module, "get_config", lambda: config)
     monkeypatch.setattr(settings_module, "get_logger", lambda: logger)
@@ -618,6 +653,7 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
         ("logging_consent_source", "settings"),
     ]
     assert logger.enabled_calls == [True]
+    assert close_calls == [True]
     assert set_autostart_calls == [True]
     assert len(info_calls) == 1
     assert "Device" in info_calls[0][0][1]
