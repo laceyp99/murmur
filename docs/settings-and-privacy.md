@@ -90,9 +90,7 @@ The current default values are:
 ```
 
 **Show recording overlay** and **Enable notifications** are independent. The
-overlay is on by default; Windows toast notifications are off by default. The
-toast default applies only to new or reset configs: a saved
-`"enable_notifications": true` keeps toasts on until it is changed in Settings.
+overlay is on by default; Windows toast notifications are off by default.
 Turning the overlay off suppresses every overlay state, including errors, while
 tray status and content-safe console messages remain.
 
