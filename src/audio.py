@@ -2,6 +2,7 @@
 Audio recording functionality for murmur.
 """
 
+import contextlib
 import threading
 import time
 from collections.abc import Callable
@@ -105,14 +106,35 @@ class AudioRecorder:
             self._block_callback_failed = False
             self._recording_limit_reached = False
 
-        self._stream = sd.InputStream(
-            samplerate=self.sample_rate,
-            channels=1,
-            dtype=np.float32,
-            callback=self._audio_callback,
-            blocksize=int(self.sample_rate * 0.1),  # 100ms blocks
-        )
-        self._stream.start()
+        # Stay marked as recording while the stream starts so early callback
+        # blocks are kept; roll back if the stream cannot be opened or started.
+        stream = None
+        try:
+            stream = sd.InputStream(
+                samplerate=self.sample_rate,
+                channels=1,
+                dtype=np.float32,
+                callback=self._audio_callback,
+                blocksize=int(self.sample_rate * 0.1),  # 100ms blocks
+            )
+            self._stream = stream
+            stream.start()
+        except Exception:
+            self._rollback_failed_start(stream)
+            raise
+
+    def _rollback_failed_start(self, stream) -> None:
+        """Close a partly opened stream and clear recording state."""
+        with self._lock:
+            self._recording = False
+            self._audio_data = []
+            self._recording_start = None
+
+        self._stream = None
+        if stream is not None:
+            # Preserve the original startup error if cleanup also fails.
+            with contextlib.suppress(Exception):
+                stream.close()
 
     def stop_recording(self) -> AudioData | None:
         """

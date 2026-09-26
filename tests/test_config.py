@@ -21,6 +21,33 @@ def test_config_defaults(tmp_path, monkeypatch):
     assert cfg.ollama_model_name == DEFAULT_OLLAMA_MODEL_NAME
     assert cfg.ollama_timeout_seconds == DEFAULT_OLLAMA_TIMEOUT_SECONDS
     assert cfg.ollama_preload_model is True
+    assert cfg.show_recording_overlay is True
+    assert cfg.enable_notifications is False
+
+
+def test_overlay_and_toast_settings_are_independent(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    cfg = Config()
+    cfg.update({"show_recording_overlay": False, "enable_notifications": True})
+
+    reloaded = Config()
+
+    assert reloaded.show_recording_overlay is False
+    assert reloaded.enable_notifications is True
+
+
+def test_saved_notification_choice_is_kept_without_migration(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    config_dir = tmp_path / config_module.APP_DIR_NAME
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps({"enable_notifications": True}), encoding="utf-8"
+    )
+
+    cfg = Config()
+
+    assert cfg.enable_notifications is True
+    assert cfg.show_recording_overlay is True
 
 
 def test_config_persistence(tmp_path, monkeypatch):

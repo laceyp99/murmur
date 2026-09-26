@@ -22,6 +22,7 @@ from .hotkey import is_hotkey_valid
 from .llm_postprocess import check_ollama_connection
 from .logger import get_logger
 from .notifications import get_notification_manager
+from .recording_overlay import RecordingOverlay
 from .settings_schema import (
     SETTINGS_BY_KEY,
     TAB_ORDER,
@@ -202,24 +203,89 @@ class _SettingsWindowService:
             self.window = None
 
 
+# The UI thread serves both the settings window and the recording overlay.
+_SHOW_SETTINGS_REQUEST = "show"
+_OVERLAY_REQUEST = "overlay"
+_CLOSE_OVERLAY_REQUEST = "overlay_close"
+_FOCUS_RECHECK_MS = 250
+
 _settings_requests = queue.Queue()
 _ollama_connection_test_results = queue.Queue()
 _settings_thread = None
 _settings_thread_lock = threading.Lock()
+_overlay_unavailable = False
 
 
 def _drain_settings_requests():
+    drained = []
     while True:
         try:
-            _settings_requests.get_nowait()
+            drained.append(_settings_requests.get_nowait())
         except queue.Empty:
-            return
+            return drained
 
 
 def _report_settings_ui_failure(exc):
     message = f"Failed to open settings: {exc}"
     print(message, file=sys.stderr)
     get_notification_manager().notify_error(message)
+
+
+def _report_overlay_unavailable(exc):
+    """Disable overlay requests after the UI thread cannot start for them."""
+    global _overlay_unavailable
+
+    if _overlay_unavailable:
+        return
+    _overlay_unavailable = True
+    print(
+        f"Recording overlay unavailable ({type(exc).__name__}).",
+        file=sys.stderr,
+    )
+
+
+def _foreground_window():
+    if sys.platform != "win32":
+        return None
+    try:
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        return user32.GetForegroundWindow()
+    except (AttributeError, OSError):
+        return None
+
+
+def _return_foreground(previous, root):
+    """Give focus back if creating the hidden root activated it.
+
+    CustomTkinter briefly maps a new root on Windows. Without this, starting the
+    UI thread for the overlay could pull focus from the app being dictated into.
+    Only the hidden root is checked, so a real Murmur window such as Settings
+    never has its focus taken away.
+    """
+    if not previous:
+        return
+    try:
+        user32 = ctypes.windll.user32
+        user32.IsWindow.argtypes = [wintypes.HWND]
+        user32.IsWindow.restype = wintypes.BOOL
+        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        user32.SetForegroundWindow.restype = wintypes.BOOL
+
+        root_window = int(root.wm_frame(), 16)
+        if _foreground_window() == root_window and user32.IsWindow(previous):
+            user32.SetForegroundWindow(previous)
+    except (AttributeError, OSError, ValueError, tk.TclError):
+        return
+
+
+def _process_ui_request(request, service, overlay):
+    if request == _SHOW_SETTINGS_REQUEST:
+        service.show()
+    elif request == _CLOSE_OVERLAY_REQUEST:
+        overlay.close()
+    elif isinstance(request, tuple) and request[0] == _OVERLAY_REQUEST:
+        overlay.request(*request[1:])
 
 
 def _configure_customtkinter():
@@ -397,17 +463,25 @@ def _destroy_native_icons(native_icons):
         return
 
 
-def _run_settings_ui():
+def _run_settings_ui(return_focus=False):
     global _settings_thread
 
     failure = None
+    pending = []
     try:
         _configure_windows_app_identity()
         _configure_customtkinter()
+        previous_foreground = _foreground_window() if return_focus else None
         root = ctk.CTk()
         root._murmur_window_icon = _apply_window_icon(root)
         root.withdraw()
+        if previous_foreground:
+            _return_foreground(previous_foreground, root)
+            # Check again once the main loop runs, in case activation came late
+            # or the first hand-back did not take effect.
+            root.after(_FOCUS_RECHECK_MS, _return_foreground, previous_foreground, root)
         service = _SettingsWindowService(root)
+        overlay = RecordingOverlay(root)
 
         def process_requests():
             try:
@@ -417,8 +491,7 @@ def _run_settings_ui():
                     except queue.Empty:
                         break
 
-                    if request == "show":
-                        service.show()
+                    _process_ui_request(request, service, overlay)
             except Exception as exc:
                 messagebox.showerror(
                     _APP_DISPLAY_NAME, f"Failed to open settings: {exc}"
@@ -434,13 +507,24 @@ def _run_settings_ui():
         with _settings_thread_lock:
             if _settings_thread is threading.current_thread():
                 _settings_thread = None
-                _drain_settings_requests()
+                pending = _drain_settings_requests()
 
     if failure is not None:
-        _report_settings_ui_failure(failure)
+        # Overlay-only startups fail quietly; dictation must not surface a
+        # settings error the user never asked for.
+        overlay_pending = any(request != _SHOW_SETTINGS_REQUEST for request in pending)
+        if _SHOW_SETTINGS_REQUEST in pending or not (return_focus or overlay_pending):
+            _report_settings_ui_failure(failure)
+        if return_focus or overlay_pending:
+            _report_overlay_unavailable(failure)
 
 
-def _ensure_settings_ui_thread():
+def _ensure_settings_ui_thread(return_focus=False):
+    """Start the shared UI thread if needed.
+
+    ``return_focus`` hands focus back after the hidden root starts, for
+    background callers such as the overlay; a settings click keeps focus.
+    """
     global _settings_thread
 
     with _settings_thread_lock:
@@ -450,6 +534,7 @@ def _ensure_settings_ui_thread():
         _drain_settings_requests()
         _settings_thread = threading.Thread(
             target=_run_settings_ui,
+            args=(return_focus,),
             name="MurmurSettingsUI",
             daemon=True,
         )
@@ -545,6 +630,9 @@ class SettingsWindow:
         self.notify_var = tk.BooleanVar(
             master=self.root, value=self.config.enable_notifications
         )
+        self.overlay_var = tk.BooleanVar(
+            master=self.root, value=self.config.show_recording_overlay
+        )
         self.logging_var = tk.BooleanVar(
             master=self.root, value=self.config.enable_logging
         )
@@ -573,6 +661,7 @@ class SettingsWindow:
                 "device": self.device_var,
                 "language": self.lang_var,
                 "enable_notifications": self.notify_var,
+                "show_recording_overlay": self.overlay_var,
                 "enable_logging": self.logging_var,
                 "start_with_windows": self.autostart_var,
                 "pause_media_while_recording": self.pause_media_var,
@@ -585,11 +674,12 @@ class SettingsWindow:
 
         general = tab_contents["General"]
         self._add_text_row(general, 0, "Hotkey", self.hotkey_var)
-        self._add_switch(general, 1, "Enable notifications", self.notify_var)
-        self._add_switch(general, 2, "Start with Windows", self.autostart_var)
+        self._add_switch(general, 1, "Show recording overlay", self.overlay_var)
+        self._add_switch(general, 2, "Enable notifications", self.notify_var)
+        self._add_switch(general, 3, "Start with Windows", self.autostart_var)
         self._add_switch(
             general,
-            3,
+            4,
             "Pause media while recording",
             self.pause_media_var,
         )
@@ -1036,6 +1126,7 @@ class SettingsWindow:
             return
 
         old_autostart = self.config.start_with_windows
+        old_overlay_enabled = self.config.show_recording_overlay
         new_autostart = self.autostart_var.get()
         updated_values = {
             "hotkey": new_hotkey,
@@ -1043,6 +1134,7 @@ class SettingsWindow:
             "device": normalize_value(self.device_var.get(), SETTINGS_BY_KEY["device"]),
             "language": lang,
             "enable_notifications": self.notify_var.get(),
+            "show_recording_overlay": self.overlay_var.get(),
             "enable_logging": new_logging,
             "start_with_windows": new_autostart,
             "pause_media_while_recording": self.pause_media_var.get(),
@@ -1070,6 +1162,9 @@ class SettingsWindow:
                 parent=self.root,
             )
             return
+
+        if old_overlay_enabled and not self.overlay_var.get():
+            close_overlay()
 
         self.logger.set_enabled(new_logging)
 
@@ -1137,4 +1232,27 @@ class SettingsWindow:
 def show_settings():
     """Request the settings window from the persistent CustomTk UI thread."""
     _ensure_settings_ui_thread()
-    _settings_requests.put("show")
+    _settings_requests.put(_SHOW_SETTINGS_REQUEST)
+
+
+def request_overlay_state(state, session=None, message=""):
+    """Queue a recording overlay state without blocking the caller.
+
+    Safe to call from any thread. Failures stay inside the overlay so capture
+    and finalization continue unaffected.
+    """
+    if _overlay_unavailable:
+        return
+    try:
+        _ensure_settings_ui_thread(return_focus=True)
+        _settings_requests.put((_OVERLAY_REQUEST, state, session, message))
+    except Exception as exc:
+        _report_overlay_unavailable(exc)
+
+
+def close_overlay():
+    """Hide and release the overlay window if the UI thread is running."""
+    with _settings_thread_lock:
+        if _settings_thread is None or not _settings_thread.is_alive():
+            return
+        _settings_requests.put(_CLOSE_OVERLAY_REQUEST)

@@ -19,6 +19,7 @@ flowchart LR
     AppStart --> LiveWorker["Start live transcription worker"]
     AppStart --> LiveVad["Start live VAD worker"]
     AppStart --> Recorder["AudioRecorder starts capture"]
+    Recorder -->|stream started| OverlayRecording["Optional overlay: recording bars"]
 
     Recorder --> Blocks["100 ms float32 audio blocks"]
     Blocks --> FullBuffer["Full recording buffer"]
@@ -31,6 +32,7 @@ flowchart LR
 
     HotkeyStop["Stop hotkey"] --> AppStop["MurmurApp._on_recording_stop"]
     AppStop --> StopRecorder["Stop recorder and return AudioData"]
+    StopRecorder --> OverlayProcessing["Optional overlay: processing loader"]
     StopRecorder --> StopLive["Stop and drain live workers"]
     StopLive --> LiveDecision{"Live path healthy and non-empty?"}
     Accumulator --> LiveDecision
@@ -46,6 +48,7 @@ flowchart LR
     LiveCleanup --> Clipboard["Copy final text to clipboard"]
     OfflineCleanup --> Clipboard
     Clipboard --> Notify["Notify user, print metrics, optionally log"]
+    Clipboard --> OverlayResult["Optional overlay: copied or short error"]
 ```
 
 ## Main Concepts
@@ -100,6 +103,30 @@ The recorder's full buffer is held in memory until finalization. It is not saved
 to disk unless opt-in training-data logging is enabled and non-empty final text
 is produced.
 
+### Recording overlay
+
+When **Show recording overlay** is on, a small dark pill above the primary
+display's taskbar mirrors the session. It is status feedback only: it never
+shows transcript text, reads no audio levels, takes no focus, and passes clicks
+through to the app underneath.
+
+| Session moment | Overlay |
+| --- | --- |
+| Input stream started successfully | Three gently pulsing bars |
+| Capture stopped by hotkey or maximum duration | Icon-only loading spinner |
+| Final text copied to the clipboard | Checkmark and `Copied to clipboard`, hidden after about 2 seconds |
+| Start failure, no audio, no speech, transcription failure, or clipboard failure | Warning symbol and a fixed short message, hidden after about 4 seconds |
+
+The recording bars appear only after `AudioRecorder` has started the input
+stream; a failed start shows the error instead. Requests carry a session number
+so a late event from an earlier session cannot hide or replace a newer one.
+
+The overlay is drawn on the same persistent CustomTkinter UI thread as the
+settings window, and `MurmurApp` only queues requests to it. Any overlay failure
+is contained there and logged once without content, so capture, fallback,
+cleanup, and clipboard output continue unchanged. Optional media pause/resume
+warnings stay in the tray status and console rather than the overlay.
+
 ## Implementation Map
 
 | Stage | Primary code | Notes |
@@ -112,3 +139,4 @@ is produced.
 | Whisper transcription | [`src/transcription.py`](https://github.com/laceyp99/murmur/blob/main/src/transcription.py) | Loads Whisper, normalizes audio, transcribes segments. |
 | LLM cleanup | [`src/llm_postprocess.py`](https://github.com/laceyp99/murmur/blob/main/src/llm_postprocess.py) | Optional Ollama pass with conservative acceptance checks. |
 | Delivery and persistence | [`src/main.py`](https://github.com/laceyp99/murmur/blob/main/src/main.py) | Copies text, reports the result, and invokes opt-in logging. |
+| Recording overlay | [`src/recording_overlay.py`](https://github.com/laceyp99/murmur/blob/main/src/recording_overlay.py) | Passive status pill; state requests are queued through `src/settings_gui.py`. |

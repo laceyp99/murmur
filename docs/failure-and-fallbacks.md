@@ -82,7 +82,8 @@ chances to produce useful text:
 ## Clipboard And Logging Outcomes
 
 Finalization can still succeed even if clipboard copy fails. In that case,
-murmur reports the copy failure. The logger runs after the clipboard attempt, so
+murmur reports the copy failure in the console, the optional recording overlay,
+and optional toast notifications. The logger runs after the clipboard attempt, so
 if training data logging is enabled and the log write succeeds, the transcript
 and source audio are still saved locally in the opt-in training-data area.
 

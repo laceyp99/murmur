@@ -34,6 +34,13 @@ def test_tabs_have_expected_order_and_settings():
         "LLM Cleanup",
         "Data Privacy",
     )
+    assert [setting.key for setting in settings_for_tab("General")] == [
+        "hotkey",
+        "enable_notifications",
+        "show_recording_overlay",
+        "start_with_windows",
+        "pause_media_while_recording",
+    ]
     assert [setting.key for setting in settings_for_tab("VAD")] == [
         "vad_aggressiveness",
         "vad_padding_ms",

@@ -28,7 +28,8 @@ DEFAULT_CONFIG = {
     "vad_silence_duration_ms": 400,
     "max_recording_duration": 300,
     "enable_logging": False,
-    "enable_notifications": True,
+    "enable_notifications": False,
+    "show_recording_overlay": True,
     "start_with_windows": True,
     "pause_media_while_recording": True,
     "logging_consent_updated_at": None,
@@ -218,7 +219,12 @@ class Config:
     @property
     def enable_notifications(self) -> bool:
         """Get the notifications setting."""
-        return self.get("enable_notifications", True)
+        return self.get("enable_notifications", False)
+
+    @property
+    def show_recording_overlay(self) -> bool:
+        """Get the on-screen recording overlay setting."""
+        return self.get("show_recording_overlay", True)
 
     @property
     def start_with_windows(self) -> bool:
