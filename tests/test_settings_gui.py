@@ -258,6 +258,47 @@ def test_ui_requests_route_to_settings_and_overlay():
     ]
 
 
+class FakeUser32:
+    """Plain functions, like ctypes ones, accept argtypes/restype attributes."""
+
+    def __init__(self, live_windows):
+        self.foreground_requests = []
+
+        def is_window(hwnd):
+            return hwnd in live_windows
+
+        def set_foreground_window(hwnd):
+            self.foreground_requests.append(hwnd)
+            return True
+
+        self.IsWindow = is_window
+        self.SetForegroundWindow = set_foreground_window
+
+
+@pytest.mark.parametrize(
+    ("foreground", "live_windows", "expected"),
+    [
+        (0x100, {0x200}, [0x200]),  # hidden root took focus: hand it back
+        (0x300, {0x200}, []),  # another Murmur window (e.g. Settings) keeps focus
+        (0x200, {0x200}, []),  # focus never moved
+        (0x100, set(), []),  # previous window closed meanwhile
+    ],
+)
+def test_return_foreground_only_undoes_hidden_root_activation(
+    monkeypatch, foreground, live_windows, expected
+):
+    user32 = FakeUser32(live_windows)
+    monkeypatch.setattr(
+        settings_module.ctypes, "windll", SimpleNamespace(user32=user32), raising=False
+    )
+    monkeypatch.setattr(settings_module, "_foreground_window", lambda: foreground)
+    root = SimpleNamespace(wm_frame=lambda: "0x100")
+
+    settings_module._return_foreground(0x200, root)
+
+    assert user32.foreground_requests == expected
+
+
 def test_close_overlay_does_not_start_ui_thread(monkeypatch):
     requests = queue.Queue()
     monkeypatch.setattr(settings_module, "_settings_requests", requests)

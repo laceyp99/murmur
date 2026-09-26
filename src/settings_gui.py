@@ -3,7 +3,6 @@
 import contextlib
 import ctypes
 import math
-import os
 import queue
 import sys
 import threading
@@ -208,6 +207,7 @@ class _SettingsWindowService:
 _SHOW_SETTINGS_REQUEST = "show"
 _OVERLAY_REQUEST = "overlay"
 _CLOSE_OVERLAY_REQUEST = "overlay_close"
+_FOCUS_RECHECK_MS = 250
 
 _settings_requests = queue.Queue()
 _ollama_connection_test_results = queue.Queue()
@@ -255,32 +255,27 @@ def _foreground_window():
         return None
 
 
-def _return_foreground(previous):
+def _return_foreground(previous, root):
     """Give focus back if creating the hidden root activated it.
 
     CustomTkinter briefly maps a new root on Windows. Without this, starting the
     UI thread for the overlay could pull focus from the app being dictated into.
+    Only the hidden root is checked, so a real Murmur window such as Settings
+    never has its focus taken away.
     """
     if not previous:
         return
     try:
         user32 = ctypes.windll.user32
-        user32.GetWindowThreadProcessId.argtypes = [
-            wintypes.HWND,
-            ctypes.POINTER(wintypes.DWORD),
-        ]
-        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        user32.IsWindow.argtypes = [wintypes.HWND]
+        user32.IsWindow.restype = wintypes.BOOL
         user32.SetForegroundWindow.argtypes = [wintypes.HWND]
         user32.SetForegroundWindow.restype = wintypes.BOOL
 
-        current = _foreground_window()
-        if not current or current == previous:
-            return
-        process_id = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(current, ctypes.byref(process_id))
-        if process_id.value == os.getpid():
+        root_window = int(root.wm_frame(), 16)
+        if _foreground_window() == root_window and user32.IsWindow(previous):
             user32.SetForegroundWindow(previous)
-    except (AttributeError, OSError):
+    except (AttributeError, OSError, ValueError, tk.TclError):
         return
 
 
@@ -480,7 +475,11 @@ def _run_settings_ui(return_focus=False):
         root = ctk.CTk()
         root._murmur_window_icon = _apply_window_icon(root)
         root.withdraw()
-        _return_foreground(previous_foreground)
+        if previous_foreground:
+            _return_foreground(previous_foreground, root)
+            # Check again once the main loop runs, in case activation came late
+            # or the first hand-back did not take effect.
+            root.after(_FOCUS_RECHECK_MS, _return_foreground, previous_foreground, root)
         service = _SettingsWindowService(root)
         overlay = RecordingOverlay(root)
 
