@@ -154,9 +154,119 @@ def test_next_settings_click_discards_stale_requests_and_queues_one(monkeypatch)
     assert len(thread_starts) == 1
     assert thread_starts[0].kwargs == {
         "target": settings_module._run_settings_ui,
+        "args": (False,),
         "name": "MurmurSettingsUI",
         "daemon": True,
     }
+
+
+def test_overlay_request_starts_ui_thread_and_queues_state(monkeypatch):
+    requests = queue.Queue()
+    thread_starts = []
+
+    class FakeThread:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def is_alive(self):
+            return True
+
+        def start(self):
+            thread_starts.append(self)
+
+    monkeypatch.setattr(settings_module, "_settings_requests", requests)
+    monkeypatch.setattr(settings_module, "_settings_thread", None)
+    monkeypatch.setattr(settings_module, "_overlay_unavailable", False)
+    monkeypatch.setattr(settings_module.threading, "Thread", FakeThread)
+
+    settings_module.request_overlay_state("recording", session=4)
+    settings_module.request_overlay_state("processing", session=4)
+
+    assert len(thread_starts) == 1
+    # Background overlay starts hand focus back to the app being dictated into.
+    assert thread_starts[0].kwargs["args"] == (True,)
+    assert requests.get_nowait() == ("overlay", "recording", 4, "")
+    assert requests.get_nowait() == ("overlay", "processing", 4, "")
+
+
+def test_overlay_only_startup_failure_is_quiet_and_disables_overlay(
+    monkeypatch, capsys
+):
+    requests = queue.Queue()
+    requests.put(("overlay", "recording", 1, ""))
+    notifications = []
+
+    monkeypatch.setattr(settings_module, "_settings_requests", requests)
+    monkeypatch.setattr(
+        settings_module, "_settings_thread", settings_module.threading.current_thread()
+    )
+    monkeypatch.setattr(settings_module, "_overlay_unavailable", False)
+    monkeypatch.setattr(
+        settings_module, "_configure_windows_app_identity", lambda: None
+    )
+    monkeypatch.setattr(settings_module, "_configure_customtkinter", lambda: None)
+    monkeypatch.setattr(
+        settings_module.ctk,
+        "CTk",
+        lambda: (_ for _ in ()).throw(RuntimeError("Tk unavailable")),
+    )
+    monkeypatch.setattr(
+        settings_module,
+        "get_notification_manager",
+        lambda: SimpleNamespace(notify_error=notifications.append),
+    )
+
+    settings_module._run_settings_ui()
+
+    assert notifications == []
+    assert settings_module._overlay_unavailable is True
+    assert requests.empty()
+    err = capsys.readouterr().err
+    assert "Recording overlay unavailable (RuntimeError)." in err
+    assert "Failed to open settings" not in err
+
+    started = []
+    monkeypatch.setattr(
+        settings_module,
+        "_ensure_settings_ui_thread",
+        lambda **kwargs: started.append(kwargs),
+    )
+    settings_module.request_overlay_state("processing", session=1)
+
+    assert started == []
+    assert requests.empty()
+
+
+def test_ui_requests_route_to_settings_and_overlay():
+    calls = []
+    service = SimpleNamespace(show=lambda: calls.append("settings"))
+    overlay = SimpleNamespace(
+        request=lambda *args: calls.append(("overlay", *args)),
+        close=lambda: calls.append("close"),
+    )
+
+    settings_module._process_ui_request("show", service, overlay)
+    settings_module._process_ui_request(
+        ("overlay", "error", 2, "No speech detected"), service, overlay
+    )
+    settings_module._process_ui_request("overlay_close", service, overlay)
+
+    assert calls == [
+        "settings",
+        ("overlay", "error", 2, "No speech detected"),
+        "close",
+    ]
+
+
+def test_close_overlay_does_not_start_ui_thread(monkeypatch):
+    requests = queue.Queue()
+    monkeypatch.setattr(settings_module, "_settings_requests", requests)
+    monkeypatch.setattr(settings_module, "_settings_thread", None)
+
+    settings_module.close_overlay()
+
+    assert requests.empty()
+    assert settings_module._settings_thread is None
 
 
 def test_settings_window_service_focuses_existing_window_and_recreates_closed(
