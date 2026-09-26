@@ -538,6 +538,7 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     window.device_var = FakeValue("cpu")
     window.lang_var = FakeValue("")
     window.notify_var = FakeValue(True)
+    window.overlay_var = FakeValue(False)
     window.logging_var = FakeValue(True)
     window.pause_media_var = FakeValue(False)
     window.autostart_var = FakeValue(True)
@@ -559,6 +560,7 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
         ("device", "cpu"),
         ("language", None),
         ("enable_notifications", True),
+        ("show_recording_overlay", False),
         ("enable_logging", True),
         ("start_with_windows", True),
         ("pause_media_while_recording", False),
@@ -615,6 +617,7 @@ def test_save_rejects_invalid_hotkey_without_persisting_changes(monkeypatch):
     window.device_var = FakeValue("cpu")
     window.lang_var = FakeValue("")
     window.notify_var = FakeValue(True)
+    window.overlay_var = FakeValue(True)
     window.logging_var = FakeValue(False)
     window.pause_media_var = FakeValue(True)
     window.autostart_var = FakeValue(False)
@@ -662,6 +665,7 @@ def test_save_rejects_non_numeric_setting_and_restores_persisted_value(monkeypat
     window.device_var = FakeValue("cpu")
     window.lang_var = FakeValue("")
     window.notify_var = FakeValue(True)
+    window.overlay_var = FakeValue(True)
     window.logging_var = FakeValue(False)
     window.pause_media_var = FakeValue(True)
     window.autostart_var = FakeValue(False)
@@ -708,6 +712,7 @@ def test_save_rejects_non_finite_numeric_setting(monkeypatch):
     window.device_var = FakeValue("cpu")
     window.lang_var = FakeValue("")
     window.notify_var = FakeValue(True)
+    window.overlay_var = FakeValue(True)
     window.logging_var = FakeValue(False)
     window.pause_media_var = FakeValue(True)
     window.autostart_var = FakeValue(False)
@@ -762,6 +767,7 @@ def test_save_rejects_blank_ollama_settings_when_cleanup_enabled(
     window.device_var = FakeValue("cpu")
     window.lang_var = FakeValue("")
     window.notify_var = FakeValue(True)
+    window.overlay_var = FakeValue(True)
     window.logging_var = FakeValue(False)
     window.pause_media_var = FakeValue(True)
     window.autostart_var = FakeValue(False)
@@ -877,6 +883,7 @@ def test_save_accepts_supported_or_auto_detect_language(monkeypatch, language):
     window.device_var = FakeValue("cpu")
     window.lang_var = FakeValue(language)
     window.notify_var = FakeValue(True)
+    window.overlay_var = FakeValue(True)
     window.logging_var = FakeValue(False)
     window.pause_media_var = FakeValue(True)
     window.autostart_var = FakeValue(False)

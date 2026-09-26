@@ -62,6 +62,14 @@ SETTINGS: tuple[SettingMetadata, ...] = (
         default=DEFAULT_CONFIG["enable_notifications"],
     ),
     SettingMetadata(
+        key="show_recording_overlay",
+        label="Show recording overlay",
+        tab="General",
+        control="bool",
+        value_type="bool",
+        default=DEFAULT_CONFIG["show_recording_overlay"],
+    ),
+    SettingMetadata(
         key="start_with_windows",
         label="Start with Windows",
         tab="General",

@@ -165,13 +165,21 @@ registration failure stops startup.
 
 1. Wait for the murmur icon in the Windows system tray.
 2. Press `Ctrl+Shift+Space` (or the configured hotkey) to start recording.
+   Once the microphone stream starts, a small pill with three pulsing bars
+   appears above the taskbar on the primary display. If the microphone cannot
+   start, the pill shows a short error instead.
 3. Speak normally. murmur captures 100 ms recorder blocks and processes sealed
    speech segments in background workers.
 4. Press the hotkey again to stop, or let the configured maximum duration stop
-   capture.
+   capture. The pill switches to a loading spinner.
 5. Wait for the final VAD flush, queued live transcription, cleanup, and
-   clipboard copy.
+   clipboard copy. The pill shows `Copied to clipboard` for about 2 seconds, or
+   a short error such as `No speech detected` for about 4 seconds.
 6. Paste with `Ctrl+V` in the target application.
+
+The overlay never takes focus and clicks pass through it. Turn it off with
+**Settings > General > Show recording overlay**. Windows toast notifications are
+off by default and can be enabled separately with **Enable notifications**.
 
 Silence closes VAD segments; it does not stop the overall recording. The stop
 path uses the accumulated live text when healthy. If live processing is empty

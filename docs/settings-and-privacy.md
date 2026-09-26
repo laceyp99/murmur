@@ -3,7 +3,8 @@
 murmur exposes user-facing settings through the **Settings** item in the
 system-tray menu. The window is owned by a persistent CustomTkinter UI thread;
 the tray callback places a request on that thread instead of creating a second
-independent UI loop.
+independent UI loop. The same thread draws the optional
+[recording overlay](pipeline.md#recording-overlay).
 
 ## Settings workflow
 
@@ -37,7 +38,7 @@ flowchart LR
 
 | Tab | Controls | Runtime effect |
 | --- | --- | --- |
-| General | Hotkey, notifications, Windows startup, media pause | Hotkey registration and cached recorder/transcriber state are refreshed on restart; notifications, media pause, and startup settings are handled by the save path. |
+| General | Hotkey, recording overlay, notifications, Windows startup, media pause | Hotkey registration and cached recorder/transcriber state are refreshed on restart; the overlay, notifications, media pause, and startup settings apply without a restart. |
 | VAD | Aggressiveness, speech padding, silence-to-stop duration | Applied to the VAD workers created for recordings; the UI requests a restart after changes. |
 | Transcription | Whisper model, device, language, maximum recording duration | Used by startup-created recorder/transcriber components; restart after changes. |
 | LLM Cleanup | Enablement, endpoint, model, timeout, preload, connection test | The final pass is optional; endpoint/model/preload changes require restart according to the UI notice. |
@@ -74,7 +75,8 @@ The current default values are:
   "vad_silence_duration_ms": 400,
   "max_recording_duration": 300,
   "enable_logging": false,
-  "enable_notifications": true,
+  "enable_notifications": false,
+  "show_recording_overlay": true,
   "start_with_windows": true,
   "pause_media_while_recording": true,
   "logging_consent_updated_at": null,
@@ -86,6 +88,13 @@ The current default values are:
   "ollama_preload_model": true
 }
 ```
+
+**Show recording overlay** and **Enable notifications** are independent. The
+overlay is on by default; Windows toast notifications are off by default. The
+toast default applies only to new or reset configs: a saved
+`"enable_notifications": true` keeps toasts on until it is changed in Settings.
+Turning the overlay off suppresses every overlay state, including errors, while
+tray status and content-safe console messages remain.
 
 The settings save operation writes a temporary file and replaces the config
 atomically. Windows autostart is stored in the current user's
@@ -149,6 +158,8 @@ text.
 
 - [`src/settings_gui.py`](https://github.com/laceyp99/murmur/blob/main/src/settings_gui.py): UI thread, validation, save,
   connection test, and deletion workflow.
+- [`src/recording_overlay.py`](https://github.com/laceyp99/murmur/blob/main/src/recording_overlay.py): recording
+  overlay states, timers, and window.
 - [`src/settings_schema.py`](https://github.com/laceyp99/murmur/blob/main/src/settings_schema.py): tabs, defaults,
   bounds, and restart metadata.
 - [`src/config.py`](https://github.com/laceyp99/murmur/blob/main/src/config.py): config path, defaults, recovery, and

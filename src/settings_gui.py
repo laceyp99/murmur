@@ -631,6 +631,9 @@ class SettingsWindow:
         self.notify_var = tk.BooleanVar(
             master=self.root, value=self.config.enable_notifications
         )
+        self.overlay_var = tk.BooleanVar(
+            master=self.root, value=self.config.show_recording_overlay
+        )
         self.logging_var = tk.BooleanVar(
             master=self.root, value=self.config.enable_logging
         )
@@ -659,6 +662,7 @@ class SettingsWindow:
                 "device": self.device_var,
                 "language": self.lang_var,
                 "enable_notifications": self.notify_var,
+                "show_recording_overlay": self.overlay_var,
                 "enable_logging": self.logging_var,
                 "start_with_windows": self.autostart_var,
                 "pause_media_while_recording": self.pause_media_var,
@@ -671,11 +675,12 @@ class SettingsWindow:
 
         general = tab_contents["General"]
         self._add_text_row(general, 0, "Hotkey", self.hotkey_var)
-        self._add_switch(general, 1, "Enable notifications", self.notify_var)
-        self._add_switch(general, 2, "Start with Windows", self.autostart_var)
+        self._add_switch(general, 1, "Show recording overlay", self.overlay_var)
+        self._add_switch(general, 2, "Enable notifications", self.notify_var)
+        self._add_switch(general, 3, "Start with Windows", self.autostart_var)
         self._add_switch(
             general,
-            3,
+            4,
             "Pause media while recording",
             self.pause_media_var,
         )
@@ -1129,6 +1134,7 @@ class SettingsWindow:
             "device": normalize_value(self.device_var.get(), SETTINGS_BY_KEY["device"]),
             "language": lang,
             "enable_notifications": self.notify_var.get(),
+            "show_recording_overlay": self.overlay_var.get(),
             "enable_logging": new_logging,
             "start_with_windows": new_autostart,
             "pause_media_while_recording": self.pause_media_var.get(),

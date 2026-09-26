@@ -34,6 +34,7 @@ Then open [http://127.0.0.1:8000/](http://127.0.0.1:8000/).
 - **Lower Stop Latency** - Starts serial Whisper work before you release the hotkey
 - **Clipboard Integration** - Copies the final transcription automatically
 - **Auto-Pause Media** - Pauses playing media during recording
+- **Recording Overlay** - A small click-through pill shows recording, processing, and the result
 - **System Tray** - Runs in the background with a status icon
 - **Settings GUI** - Configure hotkey, model, and auto-start
 - **Training Data Logging** - Optional local-only audio/transcript capture

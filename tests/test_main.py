@@ -11,6 +11,20 @@ MurmurApp = main_module.MurmurApp
 VADSettings = main_module.VADSettings
 
 
+@pytest.fixture(autouse=True)
+def overlay_calls(monkeypatch):
+    """Capture overlay requests so tests never start the real Tk UI thread."""
+    settings_gui = pytest.importorskip("src.settings_gui")
+    calls = []
+    monkeypatch.setattr(
+        settings_gui,
+        "request_overlay_state",
+        lambda state, session=None, message="": calls.append((state, session, message)),
+    )
+    monkeypatch.setattr(settings_gui, "close_overlay", lambda: calls.append("close"))
+    return calls
+
+
 class FakeSegmenter:
     def __init__(self, segments=None, error=None, sample_rate=16000):
         self.sample_rate = sample_rate
@@ -74,6 +88,7 @@ class FakeConfig:
     ollama_enabled = False
     ollama_preload_model = True
     start_with_windows = False
+    show_recording_overlay = True
 
 
 def make_app(segmenter, transcriber, config=None):
@@ -980,6 +995,7 @@ def test_recording_limit_handler_notifies_and_uses_stop_flow():
 
 def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
     monkeypatch,
+    overlay_calls,
 ):
     fake_sd = SimpleNamespace(streams=[], fail_next_start=True)
 
@@ -994,6 +1010,7 @@ def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
                 fake_sd.fail_next_start = False
                 raise OSError("device busy")
             self.started = True
+            overlay_calls.append("stream-started")
 
         def close(self):
             self.closed = True
@@ -1029,6 +1046,8 @@ def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
     assert app.tray.statuses[-1] == "Error"
     assert app.hotkey_manager.idle_calls == 1
     assert live_calls == ["transcription", "segmentation"]
+    # A failed start shows the capture error and never the recording pulse.
+    assert overlay_calls == [("error", 1, "Couldn't start recording")]
 
     app._on_recording_start()
 
@@ -1037,6 +1056,8 @@ def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
     assert app.recorder.is_recording() is True
     assert app.tray.statuses[-1] == "Recording..."
     assert app.hotkey_manager.idle_calls == 1
+    # The recording pulse is requested only after the input stream started.
+    assert overlay_calls[1:] == ["stream-started", ("recording", 2, "")]
 
 
 def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch):
@@ -1105,3 +1126,144 @@ def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch
     assert app.media_controller.play_calls == 1
     assert app.hotkey_manager.processing_calls == 1
     assert app.hotkey_manager.idle_calls == 1
+
+
+def make_stop_app(audio_data):
+    app = make_app(segmenter=None, transcriber=FakeTranscriber())
+    app.recorder = FakeRecorder(audio_data)
+    app.tray = FakeTray()
+    app.notifications = FakeNotifications()
+    app.logger = FakeLogger()
+    app.hotkey_manager = FakeHotkeyManager()
+    app.media_controller = FakeMediaController()
+    app._was_media_playing = False
+    app._overlay_session = 7
+    app._stop_live_segmentation = lambda: None
+    app._stop_live_transcription = lambda: None
+    return app
+
+
+def test_stop_shows_processing_then_copied(monkeypatch, overlay_calls):
+    app = make_stop_app(make_audio_data())
+    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: True)
+
+    app._on_recording_stop()
+
+    assert overlay_calls == [("processing", 7, ""), ("success", 7, "")]
+
+
+@pytest.mark.parametrize(
+    ("setup", "message"),
+    [
+        ("no_audio", "No audio captured"),
+        ("no_speech", "No speech detected"),
+        ("transcription_error", "Transcription failed"),
+        ("clipboard_error", "Couldn't copy to clipboard"),
+    ],
+)
+def test_stop_failures_show_fixed_error_without_transcript(
+    monkeypatch, overlay_calls, setup, message
+):
+    app = make_stop_app(None if setup == "no_audio" else make_audio_data())
+    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: False)
+    if setup == "no_speech":
+        monkeypatch.setattr(app, "_transcribe_audio", lambda audio_data: "")
+    elif setup == "transcription_error":
+
+        def fail(audio_data):
+            raise RuntimeError("private dictated text")
+
+        monkeypatch.setattr(app, "_transcribe_audio", fail)
+
+    app._on_recording_stop()
+
+    assert overlay_calls[-1] == ("error", 7, message)
+    expected_processing = [] if setup == "no_audio" else [("processing", 7, "")]
+    assert overlay_calls[:-1] == expected_processing
+    assert "Fallback text" not in repr(overlay_calls)
+    assert app.hotkey_manager.idle_calls == 1
+
+
+def test_live_finalization_error_reports_before_returning_to_idle(
+    monkeypatch, overlay_calls
+):
+    app = make_stop_app(make_audio_data())
+    app.live_transcript_accumulator = main_module.TranscriptAccumulator()
+    app.live_transcript_accumulator.add_chunk(
+        SimpleNamespace(segment_id=0, text="live text", latency_seconds=0.1)
+    )
+    events = overlay_calls
+
+    def fail_copy(text):
+        raise RuntimeError("clipboard exploded")
+
+    monkeypatch.setattr(main_module, "copy_to_clipboard", fail_copy)
+    app.hotkey_manager.set_idle = lambda: events.append("idle")
+
+    with pytest.raises(RuntimeError):
+        app._on_recording_stop()
+
+    assert events[-2:] == [("error", 7, "Transcription failed"), "idle"]
+
+
+def test_disabled_overlay_sends_nothing_but_dictation_still_copies(
+    monkeypatch, overlay_calls
+):
+    app = make_stop_app(make_audio_data())
+    app.config.show_recording_overlay = False
+    copied = []
+    monkeypatch.setattr(
+        main_module, "copy_to_clipboard", lambda text: copied.append(text) or True
+    )
+
+    app._show_overlay(main_module.HIDDEN)
+    app._on_recording_stop()
+
+    assert overlay_calls == []
+    assert copied == ["Fallback text."]
+    assert app.notifications.copied_to_clipboard == 1
+    assert app.tray.statuses[-1] == "Ready"
+
+
+def test_disabling_overlay_mid_session_clears_shown_overlay(overlay_calls):
+    app = make_stop_app(make_audio_data())
+    app._show_overlay(main_module.RECORDING)
+    app.config.show_recording_overlay = False
+
+    app._show_overlay(main_module.PROCESSING)
+    app._show_overlay(main_module.SUCCESS)
+
+    assert overlay_calls == [("recording", 7, ""), "close"]
+
+
+def test_overlay_failure_does_not_interrupt_dictation(monkeypatch, capsys):
+    settings_gui = pytest.importorskip("src.settings_gui")
+
+    def broken_overlay(*args, **kwargs):
+        raise RuntimeError("overlay broke")
+
+    monkeypatch.setattr(settings_gui, "request_overlay_state", broken_overlay)
+    app = make_stop_app(make_audio_data())
+    copied = []
+    monkeypatch.setattr(
+        main_module, "copy_to_clipboard", lambda text: copied.append(text) or True
+    )
+
+    app._on_recording_stop()
+
+    assert copied == ["Fallback text."]
+    assert app.notifications.copied_to_clipboard == 1
+    assert app.hotkey_manager.idle_calls == 1
+    assert "Recording overlay request failed." in capsys.readouterr().out
+
+
+def test_stop_app_closes_overlay(overlay_calls):
+    app = make_stop_app(None)
+    app._running = True
+    app.hotkey_manager.unregister = lambda: None
+    app.tray.stop = lambda: None
+    app.recorder.is_recording = lambda: False
+
+    app.stop()
+
+    assert overlay_calls == ["close"]
