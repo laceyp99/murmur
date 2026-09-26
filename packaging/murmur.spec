@@ -48,10 +48,7 @@ version_path = generated_root / "version_info.txt"
 
 datas = collect_data_files("customtkinter")
 datas += collect_data_files("whisper")
-datas += [
-    (str(repo_root / "murmur tray logo.png"), "."),
-    (str(repo_root / "murmur logo.png"), "."),
-]
+datas += [(str(repo_root / "app" / "icon.png"), "app")]
 
 hidden_imports = [
     "pystray._win32",

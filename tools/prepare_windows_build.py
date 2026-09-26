@@ -77,7 +77,7 @@ def _write_version_info(destination: Path, version: str) -> None:
 
 def prepare_build(repo_root: Path, output_dir: Path) -> None:
     """Create the generated resources consumed by the PyInstaller spec."""
-    logo_path = repo_root / "murmur tray logo.png"
+    logo_path = repo_root / "app" / "icon.png"
     pyproject_path = repo_root / "pyproject.toml"
     for required_path in (logo_path, pyproject_path):
         if not required_path.is_file():
