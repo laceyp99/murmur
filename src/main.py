@@ -15,6 +15,7 @@ from .hotkey import HotkeyManager, HotkeyState, is_hotkey_valid
 from .logger import get_logger
 from .media_control import get_media_controller
 from .notifications import get_notification_manager
+from .recording_overlay import ERROR, HIDDEN, PROCESSING, RECORDING, SUCCESS
 from .transcription import Transcriber
 from .transcription_live import (
     LiveSegmentMetrics,
@@ -31,6 +32,13 @@ from .vad import (
 )
 from .windows_identity import configure_windows_app_identity
 
+# Fixed, content-safe overlay messages; transcript text never reaches the overlay.
+OVERLAY_START_FAILED = "Couldn't start recording"
+OVERLAY_NO_AUDIO = "No audio captured"
+OVERLAY_NO_SPEECH = "No speech detected"
+OVERLAY_TRANSCRIPTION_FAILED = "Transcription failed"
+OVERLAY_CLIPBOARD_FAILED = "Couldn't copy to clipboard"
+
 
 class MurmurApp:
     """
@@ -43,6 +51,11 @@ class MurmurApp:
     4. Copy to clipboard
     5. Notify user
     """
+
+    # Session number sent with overlay requests so late events cannot replace
+    # a newer session's state.
+    _overlay_session = 0
+    _overlay_shown = False
 
     def __init__(self, preload_model: bool = True):
         """
@@ -153,6 +166,8 @@ class MurmurApp:
         print(f"{'=' * 50}\n")
 
         self.notifications.notify("murmur", "Ready! Press hotkey to start recording.")
+        # Start the shared UI thread now so the first recording shows promptly.
+        self._show_overlay(HIDDEN)
 
     def _recover_failed_hotkey_registration(self) -> tuple[str | None, bool]:
         """Recover from invalid or unregistrable configured hotkeys."""
@@ -215,6 +230,7 @@ class MurmurApp:
 
         if self.recorder.is_recording():
             self.recorder.stop_recording()
+        self._close_overlay()
 
         print("\nmurmur stopped.")
 
@@ -224,6 +240,7 @@ class MurmurApp:
         self._live_pipeline_degraded = False
         self._live_pipeline_degraded_reason = None
         self._recording_limit_stop_started = False
+        self._overlay_session += 1
         self.notifications.notify_recording_started()
         self.tray.set_status("Recording...")
 
@@ -244,11 +261,16 @@ class MurmurApp:
             print(f"Error starting recording: {e}")
             self.notifications.notify_error(f"Recording failed: {e}")
             self.tray.set_status("Error")
+            self._show_overlay(ERROR, OVERLAY_START_FAILED)
             self.hotkey_manager.set_idle()
             # Resume media if we paused it but recording failed
             if self._was_media_playing:
                 self.media_controller.play()
                 self._was_media_playing = False
+            return
+
+        # Only an input stream that actually started earns the recording cue.
+        self._show_overlay(RECORDING)
 
     def _on_recording_stop(self) -> None:
         """Handle recording stop via hotkey."""
@@ -257,6 +279,8 @@ class MurmurApp:
         finalization_started_at = time.perf_counter()
 
         audio_data = self.recorder.stop_recording()
+        if audio_data is not None:
+            self._show_overlay(PROCESSING)
         # Resume media if it was playing before recording
         if self._was_media_playing:
             if not self.media_controller.play():
@@ -274,6 +298,7 @@ class MurmurApp:
             )
         else:
             print("⚠️ No audio data captured.")
+            self._show_overlay(ERROR, OVERLAY_NO_AUDIO)
             self.tray.set_status("Ready")
             self.hotkey_manager.set_idle()
 
@@ -335,6 +360,10 @@ class MurmurApp:
                 finalization_started_at=finalization_started_at,
                 live_segment_metrics=self._get_live_segment_metrics(),
             )
+        except Exception:
+            # Report before set_idle so a new session cannot be replaced.
+            self._show_overlay(ERROR, OVERLAY_TRANSCRIPTION_FAILED)
+            raise
         finally:
             self.tray.set_status("Ready")
             self.hotkey_manager.set_idle()
@@ -362,6 +391,7 @@ class MurmurApp:
         except Exception:
             print("Transcription failed.")
             self.notifications.notify_error("Transcription failed.")
+            self._show_overlay(ERROR, OVERLAY_TRANSCRIPTION_FAILED)
 
         finally:
             self.tray.set_status("Ready")
@@ -421,6 +451,7 @@ class MurmurApp:
         if not text:
             print("⚠️ No speech detected.")
             self.notifications.notify("murmur", "No speech detected.")
+            self._show_overlay(ERROR, OVERLAY_NO_SPEECH)
             return
 
         copied = copy_to_clipboard(text)
@@ -431,14 +462,43 @@ class MurmurApp:
             print(f"Finalized in {runtime:.1f}s; copied to clipboard.")
             self._print_live_segment_metrics(live_segment_metrics)
             self.notifications.notify_transcription_copied()
+            self._show_overlay(SUCCESS)
             return
 
         print(f"Finalized in {runtime:.1f}s; failed to copy to clipboard.")
+        self._show_overlay(ERROR, OVERLAY_CLIPBOARD_FAILED)
         self._print_live_segment_metrics(live_segment_metrics)
         if log_entry is not None:
             self.notifications.notify_clipboard_failure_retry_with_training_data()
         else:
             self.notifications.notify_clipboard_failure_retry()
+
+    def _show_overlay(self, state: str, message: str = "") -> None:
+        """Mirror session state in the optional overlay without affecting dictation."""
+        try:
+            if not self.config.show_recording_overlay:
+                # Clear anything shown before the setting was switched off.
+                if self._overlay_shown:
+                    self._overlay_shown = False
+                    self._close_overlay()
+                return
+
+            from .settings_gui import request_overlay_state
+
+            if state != HIDDEN:
+                self._overlay_shown = True
+            request_overlay_state(state, self._overlay_session, message)
+        except Exception:
+            print("Recording overlay request failed.")
+
+    def _close_overlay(self) -> None:
+        """Hide and release the overlay window, if one was started."""
+        try:
+            from .settings_gui import close_overlay
+
+            close_overlay()
+        except Exception:
+            print("Recording overlay cleanup failed.")
 
     def _print_live_segment_metrics(
         self, live_segment_metrics: LiveSegmentMetrics
