@@ -978,6 +978,67 @@ def test_recording_limit_handler_notifies_and_uses_stop_flow():
     assert stop_calls == [True]
 
 
+def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
+    monkeypatch,
+):
+    fake_sd = SimpleNamespace(streams=[], fail_next_start=True)
+
+    class FakeStream:
+        def __init__(self, **kwargs):
+            self.started = False
+            self.closed = False
+            fake_sd.streams.append(self)
+
+        def start(self):
+            if fake_sd.fail_next_start:
+                fake_sd.fail_next_start = False
+                raise OSError("device busy")
+            self.started = True
+
+        def close(self):
+            self.closed = True
+
+    fake_sd.InputStream = FakeStream
+    monkeypatch.setattr("src.audio.sd", fake_sd)
+
+    app = make_app(segmenter=None, transcriber=FakeTranscriber())
+    app.config.pause_media_while_recording = False
+    app.recorder = main_module.AudioRecorder(
+        config=SimpleNamespace(get=lambda key, default=None: default)
+    )
+    app.tray = FakeTray()
+    app.notifications = FakeNotifications()
+    app.notifications.notify_recording_started = lambda: None
+    app.hotkey_manager = FakeHotkeyManager()
+    app._was_media_playing = False
+    live_calls = []
+    monkeypatch.setattr(app, "_start_live_transcription", lambda: None)
+    monkeypatch.setattr(app, "_start_live_segmentation", lambda: None)
+    monkeypatch.setattr(
+        app, "_stop_live_transcription", lambda: live_calls.append("transcription")
+    )
+    monkeypatch.setattr(
+        app, "_stop_live_segmentation", lambda: live_calls.append("segmentation")
+    )
+
+    app._on_recording_start()
+
+    [failed_stream] = fake_sd.streams
+    assert failed_stream.closed is True
+    assert app.recorder.is_recording() is False
+    assert app.tray.statuses[-1] == "Error"
+    assert app.hotkey_manager.idle_calls == 1
+    assert live_calls == ["transcription", "segmentation"]
+
+    app._on_recording_start()
+
+    retry_stream = fake_sd.streams[-1]
+    assert retry_stream.started is True
+    assert app.recorder.is_recording() is True
+    assert app.tray.statuses[-1] == "Recording..."
+    assert app.hotkey_manager.idle_calls == 1
+
+
 def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch):
     transcriber = FakeTranscriber()
     audio_data = make_audio_data()

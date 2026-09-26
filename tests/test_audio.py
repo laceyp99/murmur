@@ -13,13 +13,19 @@ class FakeConfig:
 
 
 class FakeInputStream:
-    def __init__(self, **kwargs):
+    def __init__(self, start_error=None, on_start=None, **kwargs):
         self.kwargs = kwargs
+        self.start_error = start_error
+        self.on_start = on_start
         self.started = False
         self.stopped = False
         self.closed = False
 
     def start(self):
+        if self.on_start is not None:
+            self.on_start(self)
+        if self.start_error is not None:
+            raise self.start_error
         self.started = True
 
     def stop(self):
@@ -32,11 +38,26 @@ class FakeInputStream:
 class FakeSoundDevice:
     def __init__(self):
         self.streams = []
+        self.constructor_errors = []
+        self.start_errors = []
+        self.on_start = None
 
     def InputStream(self, **kwargs):  # noqa: N802 - mirror sounddevice's API
-        stream = FakeInputStream(**kwargs)
+        if self.constructor_errors:
+            raise self.constructor_errors.pop(0)
+        start_error = self.start_errors.pop(0) if self.start_errors else None
+        stream = FakeInputStream(
+            start_error=start_error, on_start=self.on_start, **kwargs
+        )
         self.streams.append(stream)
         return stream
+
+
+def make_fake_recorder(monkeypatch, *, sample_rate=10):
+    fake_sd = FakeSoundDevice()
+    monkeypatch.setattr("src.audio.sd", fake_sd)
+    recorder = AudioRecorder(config=FakeConfig({"sample_rate": sample_rate}))
+    return recorder, fake_sd
 
 
 def start_fake_recorder(monkeypatch, *, sample_rate=10, max_recording_duration=0.5):
@@ -122,6 +143,89 @@ def test_start_recording_requires_sounddevice(monkeypatch):
 
     with pytest.raises(RuntimeError, match="PortAudio"):
         recorder.start_recording()
+
+
+def test_start_recording_rolls_back_when_stream_construction_fails(monkeypatch):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    fake_sd.constructor_errors.append(OSError("no input device"))
+
+    with pytest.raises(OSError, match="no input device"):
+        recorder.start_recording()
+
+    assert recorder.is_recording() is False
+    assert recorder._stream is None
+    assert recorder._recording_start is None
+    assert recorder.stop_recording() is None
+
+
+def test_start_recording_closes_stream_when_start_fails(monkeypatch):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    fake_sd.start_errors.append(OSError("device busy"))
+
+    with pytest.raises(OSError, match="device busy"):
+        recorder.start_recording()
+
+    [stream] = fake_sd.streams
+    assert stream.closed is True
+    assert stream.started is False
+    assert recorder.is_recording() is False
+    assert recorder._stream is None
+    assert recorder.stop_recording() is None
+
+
+def test_start_recording_keeps_original_error_when_close_fails(monkeypatch):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    fake_sd.start_errors.append(OSError("device busy"))
+
+    def failing_close():
+        raise RuntimeError("close failed")
+
+    fake_sd.on_start = lambda stream: setattr(stream, "close", failing_close)
+
+    with pytest.raises(OSError, match="device busy"):
+        recorder.start_recording()
+
+    assert recorder.is_recording() is False
+    assert recorder._stream is None
+
+
+def test_start_recording_accepts_blocks_while_stream_starts(monkeypatch):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    early_block = np.array([[0.1], [0.2]], dtype=np.float32)
+    fake_sd.on_start = lambda stream: stream.kwargs["callback"](
+        early_block, frames=2, time_info=None, status=None
+    )
+
+    recorder.start_recording()
+    audio_data = recorder.stop_recording()
+
+    assert audio_data is not None
+    np.testing.assert_allclose(audio_data.audio, early_block.flatten())
+
+
+def test_start_recording_can_retry_after_failed_start(monkeypatch):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    fake_sd.start_errors.append(OSError("device busy"))
+
+    with pytest.raises(OSError, match="device busy"):
+        recorder.start_recording()
+
+    recorder.start_recording()
+
+    failed_stream, retry_stream = fake_sd.streams
+    assert failed_stream.closed is True
+    assert retry_stream.started is True
+    assert recorder.is_recording() is True
+    assert recorder._stream is retry_stream
+
+    block = np.array([[0.3], [0.4]], dtype=np.float32)
+    retry_stream.kwargs["callback"](block, frames=2, time_info=None, status=None)
+    audio_data = recorder.stop_recording()
+
+    assert audio_data is not None
+    np.testing.assert_allclose(audio_data.audio, block.flatten())
+    assert retry_stream.stopped is True
+    assert retry_stream.closed is True
 
 
 def test_audio_callback_caps_audio_at_max_recording_duration(monkeypatch):
