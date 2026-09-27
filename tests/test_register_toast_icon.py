@@ -6,6 +6,8 @@ import pytest
 
 from src import windows_identity
 
+pytest.importorskip("winreg", reason="toast icon registration is Windows-only")
+
 MODULE_PATH = (
     Path(__file__).resolve().parent.parent / "tools" / "register_toast_icon.py"
 )
