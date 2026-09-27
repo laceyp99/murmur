@@ -9,6 +9,7 @@ from .config import get_app_data_dir
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_ICON_FILENAME = "murmur.ico"
+LOGO_RELATIVE_PATH = Path("app") / "icon.png"
 
 
 def _get_resource_root() -> Path:
@@ -20,11 +21,10 @@ def _get_resource_root() -> Path:
 
 
 def get_logo_path() -> Path | None:
-    """Return the preferred app logo path when it exists."""
-    for filename in ("murmur tray logo.png", "murmur logo.png", "murmur.png"):
-        path = _get_resource_root() / filename
-        if path.exists():
-            return path
+    """Return the app logo path when it exists."""
+    path = _get_resource_root() / LOGO_RELATIVE_PATH
+    if path.exists():
+        return path
     return None
 
 

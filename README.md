@@ -1,5 +1,6 @@
-# murmur: local dictation hotkey app
-
+<div align="center">
+  <img src="app/readme-logo.png" alt="Conductor Core Logo" width="100%">
+</div>
 
 A lightweight Windows application that enables dictation anywhere on your
 system. Press a global hotkey to record your voice, and murmur segments speech

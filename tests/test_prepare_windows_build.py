@@ -39,8 +39,9 @@ def test_prepare_build_generates_icon_and_version_info(tmp_path):
 
     from PIL import Image
 
+    (repo_root / "app").mkdir()
     Image.new("RGBA", (256, 256), color=(73, 109, 137, 255)).save(
-        repo_root / "murmur tray logo.png"
+        repo_root / "app" / "icon.png"
     )
 
     prepare_windows_build.prepare_build(repo_root, output_dir)

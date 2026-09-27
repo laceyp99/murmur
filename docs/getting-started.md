@@ -181,6 +181,20 @@ The overlay never takes focus and clicks pass through it. Turn it off with
 **Settings > General > Show recording overlay**. Windows toast notifications are
 off by default and can be enabled separately with **Enable notifications**.
 
+Windows reads the toast icon from a per-user registry entry that murmur does
+not create on its own. To show the murmur icon on toasts, run this once, and
+again after changing `app/toast-icon.png`:
+
+```powershell
+venv\Scripts\python.exe tools\register_toast_icon.py
+```
+
+It copies the icon into `%APPDATA%\murmur` and registers it under
+`HKCU\Software\Classes\AppUserModelId\murmur`. Add `--remove` to delete both.
+Toasts use this transparent waveform rather than `app/icon.png` because Windows
+inverts mostly dark toast icons in dark mode. Keep it small, currently 64 px,
+with a thicker stroke; Windows drops thin lines when it shrinks a large icon.
+
 Silence closes VAD segments; it does not stop the overall recording. The stop
 path uses the accumulated live text when healthy. If live processing is empty
 or degraded, murmur recomputes from the complete recorded audio.
