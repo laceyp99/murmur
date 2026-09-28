@@ -75,6 +75,40 @@ def make_numeric_vars(**overrides):
     return {key: FakeValue(value) for key, value in values.items()}
 
 
+def test_microphone_refresh_keeps_unavailable_preference_and_shows_fallback(
+    monkeypatch,
+):
+    from src.input_devices import InputDevice, InputSelection, InputStatus
+
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.config = SimpleNamespace(microphone=None)
+    window.microphone_var = FakeValue("")
+    configured = []
+    window.microphone_menu = SimpleNamespace(
+        configure=lambda **kw: configured.append(kw)
+    )
+    window.microphone_status = SimpleNamespace(
+        configure=lambda **kw: configured.append(kw)
+    )
+    fallback = InputDevice(2, "Laptop", "WASAPI")
+    monkeypatch.setattr(settings_module, "list_input_devices", lambda: [fallback])
+    monkeypatch.setattr(
+        settings_module,
+        "resolve_input_device",
+        lambda preference: InputSelection(fallback, "preferred_missing"),
+    )
+    monkeypatch.setattr(
+        settings_module.input_status, "get_status", lambda: InputStatus()
+    )
+
+    preferred = {"name": "Focusrite", "hostapi": "WASAPI"}
+    window._refresh_microphones(preferred)
+
+    assert window._selected_microphone() == preferred
+    assert "Focusrite (WASAPI) (unavailable)" in configured[0]["values"]
+    assert "Will use: Laptop (WASAPI) (fallback)" in configured[-1]["text"]
+
+
 class FakeLogger:
     def __init__(self):
         self.enabled_calls = []
@@ -634,6 +668,7 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
         ("hotkey", "ctrl+alt+space"),
         ("model", "small"),
         ("device", "cpu"),
+        ("microphone", None),
         ("language", None),
         ("enable_notifications", True),
         ("show_recording_overlay", False),

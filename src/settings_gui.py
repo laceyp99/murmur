@@ -19,6 +19,7 @@ from .assets import get_app_icon_path, get_logo_path
 from .autostart import set_autostart
 from .config import ConfigError, get_config, get_training_data_dir
 from .hotkey import is_hotkey_valid
+from .input_devices import input_status, list_input_devices, resolve_input_device
 from .llm_postprocess import check_ollama_connection
 from .logger import get_logger
 from .notifications import get_notification_manager
@@ -673,13 +674,14 @@ class SettingsWindow:
         )
 
         general = tab_contents["General"]
-        self._add_text_row(general, 0, "Hotkey", self.hotkey_var)
-        self._add_switch(general, 1, "Show recording overlay", self.overlay_var)
-        self._add_switch(general, 2, "Enable notifications", self.notify_var)
-        self._add_switch(general, 3, "Start with Windows", self.autostart_var)
+        self._add_microphone_row(general, 0)
+        self._add_text_row(general, 1, "Hotkey", self.hotkey_var, stacked=True)
+        self._add_switch(general, 2, "Show recording overlay", self.overlay_var)
+        self._add_switch(general, 3, "Enable notifications", self.notify_var)
+        self._add_switch(general, 4, "Start with Windows", self.autostart_var)
         self._add_switch(
             general,
-            4,
+            5,
             "Pause media while recording",
             self.pause_media_var,
         )
@@ -791,13 +793,19 @@ class SettingsWindow:
             command=lambda: self._reset_tab_to_defaults(tab_name),
         ).grid(row=99, column=0, sticky="w", padx=16, pady=(16, 10))
 
-    def _add_text_row(self, parent, row, label, variable, help_text=""):
+    def _add_text_row(
+        self, parent, row, label, variable, help_text="", *, stacked=False
+    ):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.grid(row=row, column=0, sticky="ew", padx=16, pady=10)
-        frame.grid_columnconfigure(1, weight=1)
+        frame.grid_columnconfigure(0 if stacked else 1, weight=1)
         ctk.CTkLabel(frame, text=label, anchor="w").grid(row=0, column=0, sticky="w")
         ctk.CTkEntry(frame, textvariable=variable).grid(
-            row=0, column=1, sticky="ew", padx=(16, 0)
+            row=1 if stacked else 0,
+            column=0 if stacked else 1,
+            sticky="ew",
+            padx=0 if stacked else (16, 0),
+            pady=(4, 0) if stacked else 0,
         )
         if help_text:
             ctk.CTkLabel(
@@ -817,6 +825,116 @@ class SettingsWindow:
         ctk.CTkOptionMenu(frame, variable=variable, values=values).grid(
             row=0, column=1, sticky="ew", padx=(16, 0)
         )
+
+    def _add_microphone_row(self, parent, row):
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.grid(row=row, column=0, sticky="ew", padx=16, pady=10)
+        frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(frame, text="Microphone", anchor="w").grid(
+            row=0, column=0, sticky="w"
+        )
+        controls = ctk.CTkFrame(frame, fg_color="transparent")
+        controls.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        controls.grid_columnconfigure(0, weight=1)
+        self.microphone_var = tk.StringVar(master=self.root)
+        self.microphone_menu = ctk.CTkOptionMenu(
+            controls,
+            variable=self.microphone_var,
+            values=["System default"],
+            command=lambda _value: self._update_microphone_status(),
+        )
+        self.microphone_menu.grid(row=0, column=0, sticky="ew")
+        ctk.CTkButton(
+            controls, text="Refresh", width=90, command=self._refresh_microphones
+        ).grid(row=0, column=1, padx=(8, 0))
+        self.microphone_status = ctk.CTkLabel(
+            frame,
+            text="",
+            anchor="w",
+            justify="left",
+            wraplength=580,
+            text_color=("gray35", "gray70"),
+        )
+        self.microphone_status.grid(row=2, column=0, sticky="ew", pady=(5, 0))
+        self._refresh_microphones(self.config.microphone, clear_error=False)
+        self.root.after(1000, self._poll_microphone_status)
+
+    def _poll_microphone_status(self):
+        if self._closed:
+            return
+        self._update_microphone_status()
+        self.root.after(1000, self._poll_microphone_status)
+
+    def _refresh_microphones(self, preference=..., *, clear_error=True):
+        if preference is ... and hasattr(self, "_microphone_choices"):
+            preference = self._selected_microphone()
+        elif preference is ...:
+            preference = self.config.microphone
+        self._microphone_choices = {"System default": None}
+        try:
+            devices = list_input_devices()
+        except Exception:
+            devices = []
+        duplicate_keys = {
+            (device.name, device.hostapi)
+            for device in devices
+            if sum(
+                other.name == device.name and other.hostapi == device.hostapi
+                for other in devices
+            )
+            > 1
+        }
+        for device in devices:
+            if (device.name, device.hostapi) in duplicate_keys:
+                continue
+            label = device.label
+            self._microphone_choices[label] = device.preference
+        preference = normalize_value(preference, SETTINGS_BY_KEY["microphone"])
+        selected = next(
+            (
+                label
+                for label, value in self._microphone_choices.items()
+                if value == preference
+            ),
+            None,
+        )
+        if selected is None and preference is not None:
+            reason = (
+                "ambiguous"
+                if (preference["name"], preference["hostapi"]) in duplicate_keys
+                else "unavailable"
+            )
+            selected = f"{preference['name']} ({preference['hostapi']}) ({reason})"
+            self._microphone_choices[selected] = preference
+        selected = selected or "System default"
+        self.microphone_menu.configure(values=list(self._microphone_choices))
+        self.microphone_var.set(selected)
+        if clear_error and input_status.get_status().active is None:
+            input_status.clear_active()
+        self._update_microphone_status()
+
+    def _selected_microphone(self):
+        return self._microphone_choices.get(self.microphone_var.get())
+
+    def _update_microphone_status(self):
+        preference = self._selected_microphone()
+        preferred = self.microphone_var.get()
+        status = input_status.get_status()
+        if status.active is not None:
+            using = f"Using: {status.active.device.label}"
+            if status.active.reason not in ("preferred", "system_default"):
+                using += " (fallback)"
+        elif status.error:
+            using = f"Microphone error: {status.error}"
+        else:
+            try:
+                selection = resolve_input_device(preference)
+                using = f"Will use: {selection.device.label}"
+                if selection.reason not in ("preferred", "system_default"):
+                    using += " (fallback)"
+            except Exception:
+                using = "No microphone is available."
+        self.microphone_status.configure(text=f"Preferred: {preferred}\n{using}")
 
     def _add_switch(self, parent, row, text, variable, help_text=""):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -928,6 +1046,9 @@ class SettingsWindow:
 
     def _reset_tab_to_defaults(self, tab_name):
         for setting in settings_for_tab(tab_name):
+            if setting.key == "microphone":
+                self._refresh_microphones(None)
+                continue
             variable = self.setting_vars.get(setting.key)
             if variable is None:
                 continue
@@ -1132,6 +1253,9 @@ class SettingsWindow:
             "hotkey": new_hotkey,
             "model": normalize_value(self.model_var.get(), SETTINGS_BY_KEY["model"]),
             "device": normalize_value(self.device_var.get(), SETTINGS_BY_KEY["device"]),
+            "microphone": self._selected_microphone()
+            if hasattr(self, "_microphone_choices")
+            else self.config.get("microphone"),
             "language": lang,
             "enable_notifications": self.notify_var.get(),
             "show_recording_overlay": self.overlay_var.get(),

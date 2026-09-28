@@ -68,6 +68,11 @@ class MurmurApp:
         self.config = get_config()
         self.recorder = AudioRecorder()
         self._set_recording_limit_callback()
+        capture_error_setter = getattr(
+            self.recorder, "set_capture_error_callback", None
+        )
+        if capture_error_setter is not None:
+            capture_error_setter(self._on_capture_error)
         self.transcriber = Transcriber()
         self.segmenter: WebRTCVADSegmenter | None = None
         self.live_segmenter: LiveVADSegmentationWorker | None = None
@@ -87,6 +92,8 @@ class MurmurApp:
         self._live_pipeline_degraded_reason: str | None = None
         self._recording_limit_stop_started = False
         self._recording_limit_stop_lock = threading.Lock()
+        self._recording_stop_started = False
+        self._recording_stop_lock = threading.Lock()
 
         if preload_model:
             print("Preloading Whisper model...")
@@ -240,6 +247,7 @@ class MurmurApp:
         self._live_pipeline_degraded = False
         self._live_pipeline_degraded_reason = None
         self._recording_limit_stop_started = False
+        self._recording_stop_started = False
         self._overlay_session += 1
         self.notifications.notify_recording_started()
         self.tray.set_status("Recording...")
@@ -274,6 +282,12 @@ class MurmurApp:
 
     def _on_recording_stop(self) -> None:
         """Handle recording stop via hotkey."""
+        stop_lock = getattr(self, "_recording_stop_lock", None)
+        if stop_lock is not None:
+            with stop_lock:
+                if self._recording_stop_started:
+                    return
+                self._recording_stop_started = True
         print("⏹️ Recording stopped.")
         self.tray.set_status("Finalizing...")
         finalization_started_at = time.perf_counter()
@@ -323,6 +337,19 @@ class MurmurApp:
             f"({duration_seconds:g}s). Finalizing recording."
         )
         self.notifications.notify_recording_limit_reached(duration_seconds)
+        self.hotkey_manager.set_processing()
+        self._on_recording_stop()
+
+    def _on_capture_error(self, message: str) -> None:
+        """Finalize buffered audio after a microphone stream stops unexpectedly."""
+        with self._recording_limit_stop_lock:
+            if self._recording_limit_stop_started:
+                return
+            self._recording_limit_stop_started = True
+        self.notifications.notify_error(
+            f"{message}. Recording ended early; finalizing captured audio."
+        )
+        self.tray.set_status("Microphone error")
         self.hotkey_manager.set_processing()
         self._on_recording_stop()
 

@@ -35,12 +35,23 @@ def test_tabs_have_expected_order_and_settings():
         "Data Privacy",
     )
     assert [setting.key for setting in settings_for_tab("General")] == [
+        "microphone",
         "hotkey",
         "enable_notifications",
         "show_recording_overlay",
         "start_with_windows",
         "pause_media_while_recording",
     ]
+
+
+def test_microphone_preference_normalizes_without_persisting_device_index():
+    setting = SETTINGS_BY_KEY["microphone"]
+    assert normalize_value(None, setting) is None
+    assert normalize_value(
+        {"name": " Focusrite ", "hostapi": " WASAPI ", "index": 7}, setting
+    ) == {"name": "Focusrite", "hostapi": "WASAPI"}
+    assert normalize_value({"name": "Focusrite"}, setting) is None
+    assert setting.restart_required is False
     assert [setting.key for setting in settings_for_tab("VAD")] == [
         "vad_aggressiveness",
         "vad_padding_ms",

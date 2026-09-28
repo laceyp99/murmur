@@ -16,8 +16,8 @@ TAB_ORDER = (
     "Data Privacy",
 )
 
-ControlType = Literal["bool", "number", "select", "text"]
-ValueType = Literal["bool", "int", "str", "optional_str"]
+ControlType = Literal["bool", "number", "select", "text", "microphone"]
+ValueType = Literal["bool", "int", "str", "optional_str", "microphone"]
 
 
 @dataclass(frozen=True)
@@ -43,6 +43,15 @@ class SettingMetadata:
 
 
 SETTINGS: tuple[SettingMetadata, ...] = (
+    SettingMetadata(
+        key="microphone",
+        label="Microphone",
+        tab="General",
+        control="microphone",
+        value_type="microphone",
+        default=DEFAULT_CONFIG["microphone"],
+        help_text="Choose a preferred microphone or follow the Windows default.",
+    ),
     SettingMetadata(
         key="hotkey",
         label="Hotkey",
@@ -254,6 +263,15 @@ def parse_numeric_text(text: str, setting: SettingMetadata) -> int:
 
 def normalize_value(value: Any, setting: SettingMetadata) -> Any:
     """Normalize a raw config or UI value for saving/display."""
+    if setting.control == "microphone":
+        if value is None:
+            return None
+        if isinstance(value, dict) and all(
+            isinstance(value.get(key), str) and value[key].strip()
+            for key in ("name", "hostapi")
+        ):
+            return {key: value[key].strip() for key in ("name", "hostapi")}
+        return None
     if setting.control == "number":
         try:
             return clamp_number(float(value), setting)

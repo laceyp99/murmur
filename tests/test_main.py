@@ -1,3 +1,4 @@
+import threading
 from types import SimpleNamespace
 
 import numpy as np
@@ -993,6 +994,25 @@ def test_recording_limit_handler_notifies_and_uses_stop_flow():
     assert stop_calls == [True]
 
 
+def test_capture_error_reports_early_end_and_uses_stop_flow_once():
+    app = make_app(segmenter=None, transcriber=FakeTranscriber())
+    app.notifications = FakeNotifications()
+    app.hotkey_manager = FakeHotkeyManager()
+    app.tray = FakeTray()
+    app._recording_limit_stop_lock = threading.Lock()
+    app._recording_limit_stop_started = False
+    stop_calls = []
+    app._on_recording_stop = lambda: stop_calls.append(True)
+
+    app._on_capture_error("Microphone disconnected or stopped")
+    app._on_capture_error("Microphone disconnected or stopped")
+
+    assert stop_calls == [True]
+    assert app.hotkey_manager.processing_calls == 1
+    assert app.tray.statuses == ["Microphone error"]
+    assert "finalizing captured audio" in app.notifications.errors[0]
+
+
 def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
     monkeypatch,
     overlay_calls,
@@ -1016,6 +1036,11 @@ def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
             self.closed = True
 
     fake_sd.InputStream = FakeStream
+    fake_sd.default = SimpleNamespace(device=(0, -1))
+    fake_sd.query_hostapis = lambda: [{"name": "Windows WASAPI"}]
+    fake_sd.query_devices = lambda: [
+        {"name": "Default microphone", "hostapi": 0, "max_input_channels": 1}
+    ]
     monkeypatch.setattr("src.audio.sd", fake_sd)
 
     app = make_app(segmenter=None, transcriber=FakeTranscriber())

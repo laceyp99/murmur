@@ -21,6 +21,7 @@ DEFAULT_CONFIG = {
     "hotkey": "ctrl+shift+space",
     "model": "small",
     "device": "cuda",
+    "microphone": None,
     "language": None,
     "sample_rate": 16000,
     "vad_aggressiveness": 1,
@@ -195,6 +196,11 @@ class Config:
     def device(self) -> str:
         """Get the device setting (cuda or cpu)."""
         return self.get("device", "cuda")
+
+    @property
+    def microphone(self) -> dict[str, str] | None:
+        """Get the preferred input device, or None for the system default."""
+        return self.get("microphone")
 
     @property
     def sample_rate(self) -> int:

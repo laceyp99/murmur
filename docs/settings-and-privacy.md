@@ -38,7 +38,7 @@ flowchart LR
 
 | Tab | Controls | Runtime effect |
 | --- | --- | --- |
-| General | Hotkey, recording overlay, notifications, Windows startup, media pause | Hotkey registration and cached recorder/transcriber state are refreshed on restart; the overlay, notifications, media pause, and startup settings apply without a restart. |
+| General | Hotkey, microphone, recording overlay, notifications, Windows startup, media pause | Microphone preference applies at the next stream start without restart. Hotkey registration and other cached recorder/transcriber state are refreshed on restart; the overlay, notifications, media pause, and startup settings apply without a restart. |
 | VAD | Aggressiveness, speech padding, silence-to-stop duration | Applied to the VAD workers created for recordings; the UI requests a restart after changes. |
 | Transcription | Whisper model, device, language, maximum recording duration | Used by startup-created recorder/transcriber components; restart after changes. |
 | LLM Cleanup | Enablement, endpoint, model, timeout, preload, connection test | The final pass is optional; endpoint/model/preload changes require restart according to the UI notice. |
@@ -52,6 +52,16 @@ state until Save is pressed.
 
 The sample rate is not exposed in the settings window. It defaults to 16,000 Hz
 and can be changed only by editing `config.json`; restart after doing so.
+
+**Microphone** offers System default and the available input devices. Refresh
+updates the list after plugging in a device. Settings shows the saved preference
+separately from the microphone currently in use, or the microphone that would
+be tried next when no stream is open. If the preferred microphone is missing or
+fails to open, Murmur tries the current Windows default and keeps the saved
+preference. Reconnecting the preferred microphone does not interrupt a recording;
+it can be selected again through Settings, and is tried at the next stream start.
+If neither input can open, Murmur reports an error and the hotkey remains usable
+for another attempt after the input problem is fixed.
 
 ## Persistent configuration
 
@@ -68,6 +78,7 @@ The current default values are:
   "hotkey": "ctrl+shift+space",
   "model": "small",
   "device": "cuda",
+  "microphone": null,
   "language": null,
   "sample_rate": 16000,
   "vad_aggressiveness": 1,
