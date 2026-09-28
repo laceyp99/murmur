@@ -81,7 +81,8 @@ def test_microphone_refresh_keeps_unavailable_preference_and_shows_fallback(
     from src.input_devices import InputDevice, InputSelection, InputStatus
 
     window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
-    window.config = SimpleNamespace(microphone=None)
+    preferred = {"name": "Focusrite", "hostapi": "WASAPI"}
+    window.config = SimpleNamespace(microphone=preferred)
     window.microphone_var = FakeValue("")
     configured = []
     window.microphone_menu = SimpleNamespace(
@@ -101,12 +102,42 @@ def test_microphone_refresh_keeps_unavailable_preference_and_shows_fallback(
         settings_module.input_status, "get_status", lambda: InputStatus()
     )
 
-    preferred = {"name": "Focusrite", "hostapi": "WASAPI"}
     window._refresh_microphones(preferred)
 
     assert window._selected_microphone() == preferred
     assert "Focusrite (WASAPI) (unavailable)" in configured[0]["values"]
     assert "Will use: Laptop (WASAPI) (fallback)" in configured[-1]["text"]
+
+
+def test_unsaved_microphone_choice_is_labeled_pending(monkeypatch):
+    from src.input_devices import InputDevice, InputSelection, InputStatus
+
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.config = SimpleNamespace(microphone=None)
+    window.microphone_var = FakeValue("Focusrite (WASAPI)")
+    window._microphone_choices = {
+        "System default": None,
+        "Focusrite (WASAPI)": {"name": "Focusrite", "hostapi": "WASAPI"},
+    }
+    configured = []
+    window.microphone_status = SimpleNamespace(
+        configure=lambda **kw: configured.append(kw)
+    )
+    default = InputDevice(0, "Laptop", "WASAPI")
+    monkeypatch.setattr(
+        settings_module,
+        "resolve_input_device",
+        lambda preference: InputSelection(default, "system_default"),
+    )
+    monkeypatch.setattr(
+        settings_module.input_status, "get_status", lambda: InputStatus()
+    )
+
+    window._update_microphone_status()
+
+    assert "Preferred: System default" in configured[-1]["text"]
+    assert "Will use: Laptop (WASAPI)" in configured[-1]["text"]
+    assert "Selected: Focusrite (WASAPI) (save to apply)" in configured[-1]["text"]
 
 
 class FakeLogger:

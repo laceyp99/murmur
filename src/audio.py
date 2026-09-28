@@ -119,16 +119,27 @@ class AudioRecorder:
 
         input_status.clear_active()
 
-        # Stay marked as recording while the stream starts so early callback
-        # blocks are kept; roll back if the stream cannot be opened or started.
+        # Buffer callbacks during start. A failed preferred stream must not
+        # feed its early blocks to either the full recording or live VAD.
         stream = None
         try:
+            callback_state = None
 
             def make_stream(**kwargs):
-                # A failed preferred start must not mix its early blocks with
-                # blocks from the fallback stream.
-                with self._lock:
-                    self._audio_data = []
+                nonlocal callback_state
+                callback_lock = threading.RLock()
+                buffered = []
+                state = {"lock": callback_lock, "buffered": buffered, "ready": False}
+                callback_state = state
+
+                def candidate_callback(indata, frames, time_info, status):
+                    with callback_lock:
+                        if not state["ready"]:
+                            buffered.append((indata.copy(), frames, time_info, status))
+                        else:
+                            self._audio_callback(indata, frames, time_info, status)
+
+                kwargs["callback"] = candidate_callback
                 return sd.InputStream(**kwargs)
 
             stream, selection = open_input_stream(
@@ -143,6 +154,11 @@ class AudioRecorder:
             )
             self._stream = stream
             input_status.set_active(selection)
+            with callback_state["lock"]:
+                for block, frames, time_info, status in callback_state["buffered"]:
+                    self._audio_callback(block, frames, time_info, status)
+                callback_state["buffered"].clear()
+                callback_state["ready"] = True
             if hasattr(stream, "active"):
                 threading.Thread(
                     target=self._watch_stream, args=(stream,), daemon=True
@@ -164,12 +180,18 @@ class AudioRecorder:
             except Exception:
                 active = False
             if not active:
-                self._report_capture_error("Microphone disconnected or stopped")
+                self._report_capture_error(
+                    "Microphone disconnected or stopped", stream=stream
+                )
                 return
 
-    def _report_capture_error(self, message: str) -> None:
+    def _report_capture_error(self, message: str, *, stream=None) -> None:
         with self._lock:
-            if self._capture_error_reported or not self._recording:
+            if (
+                self._capture_error_reported
+                or not self._recording
+                or (stream is not None and self._stream is not stream)
+            ):
                 return
             self._capture_error_reported = True
             callback = self._on_capture_error

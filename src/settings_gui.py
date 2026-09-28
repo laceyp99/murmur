@@ -917,8 +917,17 @@ class SettingsWindow:
         return self._microphone_choices.get(self.microphone_var.get())
 
     def _update_microphone_status(self):
-        preference = self._selected_microphone()
-        preferred = self.microphone_var.get()
+        preference = normalize_value(
+            self.config.microphone, SETTINGS_BY_KEY["microphone"]
+        )
+        preferred = (
+            "System default"
+            if preference is None
+            else f"{preference['name']} ({preference['hostapi']})"
+        )
+        pending = ""
+        if self._selected_microphone() != preference:
+            pending = f"\nSelected: {self.microphone_var.get()} (save to apply)"
         status = input_status.get_status()
         if status.active is not None:
             using = f"Using: {status.active.device.label}"
@@ -934,7 +943,9 @@ class SettingsWindow:
                     using += " (fallback)"
             except Exception:
                 using = "No microphone is available."
-        self.microphone_status.configure(text=f"Preferred: {preferred}\n{using}")
+        self.microphone_status.configure(
+            text=f"Preferred: {preferred}\n{using}{pending}"
+        )
 
     def _add_switch(self, parent, row, text, variable, help_text=""):
         frame = ctk.CTkFrame(parent, fg_color="transparent")

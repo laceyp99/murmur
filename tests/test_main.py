@@ -985,7 +985,7 @@ def test_recording_limit_handler_notifies_and_uses_stop_flow():
     app.notifications = FakeNotifications()
     app.hotkey_manager = FakeHotkeyManager()
     stop_calls = []
-    app._on_recording_stop = lambda: stop_calls.append(True)
+    app._finish_recording_stop = lambda: stop_calls.append(True)
 
     app._handle_recording_limit_reached(300)
 
@@ -1001,8 +1001,10 @@ def test_capture_error_reports_early_end_and_uses_stop_flow_once():
     app.tray = FakeTray()
     app._recording_limit_stop_lock = threading.Lock()
     app._recording_limit_stop_started = False
+    app._recording_stop_lock = threading.Lock()
+    app._recording_stop_started = False
     stop_calls = []
-    app._on_recording_stop = lambda: stop_calls.append(True)
+    app._finish_recording_stop = lambda: stop_calls.append(True)
 
     app._on_capture_error("Microphone disconnected or stopped")
     app._on_capture_error("Microphone disconnected or stopped")
@@ -1011,6 +1013,26 @@ def test_capture_error_reports_early_end_and_uses_stop_flow_once():
     assert app.hotkey_manager.processing_calls == 1
     assert app.tray.statuses == ["Microphone error"]
     assert "finalizing captured audio" in app.notifications.errors[0]
+
+
+def test_late_capture_error_does_not_strand_hotkey_after_manual_stop():
+    app = make_app(segmenter=None, transcriber=FakeTranscriber())
+    app.notifications = FakeNotifications()
+    app.hotkey_manager = FakeHotkeyManager()
+    app.tray = FakeTray()
+    app._recording_limit_stop_lock = threading.Lock()
+    app._recording_limit_stop_started = False
+    app._recording_stop_lock = threading.Lock()
+    app._recording_stop_started = False
+    stop_calls = []
+    app._finish_recording_stop = lambda: stop_calls.append(True)
+
+    app._on_recording_stop()
+    app._on_capture_error("Microphone disconnected or stopped")
+
+    assert stop_calls == [True]
+    assert app.hotkey_manager.processing_calls == 0
+    assert app.notifications.errors == []
 
 
 def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(

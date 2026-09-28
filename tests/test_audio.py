@@ -289,6 +289,51 @@ def test_inactive_stream_reports_capture_failure(monkeypatch):
     recorder.stop_recording()
 
 
+def test_old_stream_watcher_cannot_stop_new_recording(monkeypatch):
+    recorder, _ = make_fake_recorder(monkeypatch)
+    errors = []
+    recorder.set_capture_error_callback(errors.append)
+    recorder.start_recording()
+    old_stream = recorder._stream
+    recorder.stop_recording()
+    recorder.start_recording()
+
+    recorder._report_capture_error("old stream stopped", stream=old_stream)
+
+    assert errors == []
+    assert recorder.is_recording() is True
+    recorder.stop_recording()
+
+
+def test_failed_preferred_start_does_not_feed_early_blocks_to_live_callback(
+    monkeypatch,
+):
+    fake_sd = FakeSoundDevice()
+    fake_sd.devices.append({"name": "Focusrite", "hostapi": 0, "max_input_channels": 2})
+    fake_sd.start_errors.append(OSError("Focusrite disconnected"))
+    monkeypatch.setattr("src.audio.sd", fake_sd)
+    recorder = AudioRecorder(
+        config=FakeConfig(
+            {"microphone": {"name": "Focusrite", "hostapi": "Windows WASAPI"}}
+        )
+    )
+    live_blocks = []
+    recorder.set_block_callback(live_blocks.append)
+
+    def send_early_block(stream):
+        value = 0.1 if stream.kwargs["device"] == 1 else 0.2
+        stream.kwargs["callback"](np.array([[value]], dtype=np.float32), 1, None, None)
+
+    fake_sd.on_start = send_early_block
+    recorder.start_recording()
+    audio = recorder.stop_recording()
+
+    assert audio is not None
+    np.testing.assert_allclose(audio.audio, [0.2])
+    assert len(live_blocks) == 1
+    np.testing.assert_allclose(live_blocks[0], [[0.2]])
+
+
 def test_audio_callback_caps_audio_at_max_recording_duration(monkeypatch):
     recorder = start_fake_recorder(
         monkeypatch, sample_rate=10, max_recording_duration=0.5
