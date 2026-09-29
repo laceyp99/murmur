@@ -3,6 +3,7 @@
 import pytest
 
 from src.input_devices import (
+    InputBackendState,
     InputStatusStore,
     input_candidates,
     list_input_devices,
@@ -42,6 +43,48 @@ class FakeStream:
 
 
 PREFERRED = {"name": "Focusrite", "hostapi": "ASIO"}
+
+
+def test_backend_refresh_waits_for_stream_close_and_reinitializes_once():
+    calls = []
+    backend = type(
+        "Backend",
+        (),
+        {
+            "_terminate": lambda self: calls.append("terminate"),
+            "_initialize": lambda self: calls.append("initialize"),
+        },
+    )()
+    state = InputBackendState(backend)
+
+    state.stream_opened()
+    assert state.request_refresh() is False
+    assert calls == []
+    state.stream_closed()
+    assert calls == ["terminate", "initialize"]
+    assert state.generation == 1
+    assert state.refresh_if_pending() is False
+
+
+def test_backend_retries_initialize_without_terminating_twice():
+    calls = []
+
+    class Backend:
+        def _terminate(self):
+            calls.append("terminate")
+
+        def _initialize(self):
+            calls.append("initialize")
+            if calls.count("initialize") == 1:
+                raise OSError("device still reconnecting")
+
+    state = InputBackendState(Backend())
+    with pytest.raises(OSError, match="still reconnecting"):
+        state.request_refresh()
+    assert state.generation == 0
+    assert state.refresh_if_pending() is True
+    assert calls == ["terminate", "initialize", "initialize"]
+    assert state.generation == 1
 
 
 def test_list_and_resolve_unique_preferred():

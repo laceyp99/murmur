@@ -20,6 +20,8 @@ flowchart LR
     AppStart --> LiveVad["Start live VAD worker"]
     AppStart --> InputResolver["Resolve preferred or default microphone"]
     InputResolver --> Recorder["AudioRecorder starts capture"]
+    Refresh["Settings Refresh or stopped input"] --> DeferredRefresh["Refresh PortAudio after stream closes"]
+    DeferredRefresh --> InputResolver
     Recorder -->|stream started| OverlayRecording["Optional overlay: recording bars"]
 
     Recorder --> Blocks["100 ms float32 audio blocks"]
@@ -66,6 +68,8 @@ current Windows default if the preferred input is missing or cannot open. It
 keeps the saved preference during fallback. A device choice made during a
 recording applies to the next recording. If the stream stops unexpectedly,
 Murmur ends capture and attempts to finalize audio already in the full buffer.
+It then refreshes PortAudio's device list. Settings Refresh also refreshes the
+backend, but waits for an active stream to close before doing so.
 
 The current recorder block size is 100 ms:
 

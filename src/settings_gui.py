@@ -19,7 +19,12 @@ from .assets import get_app_icon_path, get_logo_path
 from .autostart import set_autostart
 from .config import ConfigError, get_config, get_training_data_dir
 from .hotkey import is_hotkey_valid
-from .input_devices import input_status, list_input_devices, resolve_input_device
+from .input_devices import (
+    input_backend,
+    input_status,
+    list_input_devices,
+    resolve_input_device,
+)
 from .llm_postprocess import check_ollama_connection
 from .logger import get_logger
 from .notifications import get_notification_manager
@@ -845,7 +850,10 @@ class SettingsWindow:
         )
         self.microphone_menu.grid(row=0, column=0, sticky="ew")
         ctk.CTkButton(
-            controls, text="Refresh", width=90, command=self._refresh_microphones
+            controls,
+            text="Refresh",
+            width=90,
+            command=lambda: self._refresh_microphones(refresh_backend=True),
         ).grid(row=0, column=1, padx=(8, 0))
         self.microphone_status = ctk.CTkLabel(
             frame,
@@ -862,14 +870,27 @@ class SettingsWindow:
     def _poll_microphone_status(self):
         if self._closed:
             return
-        self._update_microphone_status()
+        if self._microphone_generation != input_backend.generation:
+            self._refresh_microphones(clear_error=False)
+        else:
+            self._update_microphone_status()
         self.root.after(1000, self._poll_microphone_status)
 
-    def _refresh_microphones(self, preference=..., *, clear_error=True):
+    def _refresh_microphones(
+        self, preference=..., *, clear_error=True, refresh_backend=False
+    ):
         if preference is ... and hasattr(self, "_microphone_choices"):
             preference = self._selected_microphone()
         elif preference is ...:
             preference = self.config.microphone
+        refresh_failed = False
+        if refresh_backend:
+            try:
+                input_backend.request_refresh()
+            except Exception as exc:
+                refresh_failed = True
+                input_status.set_error(f"Microphone refresh failed: {exc}")
+        self._microphone_generation = input_backend.generation
         self._microphone_choices = {"System default": None}
         try:
             devices = list_input_devices()
@@ -909,7 +930,11 @@ class SettingsWindow:
         selected = selected or "System default"
         self.microphone_menu.configure(values=list(self._microphone_choices))
         self.microphone_var.set(selected)
-        if clear_error and input_status.get_status().active is None:
+        if (
+            clear_error
+            and not refresh_failed
+            and input_status.get_status().active is None
+        ):
             input_status.clear_active()
         self._update_microphone_status()
 

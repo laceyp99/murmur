@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from src.audio import AudioRecorder
+from src.input_devices import InputBackendState, input_status
 
 
 class FakeConfig:
@@ -61,6 +62,17 @@ class FakeSoundDevice:
         )
         self.streams.append(stream)
         return stream
+
+
+@pytest.fixture(autouse=True)
+def isolated_input_backend(monkeypatch):
+    backend = FakeSoundDevice()
+    backend._terminate = lambda: None
+    backend._initialize = lambda: None
+    state = InputBackendState(backend)
+    monkeypatch.setattr("src.audio.input_backend", state)
+    monkeypatch.setattr("src.input_devices.input_backend", state)
+    return state
 
 
 def make_fake_recorder(monkeypatch, *, sample_rate=10):
@@ -254,7 +266,9 @@ def test_preferred_open_failure_uses_default_and_keeps_preference(monkeypatch):
     recorder.stop_recording()
 
 
-def test_broken_stream_still_returns_captured_audio(monkeypatch):
+def test_broken_stream_still_returns_captured_audio(
+    monkeypatch, isolated_input_backend
+):
     recorder, fake_sd = make_fake_recorder(monkeypatch)
     recorder.start_recording()
     block = np.array([[0.1], [0.2]], dtype=np.float32)
@@ -272,6 +286,30 @@ def test_broken_stream_still_returns_captured_audio(monkeypatch):
     assert errors == ["Microphone disconnected or stopped"]
     assert audio is not None
     np.testing.assert_allclose(audio.audio, block.flatten())
+    assert isolated_input_backend.generation == 1
+
+
+def test_failed_refresh_does_not_discard_recorded_audio(
+    monkeypatch, isolated_input_backend
+):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    recorder.start_recording()
+    fake_sd.streams[0].kwargs["callback"](
+        np.array([[0.4]], dtype=np.float32), 1, None, None
+    )
+
+    def fail_initialize():
+        raise OSError("reconnect pending")
+
+    isolated_input_backend.backend._initialize = fail_initialize
+    isolated_input_backend.mark_stale()
+
+    audio = recorder.stop_recording()
+
+    assert audio is not None
+    np.testing.assert_allclose(audio.audio, [0.4])
+    assert "reconnect pending" in input_status.get_status().error
+    input_status.clear_active()
 
 
 def test_inactive_stream_reports_capture_failure(monkeypatch):

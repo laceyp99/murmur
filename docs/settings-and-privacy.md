@@ -21,6 +21,8 @@ flowchart LR
     Action -->|Cancel or close| Discard["Discard UI changes"]
     Action -->|Reset This Tab| Reset["Reset only current tab"]
     Reset --> Edit
+    Action -->|Refresh microphones| Refresh["Reinitialize PortAudio after capture closes"]
+    Refresh --> Edit
     Action -->|Test Ollama| AsyncTest["Run endpoint/model check in worker"]
     AsyncTest --> Result["Poll result on UI thread"]
     Result --> Edit
@@ -54,12 +56,14 @@ The sample rate is not exposed in the settings window. It defaults to 16,000 Hz
 and can be changed only by editing `config.json`; restart after doing so.
 
 **Microphone** offers System default and the available input devices. Refresh
-updates the list after plugging in a device. Settings shows the saved preference
+reinitializes the audio backend and updates the list after plugging in a device.
+If a recording is active, the refresh waits until its stream closes. Settings shows the saved preference
 separately from the microphone currently in use, or the microphone that would
 be tried next when no stream is open. If the preferred microphone is missing or
 fails to open, Murmur tries the current Windows default and keeps the saved
 preference. Reconnecting the preferred microphone does not interrupt a recording;
-it can be selected again through Settings, and is tried at the next stream start.
+click Refresh after reconnecting, then try it at the next stream start. An
+unexpected stream stop also queues a backend refresh after capture closes.
 If neither input can open, Murmur reports an error and the hotkey remains usable
 for another attempt after the input problem is fixed.
 

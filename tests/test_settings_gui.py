@@ -101,9 +101,16 @@ def test_microphone_refresh_keeps_unavailable_preference_and_shows_fallback(
     monkeypatch.setattr(
         settings_module.input_status, "get_status", lambda: InputStatus()
     )
+    refreshes = []
+    monkeypatch.setattr(
+        settings_module.input_backend,
+        "request_refresh",
+        lambda: refreshes.append(True),
+    )
 
-    window._refresh_microphones(preferred)
+    window._refresh_microphones(preferred, refresh_backend=True)
 
+    assert refreshes == [True]
     assert window._selected_microphone() == preferred
     assert "Focusrite (WASAPI) (unavailable)" in configured[0]["values"]
     assert "Will use: Laptop (WASAPI) (fallback)" in configured[-1]["text"]
