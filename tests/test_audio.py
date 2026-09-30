@@ -1,7 +1,10 @@
+import threading
+
 import numpy as np
 import pytest
 
 from src.audio import AudioRecorder
+from src.input_devices import InputBackendState, input_status
 
 
 class FakeConfig:
@@ -20,6 +23,7 @@ class FakeInputStream:
         self.started = False
         self.stopped = False
         self.closed = False
+        self.active = False
 
     def start(self):
         if self.on_start is not None:
@@ -27,12 +31,15 @@ class FakeInputStream:
         if self.start_error is not None:
             raise self.start_error
         self.started = True
+        self.active = True
 
     def stop(self):
         self.stopped = True
+        self.active = False
 
     def close(self):
         self.closed = True
+        self.active = False
 
 
 class FakeSoundDevice:
@@ -41,6 +48,16 @@ class FakeSoundDevice:
         self.constructor_errors = []
         self.start_errors = []
         self.on_start = None
+        self.default = type("Default", (), {"device": (0, -1)})()
+        self.devices = [
+            {"name": "Default microphone", "hostapi": 0, "max_input_channels": 1}
+        ]
+
+    def query_hostapis(self):
+        return [{"name": "Windows WASAPI"}]
+
+    def query_devices(self):
+        return self.devices
 
     def InputStream(self, **kwargs):  # noqa: N802 - mirror sounddevice's API
         if self.constructor_errors:
@@ -51,6 +68,17 @@ class FakeSoundDevice:
         )
         self.streams.append(stream)
         return stream
+
+
+@pytest.fixture(autouse=True)
+def isolated_input_backend(monkeypatch):
+    backend = FakeSoundDevice()
+    backend._terminate = lambda: None
+    backend._initialize = lambda: None
+    state = InputBackendState(backend)
+    monkeypatch.setattr("src.audio.input_backend", state)
+    monkeypatch.setattr("src.input_devices.input_backend", state)
+    return state
 
 
 def make_fake_recorder(monkeypatch, *, sample_rate=10):
@@ -226,6 +254,231 @@ def test_start_recording_can_retry_after_failed_start(monkeypatch):
     np.testing.assert_allclose(audio_data.audio, block.flatten())
     assert retry_stream.stopped is True
     assert retry_stream.closed is True
+
+
+def test_preferred_open_failure_uses_default_and_keeps_preference(monkeypatch):
+    fake_sd = FakeSoundDevice()
+    fake_sd.devices.append({"name": "Focusrite", "hostapi": 0, "max_input_channels": 2})
+    fake_sd.start_errors.append(OSError("Focusrite disconnected"))
+    monkeypatch.setattr("src.audio.sd", fake_sd)
+    preference = {"name": "Focusrite", "hostapi": "Windows WASAPI"}
+    recorder = AudioRecorder(config=FakeConfig({"microphone": preference}))
+
+    recorder.start_recording()
+
+    assert [stream.kwargs["device"] for stream in fake_sd.streams] == [1, 0]
+    assert fake_sd.streams[0].closed is True
+    assert recorder.config.get("microphone") == preference
+    recorder.stop_recording()
+
+
+def test_broken_stream_still_returns_captured_audio(
+    monkeypatch, isolated_input_backend
+):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    recorder.start_recording()
+    block = np.array([[0.1], [0.2]], dtype=np.float32)
+    fake_sd.streams[0].kwargs["callback"](block, frames=2, time_info=None, status=None)
+
+    def broken_stop():
+        raise OSError("device removed")
+
+    fake_sd.streams[0].stop = broken_stop
+    errors = []
+    recorder.set_capture_error_callback(errors.append)
+    recorder._report_capture_error("Microphone disconnected or stopped")
+    audio = recorder.stop_recording()
+
+    assert errors == ["Microphone disconnected or stopped"]
+    assert audio is not None
+    np.testing.assert_allclose(audio.audio, block.flatten())
+    assert isolated_input_backend.generation == 1
+
+
+def test_failed_refresh_does_not_discard_recorded_audio(
+    monkeypatch, isolated_input_backend
+):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    recorder.start_recording()
+    fake_sd.streams[0].kwargs["callback"](
+        np.array([[0.4]], dtype=np.float32), 1, None, None
+    )
+
+    def fail_initialize():
+        raise OSError("reconnect pending")
+
+    isolated_input_backend.backend._initialize = fail_initialize
+    isolated_input_backend.mark_stale()
+
+    audio = recorder.stop_recording()
+
+    assert audio is not None
+    np.testing.assert_allclose(audio.audio, [0.4])
+    assert "reconnect pending" in input_status.get_status().error
+    input_status.clear_active()
+
+
+def test_inactive_stream_reports_capture_failure(monkeypatch):
+    recorder, _ = make_fake_recorder(monkeypatch)
+    recorder.start_recording()
+    errors = []
+    recorder.set_capture_error_callback(errors.append)
+    monkeypatch.setattr("src.audio.time.sleep", lambda _seconds: None)
+    stream = recorder._stream
+    stream.active = False
+
+    recorder._watch_stream(stream)
+
+    assert errors == ["Microphone disconnected or stopped"]
+    recorder.stop_recording()
+
+
+def test_old_stream_watcher_cannot_stop_new_recording(monkeypatch):
+    recorder, _ = make_fake_recorder(monkeypatch)
+    errors = []
+    recorder.set_capture_error_callback(errors.append)
+    recorder.start_recording()
+    old_stream = recorder._stream
+    recorder.stop_recording()
+    recorder.start_recording()
+
+    recorder._report_capture_error("old stream stopped", stream=old_stream)
+
+    assert errors == []
+    assert recorder.is_recording() is True
+    recorder.stop_recording()
+
+
+def test_status_query_failure_after_start_preserves_audio(monkeypatch):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    block = np.array([[0.1], [0.2]], dtype=np.float32)
+
+    class BrokenStatusStream(FakeInputStream):
+        @property
+        def active(self):
+            raise OSError("device status query failed")
+
+        @active.setter
+        def active(self, value):
+            pass
+
+    monkeypatch.setattr(
+        fake_sd,
+        "InputStream",
+        lambda **kwargs: BrokenStatusStream(
+            on_start=lambda stream: stream.kwargs["callback"](block, 2, None, None),
+            **kwargs,
+        ),
+    )
+    finalized = threading.Event()
+    captured = []
+    errors = []
+
+    def capture_error(message):
+        errors.append(message)
+        captured.append(recorder.stop_recording())
+        finalized.set()
+
+    recorder.set_capture_error_callback(capture_error)
+    recorder.start_recording()
+
+    assert finalized.wait(2)
+    assert errors == ["Microphone disconnected or stopped"]
+    assert captured[0] is not None
+    np.testing.assert_allclose(captured[0].audio, block.flatten())
+
+
+def test_stream_close_waits_for_inflight_status_query(isolated_input_backend):
+    query_started = threading.Event()
+    query_released = threading.Event()
+    stop_waiting = threading.Event()
+    closed = threading.Event()
+    watcher_locked = threading.Event()
+    backend_lock = isolated_input_backend.lock
+
+    class ObservedLock:
+        def __enter__(self):
+            if threading.current_thread().name == "test-stopper":
+                stop_waiting.set()
+            backend_lock.acquire()
+            if threading.current_thread().name == "test-watcher":
+                watcher_locked.set()
+            return self
+
+        def __exit__(self, *args):
+            if threading.current_thread().name == "test-watcher":
+                watcher_locked.clear()
+            backend_lock.release()
+
+    isolated_input_backend.lock = ObservedLock()
+
+    class Stream:
+        @property
+        def active(self):
+            assert watcher_locked.is_set()
+            query_started.set()
+            query_released.wait(2)
+            return True
+
+        def stop(self):
+            pass
+
+        def close(self):
+            closed.set()
+
+    recorder = AudioRecorder(config=FakeConfig())
+    stream = Stream()
+    recorder._recording = True
+    recorder._stream = stream
+    isolated_input_backend.stream_opened()
+    watcher = threading.Thread(
+        target=recorder._watch_stream, args=(stream,), name="test-watcher"
+    )
+    stopper = threading.Thread(target=recorder.stop_recording, name="test-stopper")
+    watcher.start()
+    try:
+        assert query_started.wait(2)
+        stopper.start()
+        assert stop_waiting.wait(2)
+        assert not closed.is_set()
+    finally:
+        query_released.set()
+        watcher.join(2)
+        if stopper.ident is not None:
+            stopper.join(2)
+
+    assert not watcher.is_alive()
+    assert not stopper.is_alive()
+    assert closed.is_set()
+
+
+def test_failed_preferred_start_does_not_feed_early_blocks_to_live_callback(
+    monkeypatch,
+):
+    fake_sd = FakeSoundDevice()
+    fake_sd.devices.append({"name": "Focusrite", "hostapi": 0, "max_input_channels": 2})
+    fake_sd.start_errors.append(OSError("Focusrite disconnected"))
+    monkeypatch.setattr("src.audio.sd", fake_sd)
+    recorder = AudioRecorder(
+        config=FakeConfig(
+            {"microphone": {"name": "Focusrite", "hostapi": "Windows WASAPI"}}
+        )
+    )
+    live_blocks = []
+    recorder.set_block_callback(live_blocks.append)
+
+    def send_early_block(stream):
+        value = 0.1 if stream.kwargs["device"] == 1 else 0.2
+        stream.kwargs["callback"](np.array([[value]], dtype=np.float32), 1, None, None)
+
+    fake_sd.on_start = send_early_block
+    recorder.start_recording()
+    audio = recorder.stop_recording()
+
+    assert audio is not None
+    np.testing.assert_allclose(audio.audio, [0.2])
+    assert len(live_blocks) == 1
+    np.testing.assert_allclose(live_blocks[0], [[0.2]])
 
 
 def test_audio_callback_caps_audio_at_max_recording_duration(monkeypatch):

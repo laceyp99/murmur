@@ -10,7 +10,13 @@
 
 ### No speech detected
 
-- Confirm that the microphone works and is selected as the Windows default input.
+- Check the microphone shown in **Settings > General**. Use **Refresh** after
+  connecting a device, or choose **System default** to follow Windows.
+- After a preferred microphone disconnects, check **Using** or **Will use** in
+  Settings before the next recording. A fallback input can open successfully but
+  detect no speech if you keep speaking into the disconnected microphone.
+- Confirm that the microphone works and that Windows has a usable default input
+  when Murmur needs to fall back.
 - Check microphone permissions in Windows Settings.
 - Speak long enough for a VAD segment to close; silence closes a segment but
   does not stop the overall recording.

@@ -1,3 +1,4 @@
+import threading
 from types import SimpleNamespace
 
 import numpy as np
@@ -103,6 +104,8 @@ def make_app(segmenter, transcriber, config=None):
     app._live_vad_disabled_reason = None
     app._live_pipeline_degraded = False
     app._live_pipeline_degraded_reason = None
+    app._recording_stop_lock = threading.Lock()
+    app._recording_stop_started = False
     return app
 
 
@@ -984,13 +987,105 @@ def test_recording_limit_handler_notifies_and_uses_stop_flow():
     app.notifications = FakeNotifications()
     app.hotkey_manager = FakeHotkeyManager()
     stop_calls = []
-    app._on_recording_stop = lambda: stop_calls.append(True)
+    app._finish_recording_stop = lambda: stop_calls.append(True)
 
     app._handle_recording_limit_reached(300)
 
     assert app.notifications.recording_limits == [300]
     assert app.hotkey_manager.processing_calls == 1
     assert stop_calls == [True]
+
+
+def test_capture_error_reports_early_end_and_uses_stop_flow_once():
+    app = make_app(segmenter=None, transcriber=FakeTranscriber())
+    app.notifications = FakeNotifications()
+    app.hotkey_manager = FakeHotkeyManager()
+    app.tray = FakeTray()
+    app._recording_limit_stop_lock = threading.Lock()
+    app._recording_limit_stop_started = False
+    app._recording_stop_lock = threading.Lock()
+    app._recording_stop_started = False
+    stop_calls = []
+    app._finish_recording_stop = lambda: stop_calls.append(True)
+
+    app._on_capture_error("Microphone disconnected or stopped")
+    app._on_capture_error("Microphone disconnected or stopped")
+
+    assert stop_calls == [True]
+    assert app.hotkey_manager.processing_calls == 1
+    assert app.tray.statuses == ["Microphone error"]
+    assert "finalizing captured audio" in app.notifications.errors[0]
+
+
+def test_late_capture_error_does_not_strand_hotkey_after_manual_stop():
+    app = make_app(segmenter=None, transcriber=FakeTranscriber())
+    app.notifications = FakeNotifications()
+    app.hotkey_manager = FakeHotkeyManager()
+    app.tray = FakeTray()
+    app._recording_limit_stop_lock = threading.Lock()
+    app._recording_limit_stop_started = False
+    app._recording_stop_lock = threading.Lock()
+    app._recording_stop_started = False
+    stop_calls = []
+    app._finish_recording_stop = lambda: stop_calls.append(True)
+
+    app._on_recording_stop()
+    app._on_capture_error("Microphone disconnected or stopped")
+
+    assert stop_calls == [True]
+    assert app.hotkey_manager.processing_calls == 0
+    assert app.notifications.errors == []
+
+
+def test_accepted_capture_error_cannot_stop_next_session(monkeypatch):
+    app = make_app(segmenter=None, transcriber=FakeTranscriber())
+    app.config.pause_media_while_recording = False
+    app._was_media_playing = False
+    app.notifications = FakeNotifications()
+    app.notifications.notify_recording_started = lambda: None
+    app.hotkey_manager = FakeHotkeyManager()
+    app.tray = FakeTray()
+    app.recorder = FakeRecorder(None)
+    callbacks = []
+    app.recorder.set_capture_error_callback = callbacks.append
+    app.recorder.start_recording = lambda: None
+    for name in (
+        "_start_live_transcription",
+        "_start_live_segmentation",
+        "_stop_live_transcription",
+        "_stop_live_segmentation",
+    ):
+        monkeypatch.setattr(app, name, lambda: None)
+
+    app._on_recording_start()
+    accepted = threading.Event()
+    release = threading.Event()
+    old_callback = callbacks[-1]
+
+    def delayed_error():
+        accepted.set()
+        release.wait(2)
+        old_callback("old stream stopped")
+
+    worker = threading.Thread(target=delayed_error)
+    worker.start()
+    try:
+        assert accepted.wait(2)
+        app._on_recording_stop()
+        app._on_recording_start()
+    finally:
+        release.set()
+        worker.join(2)
+
+    assert not worker.is_alive()
+    assert app.recorder.stop_calls == 1
+    assert app._recording_stop_started is False
+    assert app.hotkey_manager.processing_calls == 0
+    assert app.notifications.errors == []
+    # The current session's error still claims and completes its stop.
+    callbacks[-1]("current stream stopped")
+    assert app.recorder.stop_calls == 2
+    assert app.hotkey_manager.processing_calls == 1
 
 
 def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
@@ -1012,10 +1107,19 @@ def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
             self.started = True
             overlay_calls.append("stream-started")
 
+        @property
+        def active(self):
+            return self.started and not self.closed
+
         def close(self):
             self.closed = True
 
     fake_sd.InputStream = FakeStream
+    fake_sd.default = SimpleNamespace(device=(0, -1))
+    fake_sd.query_hostapis = lambda: [{"name": "Windows WASAPI"}]
+    fake_sd.query_devices = lambda: [
+        {"name": "Default microphone", "hostapi": 0, "max_input_channels": 1}
+    ]
     monkeypatch.setattr("src.audio.sd", fake_sd)
 
     app = make_app(segmenter=None, transcriber=FakeTranscriber())

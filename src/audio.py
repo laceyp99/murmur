@@ -16,6 +16,7 @@ except (ImportError, OSError):
     sd = None
 
 from .config import Config, get_config
+from .input_devices import input_backend, input_status, open_input_stream
 
 DEFAULT_MAX_RECORDING_DURATION = 300
 
@@ -52,6 +53,8 @@ class AudioRecorder:
         self._on_recording_limit: Callable[[float], None] | None = None
         self._block_callback_failed = False
         self._recording_limit_reached = False
+        self._on_capture_error: Callable[[str], None] | None = None
+        self._capture_error_reported = False
 
     def _parse_max_recording_duration(self, raw_duration) -> float:
         """Return a positive recording limit, falling back to the default."""
@@ -89,6 +92,13 @@ class AudioRecorder:
         with self._lock:
             self._on_recording_limit = callback
 
+    def set_capture_error_callback(
+        self, callback: Callable[[str], None] | None
+    ) -> None:
+        """Report an input stream that stops unexpectedly."""
+        with self._lock:
+            self._on_capture_error = callback
+
     def start_recording(self):
         """Start recording audio."""
         if sd is None:
@@ -105,23 +115,95 @@ class AudioRecorder:
             self._recording_start = time.time()
             self._block_callback_failed = False
             self._recording_limit_reached = False
+            self._capture_error_reported = False
 
-        # Stay marked as recording while the stream starts so early callback
-        # blocks are kept; roll back if the stream cannot be opened or started.
+        input_status.clear_active()
+
+        # Buffer callbacks during start. A failed preferred stream must not
+        # feed its early blocks to either the full recording or live VAD.
         stream = None
         try:
-            stream = sd.InputStream(
-                samplerate=self.sample_rate,
-                channels=1,
-                dtype=np.float32,
-                callback=self._audio_callback,
-                blocksize=int(self.sample_rate * 0.1),  # 100ms blocks
-            )
-            self._stream = stream
-            stream.start()
-        except Exception:
+            callback_state = None
+
+            def make_stream(**kwargs):
+                nonlocal callback_state
+                callback_lock = threading.RLock()
+                buffered = []
+                state = {"lock": callback_lock, "buffered": buffered, "ready": False}
+                callback_state = state
+
+                def candidate_callback(indata, frames, time_info, status):
+                    with callback_lock:
+                        if not state["ready"]:
+                            buffered.append((indata.copy(), frames, time_info, status))
+                        else:
+                            self._audio_callback(indata, frames, time_info, status)
+
+                kwargs["callback"] = candidate_callback
+                return sd.InputStream(**kwargs)
+
+            with input_backend.lock:
+                input_backend.refresh_if_pending()
+                stream, selection = open_input_stream(
+                    self.config.get("microphone", None),
+                    make_stream,
+                    backend=sd,
+                    samplerate=self.sample_rate,
+                    channels=1,
+                    dtype=np.float32,
+                    callback=self._audio_callback,
+                    blocksize=int(self.sample_rate * 0.1),  # 100ms blocks
+                )
+                input_backend.stream_opened()
+                self._stream = stream
+                input_status.set_active(selection)
+                with callback_state["lock"]:
+                    for block, frames, time_info, status in callback_state["buffered"]:
+                        self._audio_callback(block, frames, time_info, status)
+                    callback_state["buffered"].clear()
+                    callback_state["ready"] = True
+            threading.Thread(
+                target=self._watch_stream, args=(stream,), daemon=True
+            ).start()
+        except Exception as exc:
             self._rollback_failed_start(stream)
+            input_status.set_error(f"Could not open a microphone: {exc}")
             raise
+
+    def _watch_stream(self, stream) -> None:
+        """Notice a stream that PortAudio stops before the user stops recording."""
+        while True:
+            time.sleep(0.3)
+            # PortAudio status queries must not overlap close or reinitialize.
+            with input_backend.lock:
+                with self._lock:
+                    if not self._recording or self._stream is not stream:
+                        return
+                try:
+                    active = stream.active
+                except Exception:
+                    active = False
+            if not active:
+                self._report_capture_error(
+                    "Microphone disconnected or stopped", stream=stream
+                )
+                return
+
+    def _report_capture_error(self, message: str, *, stream=None) -> None:
+        with input_backend.lock:
+            with self._lock:
+                if (
+                    self._capture_error_reported
+                    or not self._recording
+                    or (stream is not None and self._stream is not stream)
+                ):
+                    return
+                self._capture_error_reported = True
+                callback = self._on_capture_error
+            input_status.set_error(message)
+            input_backend.mark_stale()
+        if callback is not None:
+            callback(message)
 
     def _rollback_failed_start(self, stream) -> None:
         """Close a partly opened stream and clear recording state."""
@@ -130,11 +212,16 @@ class AudioRecorder:
             self._audio_data = []
             self._recording_start = None
 
-        self._stream = None
-        if stream is not None:
-            # Preserve the original startup error if cleanup also fails.
-            with contextlib.suppress(Exception):
-                stream.close()
+        with input_backend.lock:
+            tracked = self._stream is stream and stream is not None
+            self._stream = None
+            if stream is not None:
+                # Preserve the original startup error if cleanup also fails.
+                with contextlib.suppress(Exception):
+                    stream.close()
+            if tracked:
+                with contextlib.suppress(Exception):
+                    input_backend.stream_closed()
 
     def stop_recording(self) -> AudioData | None:
         """
@@ -148,10 +235,21 @@ class AudioRecorder:
                 return None
             self._recording = False
 
-        if self._stream:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
+        refresh_failed = False
+        with input_backend.lock:
+            stream, self._stream = self._stream, None
+            if stream:
+                with contextlib.suppress(Exception):
+                    stream.stop()
+                with contextlib.suppress(Exception):
+                    stream.close()
+                try:
+                    input_backend.stream_closed()
+                except Exception as exc:
+                    refresh_failed = True
+                    input_status.set_error(f"Microphone refresh failed: {exc}")
+        if not self._capture_error_reported and not refresh_failed:
+            input_status.clear_active()
 
         with self._lock:
             if not self._audio_data:

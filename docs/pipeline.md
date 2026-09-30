@@ -18,7 +18,10 @@ flowchart LR
     AppStart --> MediaPause["Optional media pause"]
     AppStart --> LiveWorker["Start live transcription worker"]
     AppStart --> LiveVad["Start live VAD worker"]
-    AppStart --> Recorder["AudioRecorder starts capture"]
+    AppStart --> InputResolver["Resolve preferred or default microphone"]
+    InputResolver --> Recorder["AudioRecorder starts capture"]
+    Refresh["Settings Refresh or stopped input"] --> DeferredRefresh["Refresh PortAudio after stream closes"]
+    DeferredRefresh --> InputResolver
     Recorder -->|stream started| OverlayRecording["Optional overlay: recording bars"]
 
     Recorder --> Blocks["100 ms float32 audio blocks"]
@@ -59,6 +62,18 @@ flowchart LR
 mono channel, and `float32` sample format. The stream callback stores each block
 in the full recording buffer and forwards a copy to the live VAD worker when the
 live callback is active.
+
+At stream start, the shared input resolver tries the saved microphone, then the
+current Windows default if the preferred input is missing or cannot open. It
+keeps the saved preference during fallback. A device choice made during a
+recording applies to the next recording. If the stream stops unexpectedly,
+Murmur ends capture and attempts to finalize audio already in the full buffer.
+It then refreshes PortAudio's device list. Settings Refresh also refreshes the
+backend, but waits for an active stream to close before doing so.
+Stream status queries share the backend lock with stream closure and refresh.
+A failed status query ends capture through the same audio-preserving error path
+as an unexpected stream stop. Capture-error callbacks carry the originating
+session number so a delayed error cannot finalize a newer recording.
 
 The current recorder block size is 100 ms:
 

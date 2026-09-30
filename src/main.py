@@ -87,6 +87,8 @@ class MurmurApp:
         self._live_pipeline_degraded_reason: str | None = None
         self._recording_limit_stop_started = False
         self._recording_limit_stop_lock = threading.Lock()
+        self._recording_stop_started = False
+        self._recording_stop_lock = threading.Lock()
 
         if preload_model:
             print("Preloading Whisper model...")
@@ -240,7 +242,13 @@ class MurmurApp:
         self._live_pipeline_degraded = False
         self._live_pipeline_degraded_reason = None
         self._recording_limit_stop_started = False
-        self._overlay_session += 1
+        with self._recording_stop_lock:
+            self._recording_stop_started = False
+            self._overlay_session += 1
+            session = self._overlay_session
+        self.recorder.set_capture_error_callback(
+            lambda message: self._on_capture_error(message, session=session)
+        )
         self.notifications.notify_recording_started()
         self.tray.set_status("Recording...")
 
@@ -274,6 +282,22 @@ class MurmurApp:
 
     def _on_recording_stop(self) -> None:
         """Handle recording stop via hotkey."""
+        if not self._claim_recording_stop():
+            return
+        self._finish_recording_stop()
+
+    def _claim_recording_stop(self, *, session: int | None = None) -> bool:
+        """Allow only one stop path to finalize the current recording."""
+        with self._recording_stop_lock:
+            if self._recording_stop_started or (
+                session is not None and session != self._overlay_session
+            ):
+                return False
+            self._recording_stop_started = True
+        return True
+
+    def _finish_recording_stop(self) -> None:
+        """Stop capture and finalize its buffered audio."""
         print("⏹️ Recording stopped.")
         self.tray.set_status("Finalizing...")
         finalization_started_at = time.perf_counter()
@@ -318,13 +342,26 @@ class MurmurApp:
 
     def _handle_recording_limit_reached(self, duration_seconds: float) -> None:
         """Notify the user and finalize a recording stopped by the duration cap."""
+        if not self._claim_recording_stop():
+            return
         print(
             "Maximum recording duration reached "
             f"({duration_seconds:g}s). Finalizing recording."
         )
         self.notifications.notify_recording_limit_reached(duration_seconds)
         self.hotkey_manager.set_processing()
-        self._on_recording_stop()
+        self._finish_recording_stop()
+
+    def _on_capture_error(self, message: str, *, session: int | None = None) -> None:
+        """Finalize buffered audio after a microphone stream stops unexpectedly."""
+        if not self._claim_recording_stop(session=session):
+            return
+        self.notifications.notify_error(
+            f"{message}. Recording ended early; finalizing captured audio."
+        )
+        self.tray.set_status("Microphone error")
+        self.hotkey_manager.set_processing()
+        self._finish_recording_stop()
 
     def _finalize_recording(
         self,
