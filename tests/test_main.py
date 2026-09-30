@@ -104,6 +104,8 @@ def make_app(segmenter, transcriber, config=None):
     app._live_vad_disabled_reason = None
     app._live_pipeline_degraded = False
     app._live_pipeline_degraded_reason = None
+    app._recording_stop_lock = threading.Lock()
+    app._recording_stop_started = False
     return app
 
 
@@ -1035,6 +1037,57 @@ def test_late_capture_error_does_not_strand_hotkey_after_manual_stop():
     assert app.notifications.errors == []
 
 
+def test_accepted_capture_error_cannot_stop_next_session(monkeypatch):
+    app = make_app(segmenter=None, transcriber=FakeTranscriber())
+    app.config.pause_media_while_recording = False
+    app._was_media_playing = False
+    app.notifications = FakeNotifications()
+    app.notifications.notify_recording_started = lambda: None
+    app.hotkey_manager = FakeHotkeyManager()
+    app.tray = FakeTray()
+    app.recorder = FakeRecorder(None)
+    callbacks = []
+    app.recorder.set_capture_error_callback = callbacks.append
+    app.recorder.start_recording = lambda: None
+    for name in (
+        "_start_live_transcription",
+        "_start_live_segmentation",
+        "_stop_live_transcription",
+        "_stop_live_segmentation",
+    ):
+        monkeypatch.setattr(app, name, lambda: None)
+
+    app._on_recording_start()
+    accepted = threading.Event()
+    release = threading.Event()
+    old_callback = callbacks[-1]
+
+    def delayed_error():
+        accepted.set()
+        release.wait(2)
+        old_callback("old stream stopped")
+
+    worker = threading.Thread(target=delayed_error)
+    worker.start()
+    try:
+        assert accepted.wait(2)
+        app._on_recording_stop()
+        app._on_recording_start()
+    finally:
+        release.set()
+        worker.join(2)
+
+    assert not worker.is_alive()
+    assert app.recorder.stop_calls == 1
+    assert app._recording_stop_started is False
+    assert app.hotkey_manager.processing_calls == 0
+    assert app.notifications.errors == []
+    # The current session's error still claims and completes its stop.
+    callbacks[-1]("current stream stopped")
+    assert app.recorder.stop_calls == 2
+    assert app.hotkey_manager.processing_calls == 1
+
+
 def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
     monkeypatch,
     overlay_calls,
@@ -1053,6 +1106,10 @@ def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
                 raise OSError("device busy")
             self.started = True
             overlay_calls.append("stream-started")
+
+        @property
+        def active(self):
+            return self.started and not self.closed
 
         def close(self):
             self.closed = True

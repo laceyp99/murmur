@@ -68,11 +68,6 @@ class MurmurApp:
         self.config = get_config()
         self.recorder = AudioRecorder()
         self._set_recording_limit_callback()
-        capture_error_setter = getattr(
-            self.recorder, "set_capture_error_callback", None
-        )
-        if capture_error_setter is not None:
-            capture_error_setter(self._on_capture_error)
         self.transcriber = Transcriber()
         self.segmenter: WebRTCVADSegmenter | None = None
         self.live_segmenter: LiveVADSegmentationWorker | None = None
@@ -247,8 +242,13 @@ class MurmurApp:
         self._live_pipeline_degraded = False
         self._live_pipeline_degraded_reason = None
         self._recording_limit_stop_started = False
-        self._recording_stop_started = False
-        self._overlay_session += 1
+        with self._recording_stop_lock:
+            self._recording_stop_started = False
+            self._overlay_session += 1
+            session = self._overlay_session
+        self.recorder.set_capture_error_callback(
+            lambda message: self._on_capture_error(message, session=session)
+        )
         self.notifications.notify_recording_started()
         self.tray.set_status("Recording...")
 
@@ -286,14 +286,14 @@ class MurmurApp:
             return
         self._finish_recording_stop()
 
-    def _claim_recording_stop(self) -> bool:
+    def _claim_recording_stop(self, *, session: int | None = None) -> bool:
         """Allow only one stop path to finalize the current recording."""
-        stop_lock = getattr(self, "_recording_stop_lock", None)
-        if stop_lock is not None:
-            with stop_lock:
-                if self._recording_stop_started:
-                    return False
-                self._recording_stop_started = True
+        with self._recording_stop_lock:
+            if self._recording_stop_started or (
+                session is not None and session != self._overlay_session
+            ):
+                return False
+            self._recording_stop_started = True
         return True
 
     def _finish_recording_stop(self) -> None:
@@ -352,13 +352,9 @@ class MurmurApp:
         self.hotkey_manager.set_processing()
         self._finish_recording_stop()
 
-    def _on_capture_error(self, message: str) -> None:
+    def _on_capture_error(self, message: str, *, session: int | None = None) -> None:
         """Finalize buffered audio after a microphone stream stops unexpectedly."""
-        with self._recording_limit_stop_lock:
-            if self._recording_limit_stop_started:
-                return
-            self._recording_limit_stop_started = True
-        if not self._claim_recording_stop():
+        if not self._claim_recording_stop(session=session):
             return
         self.notifications.notify_error(
             f"{message}. Recording ended early; finalizing captured audio."

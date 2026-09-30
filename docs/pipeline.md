@@ -70,6 +70,10 @@ recording applies to the next recording. If the stream stops unexpectedly,
 Murmur ends capture and attempts to finalize audio already in the full buffer.
 It then refreshes PortAudio's device list. Settings Refresh also refreshes the
 backend, but waits for an active stream to close before doing so.
+Stream status queries share the backend lock with stream closure and refresh.
+A failed status query ends capture through the same audio-preserving error path
+as an unexpected stream stop. Capture-error callbacks carry the originating
+session number so a delayed error cannot finalize a newer recording.
 
 The current recorder block size is 100 ms:
 

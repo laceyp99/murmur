@@ -162,10 +162,9 @@ class AudioRecorder:
                         self._audio_callback(block, frames, time_info, status)
                     callback_state["buffered"].clear()
                     callback_state["ready"] = True
-            if hasattr(stream, "active"):
-                threading.Thread(
-                    target=self._watch_stream, args=(stream,), daemon=True
-                ).start()
+            threading.Thread(
+                target=self._watch_stream, args=(stream,), daemon=True
+            ).start()
         except Exception as exc:
             self._rollback_failed_start(stream)
             input_status.set_error(f"Could not open a microphone: {exc}")
@@ -175,13 +174,15 @@ class AudioRecorder:
         """Notice a stream that PortAudio stops before the user stops recording."""
         while True:
             time.sleep(0.3)
-            with self._lock:
-                if not self._recording or self._stream is not stream:
-                    return
-            try:
-                active = stream.active
-            except Exception:
-                active = False
+            # PortAudio status queries must not overlap close or reinitialize.
+            with input_backend.lock:
+                with self._lock:
+                    if not self._recording or self._stream is not stream:
+                        return
+                try:
+                    active = stream.active
+                except Exception:
+                    active = False
             if not active:
                 self._report_capture_error(
                     "Microphone disconnected or stopped", stream=stream
@@ -189,17 +190,18 @@ class AudioRecorder:
                 return
 
     def _report_capture_error(self, message: str, *, stream=None) -> None:
-        with self._lock:
-            if (
-                self._capture_error_reported
-                or not self._recording
-                or (stream is not None and self._stream is not stream)
-            ):
-                return
-            self._capture_error_reported = True
-            callback = self._on_capture_error
-        input_status.set_error(message)
-        input_backend.mark_stale()
+        with input_backend.lock:
+            with self._lock:
+                if (
+                    self._capture_error_reported
+                    or not self._recording
+                    or (stream is not None and self._stream is not stream)
+                ):
+                    return
+                self._capture_error_reported = True
+                callback = self._on_capture_error
+            input_status.set_error(message)
+            input_backend.mark_stale()
         if callback is not None:
             callback(message)
 

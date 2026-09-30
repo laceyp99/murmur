@@ -1,3 +1,5 @@
+import threading
+
 import numpy as np
 import pytest
 
@@ -21,6 +23,7 @@ class FakeInputStream:
         self.started = False
         self.stopped = False
         self.closed = False
+        self.active = False
 
     def start(self):
         if self.on_start is not None:
@@ -28,12 +31,15 @@ class FakeInputStream:
         if self.start_error is not None:
             raise self.start_error
         self.started = True
+        self.active = True
 
     def stop(self):
         self.stopped = True
+        self.active = False
 
     def close(self):
         self.closed = True
+        self.active = False
 
 
 class FakeSoundDevice:
@@ -341,6 +347,109 @@ def test_old_stream_watcher_cannot_stop_new_recording(monkeypatch):
     assert errors == []
     assert recorder.is_recording() is True
     recorder.stop_recording()
+
+
+def test_status_query_failure_after_start_preserves_audio(monkeypatch):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    block = np.array([[0.1], [0.2]], dtype=np.float32)
+
+    class BrokenStatusStream(FakeInputStream):
+        @property
+        def active(self):
+            raise OSError("device status query failed")
+
+        @active.setter
+        def active(self, value):
+            pass
+
+    monkeypatch.setattr(
+        fake_sd,
+        "InputStream",
+        lambda **kwargs: BrokenStatusStream(
+            on_start=lambda stream: stream.kwargs["callback"](block, 2, None, None),
+            **kwargs,
+        ),
+    )
+    finalized = threading.Event()
+    captured = []
+    errors = []
+
+    def capture_error(message):
+        errors.append(message)
+        captured.append(recorder.stop_recording())
+        finalized.set()
+
+    recorder.set_capture_error_callback(capture_error)
+    recorder.start_recording()
+
+    assert finalized.wait(2)
+    assert errors == ["Microphone disconnected or stopped"]
+    assert captured[0] is not None
+    np.testing.assert_allclose(captured[0].audio, block.flatten())
+
+
+def test_stream_close_waits_for_inflight_status_query(isolated_input_backend):
+    query_started = threading.Event()
+    query_released = threading.Event()
+    stop_waiting = threading.Event()
+    closed = threading.Event()
+    watcher_locked = threading.Event()
+    backend_lock = isolated_input_backend.lock
+
+    class ObservedLock:
+        def __enter__(self):
+            if threading.current_thread().name == "test-stopper":
+                stop_waiting.set()
+            backend_lock.acquire()
+            if threading.current_thread().name == "test-watcher":
+                watcher_locked.set()
+            return self
+
+        def __exit__(self, *args):
+            if threading.current_thread().name == "test-watcher":
+                watcher_locked.clear()
+            backend_lock.release()
+
+    isolated_input_backend.lock = ObservedLock()
+
+    class Stream:
+        @property
+        def active(self):
+            assert watcher_locked.is_set()
+            query_started.set()
+            query_released.wait(2)
+            return True
+
+        def stop(self):
+            pass
+
+        def close(self):
+            closed.set()
+
+    recorder = AudioRecorder(config=FakeConfig())
+    stream = Stream()
+    recorder._recording = True
+    recorder._stream = stream
+    isolated_input_backend.stream_opened()
+    watcher = threading.Thread(
+        target=recorder._watch_stream, args=(stream,), name="test-watcher"
+    )
+    stopper = threading.Thread(target=recorder.stop_recording, name="test-stopper")
+    watcher.start()
+    try:
+        assert query_started.wait(2)
+        stopper.start()
+        assert stop_waiting.wait(2)
+        assert not closed.is_set()
+    finally:
+        query_released.set()
+        watcher.join(2)
+        if stopper.ident is not None:
+            stopper.join(2)
+
+    assert not watcher.is_alive()
+    assert not stopper.is_alive()
+    assert closed.is_set()
 
 
 def test_failed_preferred_start_does_not_feed_early_blocks_to_live_callback(
