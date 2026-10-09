@@ -253,9 +253,13 @@ class MurmurApp:
         self.tray.set_status("Recording...")
 
         # Check and pause media if playing (when enabled)
-        if self.config.pause_media_while_recording:
-            self._was_media_playing = self.media_controller.is_media_playing()
-            if self._was_media_playing and not self.media_controller.pause():
+        self._was_media_playing = False
+        if (
+            self.config.pause_media_while_recording
+            and self.media_controller.is_media_playing()
+        ):
+            self._was_media_playing = self.media_controller.pause()
+            if not self._was_media_playing:
                 print("⚠️ Failed to pause media playback")
                 self.notifications.notify("murmur", "Could not pause media playback")
 

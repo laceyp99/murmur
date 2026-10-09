@@ -63,6 +63,10 @@ class HotkeyManager:
         self._on_state_change: Callable[[HotkeyState], None] | None = None
         self._hotkey_registered: bool = False
         self._last_registration_error: str | None = None
+        self._remove_hotkey: Callable[[], None] | None = None
+        self._key_hooks: list[Callable[[], None]] = []
+        self._activation_keys: set[int] = set()
+        self._consumed_keys: set[int] = set()
         self._lock = threading.Lock()
 
     def register(
@@ -90,7 +94,24 @@ class HotkeyManager:
         self._on_state_change = on_state_change
 
         try:
-            keyboard.add_hotkey(
+            steps = keyboard.parse_hotkey_combinations(self.config.hotkey)
+            # Sequence hotkeys need their key-up events to advance library state.
+            if len(steps) == 1:
+                self._activation_keys = {
+                    scan_code
+                    for combination in steps[0]
+                    for scan_code in combination
+                    if not keyboard.is_modifier(scan_code)
+                }
+                for scan_code in sorted(self._activation_keys):
+                    self._key_hooks.append(
+                        keyboard.hook_key(
+                            scan_code,
+                            lambda event: self._filter_consumed_key(event),
+                            suppress=True,
+                        )
+                    )
+            self._remove_hotkey = keyboard.add_hotkey(
                 self.config.hotkey, self._on_hotkey_pressed, suppress=True
             )
             self._hotkey_registered = True
@@ -98,17 +119,35 @@ class HotkeyManager:
             print(f"Hotkey '{self.config.hotkey}' registered successfully.")
             return True
         except Exception as e:
+            self.unregister()
             self._last_registration_error = str(e)
             print(f"Failed to register hotkey: {e}")
             return False
 
     def unregister(self) -> None:
         """Unregister the global hotkey."""
-        if self._hotkey_registered:
+        if self._remove_hotkey is not None:
             with contextlib.suppress(Exception):
-                keyboard.remove_hotkey(self.config.hotkey)
-            self._hotkey_registered = False
+                self._remove_hotkey()
+            self._remove_hotkey = None
+        for remove_hook in self._key_hooks:
+            with contextlib.suppress(Exception):
+                remove_hook()
+        self._key_hooks.clear()
+        self._activation_keys.clear()
+        self._consumed_keys.clear()
+        self._hotkey_registered = False
         self._last_registration_error = None
+
+    def _filter_consumed_key(self, event: keyboard.KeyboardEvent) -> bool:
+        """Consume repeats and release of a key used to activate dictation."""
+        if event.scan_code not in self._consumed_keys:
+            return True
+        if event.event_type == keyboard.KEY_UP:
+            self._consumed_keys.discard(event.scan_code)
+        # Keep suppressing after modifiers are released, when add_hotkey no
+        # longer matches the chord and would leak key-up to a focused player.
+        return False
 
     def get_last_registration_error(self) -> str | None:
         """Return the last registration failure message, if any."""
@@ -117,6 +156,11 @@ class HotkeyManager:
     def _on_hotkey_pressed(self) -> None:
         """Handle hotkey press event."""
         with self._lock:
+            self._consumed_keys.update(
+                scan_code
+                for scan_code in self._activation_keys
+                if keyboard.is_pressed(scan_code)
+            )
             if self._state == HotkeyState.IDLE:
                 self._set_state(HotkeyState.RECORDING)
                 if self._on_start:

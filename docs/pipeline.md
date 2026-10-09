@@ -14,7 +14,8 @@ finalization can recompute the transcript from the full recording.
 
 ```mermaid
 flowchart LR
-    HotkeyStart["Start hotkey"] --> AppStart["MurmurApp._on_recording_start"]
+    HotkeyStart["Start hotkey"] --> HotkeyFilter["Suppress chord repeats and release"]
+    HotkeyFilter --> AppStart["MurmurApp._on_recording_start"]
     AppStart --> MediaPause["Optional media pause"]
     AppStart --> LiveWorker["Start live transcription worker"]
     AppStart --> LiveVad["Start live VAD worker"]
@@ -57,6 +58,16 @@ flowchart LR
 ## Main Concepts
 
 ### Capture
+
+For a single-chord hotkey such as `Ctrl+Shift+Space`, Murmur consumes repeat
+presses and the release of the activation key, including when modifiers are
+released first. This prevents a focused media control from receiving a stray
+Space release. Unmatched key presses pass through normally. Sequence hotkeys
+retain the keyboard library's event handling.
+
+When media pause is enabled, Murmur resumes playback after capture stops or
+fails to start only if its pause request succeeded. A failed pause request
+does not schedule a resume.
 
 `AudioRecorder` opens a `sounddevice.InputStream` at the configured sample rate,
 mono channel, and `float32` sample format. The stream callback stores each block
