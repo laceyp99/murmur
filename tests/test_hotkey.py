@@ -91,6 +91,44 @@ def test_unmatched_chord_and_typing_pass_through(hotkey_events):
     assert states == []
 
 
+@pytest.mark.parametrize("repeat_count", [0, 3])
+@pytest.mark.parametrize(
+    "release_order", [("ctrl", "shift", "space"), ("space", "ctrl", "shift")]
+)
+def test_space_pressed_before_modifiers_keeps_its_release(
+    hotkey_events, repeat_count, release_order
+):
+    manager, states, dispatch, _ = hotkey_events
+    assert dispatch("space", keyboard.KEY_DOWN)
+    dispatch("ctrl", keyboard.KEY_DOWN)
+    dispatch("shift", keyboard.KEY_DOWN)
+    for _ in range(repeat_count):
+        assert dispatch("space", keyboard.KEY_DOWN)
+    for key in release_order:
+        accepted = dispatch(key, keyboard.KEY_UP)
+        if key == "space":
+            assert accepted
+    assert manager.get_state() == HotkeyState.IDLE
+    assert states == []
+    for key in ("ctrl", "shift", "space"):
+        dispatch(key, keyboard.KEY_DOWN)
+    assert manager.get_state() == HotkeyState.RECORDING
+
+
+def test_only_final_fresh_key_is_consumed_in_multi_key_chord(hotkey_events):
+    manager, states, dispatch, _ = hotkey_events
+    manager.unregister()
+    manager.config.hotkey = "ctrl+space+a"
+    assert manager.register(on_state_change=states.append)
+    dispatch("ctrl", keyboard.KEY_DOWN)
+    assert dispatch("space", keyboard.KEY_DOWN)
+    assert not dispatch("a", keyboard.KEY_DOWN)
+    dispatch("ctrl", keyboard.KEY_UP)
+    assert dispatch("space", keyboard.KEY_UP)
+    assert not dispatch("a", keyboard.KEY_UP)
+    assert states == [HotkeyState.RECORDING]
+
+
 def test_unregister_removes_only_owned_hooks(hotkey_events):
     manager, _, dispatch, listener = hotkey_events
 

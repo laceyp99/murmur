@@ -62,8 +62,12 @@ flowchart LR
 For a single-chord hotkey such as `Ctrl+Shift+Space`, Murmur consumes repeat
 presses and the release of the activation key, including when modifiers are
 released first. This prevents a focused media control from receiving a stray
-Space release. Unmatched key presses pass through normally. Sequence hotkeys
-retain the keyboard library's event handling.
+Space release. Only the fresh key press that completes the chord is consumed.
+Keys pressed before the chord matched keep their repeats and release, so holding
+Space first and then adding modifiers does not trigger recording on auto-repeat
+or leave the focused application treating Space as held. Unmatched key presses
+pass through normally. Sequence hotkeys retain the keyboard library's event
+handling.
 
 When media pause is enabled, Murmur resumes playback after capture stops or
 fails to start only if its pause request succeeded. A failed pause request

@@ -66,6 +66,8 @@ class HotkeyManager:
         self._remove_hotkey: Callable[[], None] | None = None
         self._key_hooks: list[Callable[[], None]] = []
         self._activation_keys: set[int] = set()
+        self._held_activation_keys: set[int] = set()
+        self._fresh_activation_key: int | None = None
         self._consumed_keys: set[int] = set()
         self._lock = threading.Lock()
 
@@ -135,32 +137,44 @@ class HotkeyManager:
                 remove_hook()
         self._key_hooks.clear()
         self._activation_keys.clear()
+        self._held_activation_keys.clear()
+        self._fresh_activation_key = None
         self._consumed_keys.clear()
         self._hotkey_registered = False
         self._last_registration_error = None
 
     def _filter_consumed_key(self, event: keyboard.KeyboardEvent) -> bool:
         """Consume repeats and release of a key used to activate dictation."""
-        if event.scan_code not in self._consumed_keys:
-            return True
+        consumed = event.scan_code in self._consumed_keys
         if event.event_type == keyboard.KEY_UP:
+            self._held_activation_keys.discard(event.scan_code)
+            self._fresh_activation_key = None
             self._consumed_keys.discard(event.scan_code)
+        else:
+            self._fresh_activation_key = (
+                None
+                if event.scan_code in self._held_activation_keys
+                else event.scan_code
+            )
+            self._held_activation_keys.add(event.scan_code)
         # Keep suppressing after modifiers are released, when add_hotkey no
         # longer matches the chord and would leak key-up to a focused player.
-        return False
+        return not consumed
 
     def get_last_registration_error(self) -> str | None:
         """Return the last registration failure message, if any."""
         return self._last_registration_error
 
-    def _on_hotkey_pressed(self) -> None:
+    def _on_hotkey_pressed(self) -> bool:
         """Handle hotkey press event."""
         with self._lock:
-            self._consumed_keys.update(
-                scan_code
-                for scan_code in self._activation_keys
-                if keyboard.is_pressed(scan_code)
-            )
+            if self._activation_keys:
+                # A key held before the chord matched already reached the app.
+                # Let its repeats and release through instead of consuming it.
+                if self._fresh_activation_key is None:
+                    return True
+                self._consumed_keys.add(self._fresh_activation_key)
+                self._fresh_activation_key = None
             if self._state == HotkeyState.IDLE:
                 self._set_state(HotkeyState.RECORDING)
                 if self._on_start:
@@ -171,6 +185,7 @@ class HotkeyManager:
                 self._set_state(HotkeyState.PROCESSING)
                 if self._on_stop:
                     threading.Thread(target=self._on_stop).start()
+            return False
 
     def _set_state(self, state: HotkeyState) -> None:
         """Set the current state and notify listeners."""
