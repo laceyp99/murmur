@@ -7,6 +7,7 @@ import re
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from threading import Event
 from typing import Protocol
 
 import numpy as np
@@ -14,6 +15,7 @@ import torch
 import whisper
 
 from .audio import AudioData
+from .cancellation import check_cancelled
 from .config import get_config
 from .llm_postprocess import LLMPostProcessor, OllamaClient
 from .user_vocab import load_user_vocab
@@ -117,7 +119,9 @@ class Transcriber:
         self._model = whisper.load_model(self.config.model_name, device=self._device)
         print("Model loaded successfully.")
 
-    def transcribe(self, audio_data: AudioData) -> str:
+    def transcribe(
+        self, audio_data: AudioData, *, cancel_event: Event | None = None
+    ) -> str:
         """
         Transcribe audio to text.
 
@@ -127,27 +131,37 @@ class Transcriber:
         Returns:
             Transcribed text string.
         """
-        return self.transcribe_segments([audio_data]).text
+        return self.transcribe_segments([audio_data], cancel_event=cancel_event).text
 
-    def finalize_text(self, text: str) -> str:
+    def finalize_text(self, text: str, *, cancel_event: Event | None = None) -> str:
         """Apply document-level cleanup to pre-transcribed text."""
+        check_cancelled(cancel_event)
         cleaned_text = self._post_process_document(text)
         if not cleaned_text or not getattr(self.config, "ollama_enabled", False):
             return cleaned_text
 
         processor = self._get_llm_post_processor()
+        check_cancelled(cancel_event)
         if processor is None:
             return cleaned_text
 
         try:
-            return processor.process(cleaned_text)
+            result = processor.process(cleaned_text)
         except Exception:
+            check_cancelled(cancel_event)
             print("Ollama post-processing failed; using local transcript cleanup.")
             return cleaned_text
+        check_cancelled(cancel_event)
+        return result
 
-    def finalize_segment_texts(self, segment_texts: Sequence[str]) -> str:
+    def finalize_segment_texts(
+        self, segment_texts: Sequence[str], *, cancel_event: Event | None = None
+    ) -> str:
         """Apply boundary-aware segment joining before document-level cleanup."""
-        return self.finalize_text(self._join_segment_texts(segment_texts))
+        check_cancelled(cancel_event)
+        return self.finalize_text(
+            self._join_segment_texts(segment_texts), cancel_event=cancel_event
+        )
 
     def _get_llm_post_processor(self) -> LLMPostProcessor | None:
         """Build the optional final-pass LLM post-processor lazily."""
@@ -192,15 +206,20 @@ class Transcriber:
         self,
         segments: Sequence[AudioSegmentLike],
         debug: bool = False,
+        *,
+        cancel_event: Event | None = None,
     ) -> TranscriptionResult:
         """Transcribe ordered audio segments and return raw and final text."""
+        check_cancelled(cancel_event)
         if self._model is None:
             self.load_model()
 
         segment_results: list[SegmentTranscription] = []
         for index, segment in enumerate(segments):
+            check_cancelled(cancel_event)
             start_time = time.time()
             text = self._transcribe_segment_audio(segment.audio)
+            check_cancelled(cancel_event)
             elapsed = time.time() - start_time
 
             if not text:
@@ -221,7 +240,7 @@ class Transcriber:
                 )
 
         final_text = self.finalize_segment_texts(
-            [segment.text for segment in segment_results]
+            [segment.text for segment in segment_results], cancel_event=cancel_event
         )
 
         return TranscriptionResult(text=final_text, segments=segment_results)

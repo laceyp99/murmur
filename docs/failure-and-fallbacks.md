@@ -6,6 +6,12 @@ failures degrade to a slower full-recording path instead of losing the user's
 dictation. A recording with no captured audio or a final transcription exception
 is reported as a failure and does not produce clipboard output.
 
+An explicit user cancellation deliberately discards the session. It does not
+trigger offline fallback, clipboard output, or training-data saving. Existing
+model calls may finish, with their results ignored. This is distinct from a
+pipeline failure, which still preserves audio for fallback. See
+[Cancellation](pipeline.md#cancellation) for the delivery boundary.
+
 ## Fallback Overview
 
 ```mermaid

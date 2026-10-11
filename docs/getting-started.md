@@ -177,7 +177,15 @@ registration failure stops startup.
    a short error such as `No speech detected` for about 4 seconds.
 6. Paste with `Ctrl+V` in the target application.
 
-The overlay never takes focus and clicks pass through it. Turn it off with
+To discard a recording or pending result, click the pill's **X** or choose
+**Cancel dictation** from the tray menu. This stops capture, skips remaining
+transcription and cleanup, and leaves your clipboard untouched if delivery has
+not begun. Cancelled sessions are not saved to training data. The pill shows
+`Cancelled` immediately; an active model call may finish before another
+recording can start.
+
+The overlay never takes focus. Its visible pill absorbs clicks, with only X
+performing an action; clicks outside the pill pass through. Turn it off with
 **Settings > General > Show recording overlay**. Windows toast notifications are
 off by default and can be enabled separately with **Enable notifications**.
 

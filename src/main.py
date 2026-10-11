@@ -9,13 +9,22 @@ import time
 
 from .audio import AudioData, AudioRecorder
 from .autostart import set_autostart
+from .cancellation import TranscriptionCancelledError, check_cancelled
 from .clipboard import copy_to_clipboard
 from .config import DEFAULT_CONFIG, ConfigError, get_config
 from .hotkey import HotkeyManager, HotkeyState, is_hotkey_valid
 from .logger import get_logger
 from .media_control import get_media_controller
 from .notifications import get_notification_manager
-from .recording_overlay import ERROR, HIDDEN, PROCESSING, RECORDING, SUCCESS
+from .recording_overlay import (
+    CANCELLED,
+    CANCELLED_DONE,
+    ERROR,
+    HIDDEN,
+    PROCESSING,
+    RECORDING,
+    SUCCESS,
+)
 from .transcription import Transcriber
 from .transcription_live import (
     LiveSegmentMetrics,
@@ -76,7 +85,11 @@ class MurmurApp:
         self.hotkey_manager = HotkeyManager()
         self.notifications = get_notification_manager()
         self.logger = get_logger()
-        self.tray = TrayManager(on_exit_callback=self.stop)
+        self.tray = TrayManager(
+            on_exit_callback=self.stop,
+            on_cancel_callback=self._on_recording_cancel,
+            get_cancel_session_callback=self._get_cancel_session,
+        )
         self.media_controller = get_media_controller()
 
         self._running = False
@@ -88,7 +101,15 @@ class MurmurApp:
         self._recording_limit_stop_started = False
         self._recording_limit_stop_lock = threading.Lock()
         self._recording_stop_started = False
-        self._recording_stop_lock = threading.Lock()
+        self._recording_stop_lock = threading.RLock()
+        self._lifecycle_lock = threading.RLock()
+        self._cancel_event = threading.Event()
+        self._session_active = False
+        self._delivery_started = False
+
+        from .settings_gui import set_overlay_cancel_callback
+
+        set_overlay_cancel_callback(self._on_recording_cancel)
 
         if preload_model:
             print("Preloading Whisper model...")
@@ -238,6 +259,11 @@ class MurmurApp:
 
     def _on_recording_start(self) -> None:
         """Handle recording start."""
+        with self._lifecycle_lock:
+            self._start_recording_session()
+
+    def _start_recording_session(self) -> None:
+        """Serialize startup with teardown so a cancelled start cannot leak capture."""
         print("🎤 Recording started...")
         self._live_pipeline_degraded = False
         self._live_pipeline_degraded_reason = None
@@ -246,8 +272,14 @@ class MurmurApp:
             self._recording_stop_started = False
             self._overlay_session += 1
             session = self._overlay_session
+            self._cancel_event = threading.Event()
+            self._session_active = True
+            self._delivery_started = False
         self.recorder.set_capture_error_callback(
             lambda message: self._on_capture_error(message, session=session)
+        )
+        self.recorder.set_recording_limit_callback(
+            lambda duration: self._on_recording_limit_reached(duration, session=session)
         )
         self.notifications.notify_recording_started()
         self.tray.set_status("Recording...")
@@ -274,15 +306,60 @@ class MurmurApp:
             self.notifications.notify_error(f"Recording failed: {e}")
             self.tray.set_status("Error")
             self._show_overlay(ERROR, OVERLAY_START_FAILED)
-            self.hotkey_manager.set_idle()
             # Resume media if we paused it but recording failed
             if self._was_media_playing:
                 self.media_controller.play()
                 self._was_media_playing = False
+            with self._recording_stop_lock:
+                if not self._cancel_event.is_set():
+                    self._session_active = False
+                    self.hotkey_manager.set_idle()
             return
 
         # Only an input stream that actually started earns the recording cue.
         self._show_overlay(RECORDING)
+
+    def _can_cancel(self) -> bool:
+        """Whether the current session can still be discarded before delivery."""
+        return self._get_cancel_session() is not None
+
+    def _get_cancel_session(self) -> int | None:
+        """Capture session identity before a tray request leaves the UI thread."""
+        with self._recording_stop_lock:
+            if (
+                self._session_active
+                and not self._delivery_started
+                and not self._cancel_event.is_set()
+            ):
+                return self._overlay_session
+            return None
+
+    def _on_recording_cancel(self, session: int | None = None) -> None:
+        """Claim cancellation and let the existing stop owner finish teardown."""
+        with self._recording_stop_lock:
+            if (
+                not self._session_active
+                or self._delivery_started
+                or self._cancel_event.is_set()
+                or (session is not None and session != self._overlay_session)
+            ):
+                return
+            self._cancel_event.set()
+            owns_stop = not self._recording_stop_started
+            self._recording_stop_started = True
+            self.hotkey_manager.set_processing()
+            self.tray.set_status("Cancelled")
+            self._show_overlay(CANCELLED)
+            # Keep feedback and discard requests ahead of the owner's Ready event.
+            self._cancel_live_workers()
+        if owns_stop:
+            self._finish_recording_stop()
+
+    def _cancel_live_workers(self) -> None:
+        """Drop queued work without waiting for model calls on this thread."""
+        for worker in (self.live_segmenter, self.live_transcription_worker):
+            if worker is not None:
+                worker.cancel()
 
     def _on_recording_stop(self) -> None:
         """Handle recording stop via hotkey."""
@@ -302,22 +379,48 @@ class MurmurApp:
 
     def _finish_recording_stop(self) -> None:
         """Stop capture and finalize its buffered audio."""
+        with self._lifecycle_lock:
+            try:
+                self._stop_and_finalize_session()
+            except TranscriptionCancelledError:
+                pass
+            finally:
+                # All worker/model work is done before another session is allowed.
+                self.live_transcript_accumulator = None
+                with self._recording_stop_lock:
+                    if self._cancel_event.is_set():
+                        self._show_overlay(CANCELLED_DONE)
+                    self._session_active = False
+                    self.tray.set_status("Ready")
+                    self.hotkey_manager.set_idle()
+
+    def _stop_and_finalize_session(self) -> None:
+        """Preserve normal stop's drain path and discard deliberately cancelled work."""
         print("⏹️ Recording stopped.")
-        self.tray.set_status("Finalizing...")
+        if not self._cancel_event.is_set():
+            self.tray.set_status("Finalizing...")
         finalization_started_at = time.perf_counter()
 
-        audio_data = self.recorder.stop_recording()
-        if audio_data is not None:
-            self._show_overlay(PROCESSING)
-        # Resume media if it was playing before recording
-        if self._was_media_playing:
-            if not self.media_controller.play():
-                print("⚠️ Failed to resume media playback")
-                self.notifications.notify("murmur", "Could not resume media playback")
-            self._was_media_playing = False
-
-        self._stop_live_segmentation()
-        self._stop_live_transcription()
+        try:
+            audio_data = self.recorder.stop_recording()
+            if audio_data is not None and not self._cancel_event.is_set():
+                self._show_overlay(PROCESSING)
+            # Resume media if it was playing before recording.
+            if self._was_media_playing:
+                if not self.media_controller.play():
+                    print("⚠️ Failed to resume media playback")
+                    self.notifications.notify(
+                        "murmur", "Could not resume media playback"
+                    )
+                self._was_media_playing = False
+        finally:
+            if self._cancel_event.is_set():
+                self._cancel_live_workers()
+            try:
+                self._stop_live_segmentation()
+            finally:
+                self._stop_live_transcription()
+        check_cancelled(self._cancel_event)
 
         if audio_data is not None:
             self._finalize_recording(
@@ -327,11 +430,14 @@ class MurmurApp:
         else:
             print("⚠️ No audio data captured.")
             self._show_overlay(ERROR, OVERLAY_NO_AUDIO)
-            self.tray.set_status("Ready")
-            self.hotkey_manager.set_idle()
 
-    def _on_recording_limit_reached(self, duration_seconds: float) -> None:
+    def _on_recording_limit_reached(
+        self, duration_seconds: float, *, session: int | None = None
+    ) -> None:
         """Handle the recorder reaching max duration from the audio callback."""
+        with self._recording_stop_lock:
+            if session is not None and session != self._overlay_session:
+                return
         with self._recording_limit_stop_lock:
             if self._recording_limit_stop_started:
                 return
@@ -340,13 +446,16 @@ class MurmurApp:
         thread = threading.Thread(
             target=self._handle_recording_limit_reached,
             args=(duration_seconds,),
+            kwargs={"session": session},
             daemon=True,
         )
         thread.start()
 
-    def _handle_recording_limit_reached(self, duration_seconds: float) -> None:
+    def _handle_recording_limit_reached(
+        self, duration_seconds: float, *, session: int | None = None
+    ) -> None:
         """Notify the user and finalize a recording stopped by the duration cap."""
-        if not self._claim_recording_stop():
+        if not self._claim_recording_stop(session=session):
             return
         print(
             "Maximum recording duration reached "
@@ -374,6 +483,7 @@ class MurmurApp:
         finalization_started_at: float,
     ) -> None:
         """Finalize stop-time output from the live transcript, or fall back offline."""
+        check_cancelled(self._cancel_event)
         if self._live_pipeline_degraded:
             reason = (
                 self._live_pipeline_degraded_reason or "Live transcription degraded"
@@ -405,9 +515,6 @@ class MurmurApp:
             # Report before set_idle so a new session cannot be replaced.
             self._show_overlay(ERROR, OVERLAY_TRANSCRIPTION_FAILED)
             raise
-        finally:
-            self.tray.set_status("Ready")
-            self.hotkey_manager.set_idle()
 
     def _process_audio(
         self,
@@ -429,38 +536,49 @@ class MurmurApp:
                 live_segment_metrics=LiveSegmentMetrics.empty(),
             )
 
+        except TranscriptionCancelledError:
+            raise
         except Exception:
+            check_cancelled(self._cancel_event)
             print("Transcription failed.")
             self.notifications.notify_error("Transcription failed.")
             self._show_overlay(ERROR, OVERLAY_TRANSCRIPTION_FAILED)
 
-        finally:
-            self.tray.set_status("Ready")
-            self.hotkey_manager.set_idle()
-
     def _transcribe_audio(self, audio_data: AudioData) -> str:
         """Transcribe audio through VAD segments with a full-clip fallback."""
+        check_cancelled(self._cancel_event)
         segmenter = self._get_segmenter(audio_data.sample_rate)
         if segmenter is None:
             reason = self._vad_disabled_reason or "VAD unavailable"
             print(f"⚠️ {reason}. Falling back to full clip.")
-            return self.transcriber.transcribe(audio_data)
+            return self.transcriber.transcribe(
+                audio_data, cancel_event=self._cancel_event
+            )
 
         try:
             segments = segmenter.segment_audio(audio_data.audio)
         except Exception as exc:
             print(f"⚠️ VAD segmentation failed: {exc}. Falling back to full clip.")
-            return self.transcriber.transcribe(audio_data)
+            check_cancelled(self._cancel_event)
+            return self.transcriber.transcribe(
+                audio_data, cancel_event=self._cancel_event
+            )
+
+        check_cancelled(self._cancel_event)
 
         if not segments:
             print("⚠️ No VAD speech segments detected. Falling back to full clip.")
-            return self.transcriber.transcribe(audio_data)
+            return self.transcriber.transcribe(
+                audio_data, cancel_event=self._cancel_event
+            )
 
         print(f"Detected {len(segments)} speech segment(s).")
         for index, segment in enumerate(segments):
             print(f"  Segment {index}: {segment.duration:.2f}s")
 
-        return self.transcriber.transcribe_segments(segments, debug=True).text
+        return self.transcriber.transcribe_segments(
+            segments, debug=True, cancel_event=self._cancel_event
+        ).text
 
     def _get_live_transcript_text(self) -> str:
         """Return the finalized live transcript text accumulated during recording."""
@@ -471,7 +589,9 @@ class MurmurApp:
         if not chunks:
             return ""
 
-        return self.transcriber.finalize_segment_texts([chunk.text for chunk in chunks])
+        return self.transcriber.finalize_segment_texts(
+            [chunk.text for chunk in chunks], cancel_event=self._cancel_event
+        )
 
     def _get_live_segment_metrics(self) -> LiveSegmentMetrics:
         """Return live segment metrics for chunks that contributed text."""
@@ -489,6 +609,11 @@ class MurmurApp:
         live_segment_metrics: LiveSegmentMetrics,
     ) -> None:
         """Finish clipboard, notification, and logging for a completed transcript."""
+        with self._recording_stop_lock:
+            check_cancelled(self._cancel_event)
+            if self._delivery_started:
+                return
+            self._delivery_started = True
         if not text:
             print("⚠️ No speech detected.")
             self.notifications.notify("murmur", "No speech detected.")

@@ -54,6 +54,7 @@ class LiveVADSegmentationWorker:
         self._thread: threading.Thread | None = None
         self._running = False
         self._state_lock = threading.RLock()
+        self._cancelled = threading.Event()
         self._degraded = False
         self._last_error: str | None = None
         self._degraded_notified = False
@@ -93,16 +94,25 @@ class LiveVADSegmentationWorker:
         elif not prepared_block.flags.c_contiguous:
             prepared_block = np.ascontiguousarray(prepared_block)
 
-        self._queue.put(prepared_block)
+        with self._state_lock:
+            if not self._running or self._cancelled.is_set():
+                return
+            self._queue.put(prepared_block)
+
+    def cancel(self) -> None:
+        """Discard queued audio and skip the final speech flush without joining."""
+        with self._state_lock:
+            self._cancelled.set()
+            self._running = False
+            self._discard_queued_audio_blocks()
+            self._queue.put(None)
 
     def stop(self) -> None:
         """Stop the worker and flush any pending speech segment."""
-        if not self._running:
-            self._join_worker_thread()
-            return
-
-        self._running = False
-        self._queue.put(None)
+        with self._state_lock:
+            if self._running:
+                self._running = False
+                self._queue.put(None)
         self._join_worker_thread()
 
     def is_degraded(self) -> bool:
@@ -122,6 +132,10 @@ class LiveVADSegmentationWorker:
             except Empty:
                 if self._running:
                     continue
+                break
+
+            if self._cancelled.is_set():
+                self._clear_pending_audio_state()
                 break
 
             if audio_block is None:
@@ -170,7 +184,7 @@ class LiveVADSegmentationWorker:
         self._pending_block = buffered_audio[consumed_samples:].copy()
 
         for frame_index in range(frame_count):
-            if self.is_degraded():
+            if self.is_degraded() or self._cancelled.is_set():
                 break
 
             frame_start = frame_index * self.frame_samples
@@ -266,6 +280,8 @@ class LiveVADSegmentationWorker:
         self._pending_segment = segment
 
     def _emit_pending_segment(self) -> None:
+        if self._cancelled.is_set():
+            return
         if self._pending_segment is None:
             return
 

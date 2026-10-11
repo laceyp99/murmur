@@ -286,9 +286,105 @@ def test_overlay_size_widens_only_for_text_states():
     processing = overlay_module.overlay_size(PROCESSING, 0, 1.0)
     success = overlay_module.overlay_size(SUCCESS, 120, 1.0)
 
-    assert recording == processing == (64, 36)
+    assert recording == processing == (100, 36)
     assert success == (2 * 14 + 16 + 8 + 120, 36)
-    assert overlay_module.overlay_size(RECORDING, 0, 1.5) == (96, 54)
+    assert overlay_module.overlay_size(RECORDING, 0, 1.5) == (150, 54)
+
+
+def test_cancelled_waits_for_workers_and_preserves_minimum_display_time():
+    master = FakeMaster()
+    now = [10.0]
+    overlay = RecordingOverlay(master, view_factory=FakeView, clock=lambda: now[0])
+    overlay.request(RECORDING, 1)
+    overlay.request(overlay_module.CANCELLED, 1)
+    assert master.jobs == {}
+    assert overlay._view.shown[-1][1] == "Cancelled"
+    now[0] = 10.25
+    overlay.request(overlay_module.CANCELLED_DONE, 1)
+    assert master.delays() == [750]
+    for state in (RECORDING, PROCESSING, SUCCESS, ERROR, overlay_module.CANCELLED):
+        assert overlay.request(state, 1) is False
+    overlay.request(RECORDING, 2)
+    assert master.delays() == [overlay_module.ANIMATION_FRAME_MS]
+
+
+def test_cancelled_done_after_minimum_time_hides_without_extra_delay():
+    master = FakeMaster()
+    now = [10.0]
+    overlay = RecordingOverlay(master, view_factory=FakeView, clock=lambda: now[0])
+    overlay.request(overlay_module.CANCELLED, 1)
+    now[0] = 12.0
+    overlay.request(overlay_module.CANCELLED_DONE, 1)
+    assert master.delays() == [0]
+    master.fire(0)
+    assert overlay.state == HIDDEN
+
+
+def test_cancel_dispatches_displayed_session_only_while_active():
+    calls = []
+    overlay = RecordingOverlay(
+        FakeMaster(), view_factory=FakeView, on_cancel=calls.append
+    )
+    overlay.request(RECORDING, 4)
+    overlay.cancel()
+    overlay.request(PROCESSING, 5)
+    overlay.cancel()
+    overlay.request(overlay_module.CANCELLED, 5)
+    overlay.cancel()
+    assert calls == [4, 5]
+
+
+def test_cancel_hit_target_is_scaled_and_ignores_other_pill_clicks():
+    from types import SimpleNamespace
+
+    view = overlay_module.OverlayWindow.__new__(overlay_module.OverlayWindow)
+    view._state = RECORDING
+    view._scale = 1.5
+    view._geometry = (0, 0, 150, 54)
+    calls = []
+    view._cancel_callback = lambda: calls.append(True)
+    view._on_click(SimpleNamespace(x=120, y=27))
+    view._on_click(SimpleNamespace(x=40, y=27))
+    view._state = SUCCESS
+    view._on_click(SimpleNamespace(x=120, y=27))
+    assert calls == [True]
+
+
+def test_cancel_callback_failure_does_not_disable_ui_or_print_private_text(capsys):
+    def fail(_session):
+        raise ValueError("private transcript")
+
+    overlay = RecordingOverlay(FakeMaster(), view_factory=FakeView, on_cancel=fail)
+    overlay.request(RECORDING, 1)
+    overlay.cancel()
+    assert overlay.request(PROCESSING, 1)
+    error = capsys.readouterr().err
+    assert "ValueError" in error
+    assert "private transcript" not in error
+
+
+def test_animation_redraw_preserves_hover_and_single_tooltip_timer():
+    from types import SimpleNamespace
+
+    view = overlay_module.OverlayWindow.__new__(overlay_module.OverlayWindow)
+    view._state = RECORDING
+    view._scale = 1
+    view._geometry = (0, 0, 100, 36)
+    view._hover = False
+    view._tooltip_job = None
+    view._tooltip = None
+    view._window = FakeMaster()
+    fills = []
+    view._canvas = SimpleNamespace(itemconfigure=lambda _tag, **kw: fills.append(kw))
+    event = SimpleNamespace(x=82, y=18)
+    view._on_motion(event)
+    view._on_motion(event)
+    assert view._hover
+    assert view._window.delays() == [500]
+    assert len(fills) == 1
+    view._on_leave()
+    assert not view._hover
+    assert view._window.jobs == {}
 
 
 @pytest.mark.parametrize(

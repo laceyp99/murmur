@@ -50,11 +50,11 @@ class FakeTranscriber:
         self.load_model_calls = 0
         self.warm_llm_post_processor_calls = 0
 
-    def transcribe_segments(self, segments, debug=False):
+    def transcribe_segments(self, segments, debug=False, *, cancel_event=None):
         self.segment_calls.append({"segments": list(segments), "debug": debug})
         return SimpleNamespace(text="Segmented text.")
 
-    def transcribe(self, audio_data):
+    def transcribe(self, audio_data, *, cancel_event=None):
         self.audio_calls.append(audio_data)
         return "Fallback text."
 
@@ -66,7 +66,7 @@ class FakeTranscriber:
         self.finalize_calls.append(text)
         return f"FINAL:{text}" if text else ""
 
-    def finalize_segment_texts(self, segment_texts):
+    def finalize_segment_texts(self, segment_texts, *, cancel_event=None):
         segment_texts = list(segment_texts)
         self.finalize_segment_calls.append(segment_texts)
         return self.finalize_text(" ".join(segment_texts))
@@ -104,8 +104,12 @@ def make_app(segmenter, transcriber, config=None):
     app._live_vad_disabled_reason = None
     app._live_pipeline_degraded = False
     app._live_pipeline_degraded_reason = None
-    app._recording_stop_lock = threading.Lock()
+    app._recording_stop_lock = threading.RLock()
     app._recording_stop_started = False
+    app._lifecycle_lock = threading.RLock()
+    app._cancel_event = threading.Event()
+    app._session_active = True
+    app._delivery_started = False
     return app
 
 
@@ -422,9 +426,7 @@ def test_init_preloads_whisper_and_ollama_when_enabled(monkeypatch):
         main_module, "get_notification_manager", lambda: SimpleNamespace()
     )
     monkeypatch.setattr(main_module, "get_logger", lambda: SimpleNamespace())
-    monkeypatch.setattr(
-        main_module, "TrayManager", lambda on_exit_callback: SimpleNamespace()
-    )
+    monkeypatch.setattr(main_module, "TrayManager", lambda **kwargs: SimpleNamespace())
     monkeypatch.setattr(main_module, "get_media_controller", lambda: SimpleNamespace())
 
     app = main_module.MurmurApp(preload_model=True)
@@ -456,9 +458,7 @@ def test_init_skips_ollama_warmup_when_disabled(monkeypatch):
         main_module, "get_notification_manager", lambda: SimpleNamespace()
     )
     monkeypatch.setattr(main_module, "get_logger", lambda: SimpleNamespace())
-    monkeypatch.setattr(
-        main_module, "TrayManager", lambda on_exit_callback: SimpleNamespace()
-    )
+    monkeypatch.setattr(main_module, "TrayManager", lambda **kwargs: SimpleNamespace())
     monkeypatch.setattr(main_module, "get_media_controller", lambda: SimpleNamespace())
 
     main_module.MurmurApp(preload_model=True)
@@ -653,9 +653,10 @@ def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeyp
     assert live_segment_metrics.segment_count == 2
     assert live_segment_metrics.latency_avg_seconds == 49.55
     assert live_segment_metrics.latency_max_seconds == 99.0
-    assert app.tray.statuses == ["Ready"]
+    # Readiness belongs to the stop owner after finalization and worker teardown.
+    assert app.tray.statuses == []
     assert app.hotkey_manager.processing_calls == 1
-    assert app.hotkey_manager.idle_calls == 1
+    assert app.hotkey_manager.idle_calls == 0
 
 
 def test_complete_transcription_stdout_omits_transcript_on_success(
@@ -1410,6 +1411,297 @@ def test_overlay_failure_does_not_interrupt_dictation(monkeypatch, capsys):
     assert app.notifications.copied_to_clipboard == 1
     assert app.hotkey_manager.idle_calls == 1
     assert "Recording overlay request failed." in capsys.readouterr().out
+
+
+def test_cancel_capture_discards_session_and_resumes_media(monkeypatch, overlay_calls):
+    app = make_stop_app(make_audio_data())
+    app._was_media_playing = True
+    copied = []
+    monkeypatch.setattr(main_module, "copy_to_clipboard", copied.append)
+
+    app._on_recording_cancel(7)
+    app._on_recording_cancel(7)
+
+    assert app.recorder.stop_calls == 1
+    assert app.media_controller.play_calls == 1
+    assert app.transcriber.audio_calls == []
+    assert app.transcriber.finalize_calls == []
+    assert copied == []
+    assert app.logger.entries == []
+    assert app.hotkey_manager.idle_calls == 1
+    assert not app._can_cancel()
+    assert overlay_calls == [("cancelled", 7, ""), ("cancelled_done", 7, "")]
+
+
+def test_cancel_during_processing_waits_for_call_and_suppresses_delivery(
+    monkeypatch, overlay_calls
+):
+    app = make_stop_app(make_audio_data())
+    entered, release = threading.Event(), threading.Event()
+    copied = []
+    errors = []
+
+    def transcribe(audio_data):
+        entered.set()
+        assert release.wait(2)
+        return "late result"
+
+    def stop():
+        try:
+            app._on_recording_stop()
+        except Exception as exc:
+            errors.append(exc)
+
+    monkeypatch.setattr(app, "_transcribe_audio", transcribe)
+    monkeypatch.setattr(main_module, "copy_to_clipboard", copied.append)
+    thread = threading.Thread(target=stop)
+    thread.start()
+    try:
+        assert entered.wait(2)
+        app._on_recording_cancel(7)
+        assert app.hotkey_manager.idle_calls == 0
+        assert app._session_active
+        assert overlay_calls[-1] == ("cancelled", 7, "")
+        app._on_recording_cancel(7)
+        assert app.recorder.stop_calls == 1
+    finally:
+        release.set()
+        thread.join(2)
+    assert not thread.is_alive()
+    assert not errors
+    assert copied == []
+    assert app.logger.entries == []
+    assert app.notifications.errors == []
+    assert app.live_transcript_accumulator is None
+    assert app.hotkey_manager.idle_calls == 1
+    assert overlay_calls[-1] == ("cancelled_done", 7, "")
+
+
+def test_delivery_claim_prevents_cancel_before_copy_returns(monkeypatch, overlay_calls):
+    app = make_stop_app(make_audio_data())
+    entered, release = threading.Event(), threading.Event()
+    copied = []
+    errors = []
+
+    def copy(text):
+        entered.set()
+        assert release.wait(2)
+        copied.append(text)
+        return True
+
+    def stop():
+        try:
+            app._on_recording_stop()
+        except Exception as exc:
+            errors.append(exc)
+
+    monkeypatch.setattr(main_module, "copy_to_clipboard", copy)
+    thread = threading.Thread(target=stop)
+    thread.start()
+    try:
+        assert entered.wait(2)
+        app._on_recording_cancel(7)
+        assert not app._cancel_event.is_set()
+        assert not app._can_cancel()
+    finally:
+        release.set()
+        thread.join(2)
+    assert not thread.is_alive()
+    assert not errors
+    assert copied == ["Fallback text."]
+    assert len(app.logger.entries) == 1
+    assert overlay_calls[-1] == ("success", 7, "")
+
+
+def test_stale_cancel_and_limit_do_not_claim_newer_session():
+    app = make_stop_app(make_audio_data())
+    app._on_recording_cancel(6)
+    app._handle_recording_limit_reached(60, session=6)
+    assert not app._cancel_event.is_set()
+    assert not app._recording_stop_started
+    assert app.recorder.stop_calls == 0
+    assert app._can_cancel()
+
+
+def test_cancel_while_normal_stop_drains_live_worker(monkeypatch, overlay_calls):
+    app = make_stop_app(make_audio_data())
+    entered, release = threading.Event(), threading.Event()
+    errors = []
+    monkeypatch.setattr(
+        app, "_stop_live_transcription", MurmurApp._stop_live_transcription.__get__(app)
+    )
+
+    def transcribe(segment):
+        entered.set()
+        assert release.wait(2)
+        return "discarded live text"
+
+    monkeypatch.setattr(app.transcriber, "transcribe_segment", transcribe)
+    app._start_live_transcription()
+    worker = app.live_transcription_worker
+    worker.submit_segment(SimpleNamespace(segment_id=0))
+
+    def stop():
+        try:
+            app._on_recording_stop()
+        except Exception as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=stop)
+    thread.start()
+    try:
+        assert entered.wait(2)
+        app._on_recording_cancel(7)
+        assert app.hotkey_manager.idle_calls == 0
+        assert overlay_calls[-1] == ("cancelled", 7, "")
+    finally:
+        release.set()
+        thread.join(2)
+        worker.stop()
+    assert not thread.is_alive()
+    assert not errors
+    assert app.live_transcription_worker is None
+    assert app.live_transcript_accumulator is None
+    assert app.transcriber.audio_calls == []
+    assert app.transcriber.finalize_calls == []
+    assert app.logger.entries == []
+    assert app.hotkey_manager.idle_calls == 1
+
+
+def test_cancel_during_startup_waits_for_stream_then_stops_it(
+    monkeypatch, overlay_calls
+):
+    app = make_stop_app(make_audio_data())
+    entered, release = threading.Event(), threading.Event()
+    cancelled = threading.Event()
+    errors = []
+    app.config.pause_media_while_recording = False
+    app.notifications.notify_recording_started = lambda: None
+    app.recorder.set_capture_error_callback = lambda callback: None
+    monkeypatch.setattr(app, "_start_live_transcription", lambda: None)
+    monkeypatch.setattr(app, "_start_live_segmentation", lambda: None)
+
+    def start_stream():
+        entered.set()
+        assert release.wait(2)
+
+    def start():
+        try:
+            app._on_recording_start()
+        except Exception as exc:
+            errors.append(exc)
+
+    def cancel():
+        try:
+            app._on_recording_cancel(app._overlay_session)
+        except Exception as exc:
+            errors.append(exc)
+
+    def show(state, message=""):
+        overlay_calls.append((state, app._overlay_session, message))
+        if state == main_module.CANCELLED:
+            cancelled.set()
+
+    monkeypatch.setattr(app.recorder, "start_recording", start_stream, raising=False)
+    monkeypatch.setattr(app, "_show_overlay", show)
+    starter = threading.Thread(target=start)
+    canceller = threading.Thread(target=cancel)
+    starter.start()
+    try:
+        assert entered.wait(2)
+        canceller.start()
+        assert cancelled.wait(2)
+        assert app.hotkey_manager.idle_calls == 0
+        assert app.recorder.stop_calls == 0
+    finally:
+        release.set()
+        starter.join(2)
+        if canceller.ident is not None:
+            canceller.join(2)
+    assert not starter.is_alive()
+    assert not canceller.is_alive()
+    assert not errors
+    assert app.recorder.stop_calls == 1
+    assert app.transcriber.audio_calls == []
+    assert app.hotkey_manager.idle_calls == 1
+    assert overlay_calls[-1][0] == main_module.CANCELLED_DONE
+
+
+def test_failed_start_does_not_release_session_claimed_by_cancellation(monkeypatch):
+    app = make_stop_app(None)
+    app.config.pause_media_while_recording = False
+    app.notifications.notify_recording_started = lambda: None
+    app.recorder.set_capture_error_callback = lambda callback: None
+    armed = threading.Event()
+    release_boundary = threading.Event()
+    cancellation_claimed = threading.Event()
+    release_cleanup = threading.Event()
+    errors = []
+    lock = threading.RLock()
+
+    class ReleaseBoundaryLock:
+        """Let cancellation claim the failed session before release takes its lock."""
+
+        def __enter__(self):
+            if threading.current_thread() is starter and armed.is_set():
+                armed.clear()
+                release_boundary.set()
+                assert cancellation_claimed.wait(2)
+            lock.acquire()
+            return self
+
+        def __exit__(self, *args):
+            lock.release()
+
+    def fail_start():
+        armed.set()
+        raise RuntimeError("microphone unavailable")
+
+    finish_stop = app._finish_recording_stop
+
+    def delayed_cleanup():
+        cancellation_claimed.set()
+        assert release_cleanup.wait(2)
+        finish_stop()
+
+    def start():
+        try:
+            app._on_recording_start()
+        except Exception as exc:
+            errors.append(exc)
+
+    def cancel():
+        try:
+            assert release_boundary.wait(2)
+            app._on_recording_cancel(app._overlay_session)
+        except Exception as exc:
+            errors.append(exc)
+
+    monkeypatch.setattr(app, "_recording_stop_lock", ReleaseBoundaryLock())
+    monkeypatch.setattr(app, "_start_live_transcription", lambda: None)
+    monkeypatch.setattr(app, "_start_live_segmentation", lambda: None)
+    monkeypatch.setattr(app.recorder, "start_recording", fail_start, raising=False)
+    monkeypatch.setattr(app, "_finish_recording_stop", delayed_cleanup)
+    starter = threading.Thread(target=start)
+    canceller = threading.Thread(target=cancel)
+    starter.start()
+    canceller.start()
+    try:
+        assert cancellation_claimed.wait(2)
+        starter.join(2)
+        assert not starter.is_alive()
+        assert app._cancel_event.is_set()
+        assert app._session_active
+        assert app.hotkey_manager.idle_calls == 0
+    finally:
+        release_cleanup.set()
+        starter.join(2)
+        canceller.join(2)
+    assert not canceller.is_alive()
+    assert not errors
+    assert app.hotkey_manager.idle_calls == 1
+    assert not app._session_active
+    assert app.recorder.stop_calls == 1
 
 
 def test_stop_app_closes_overlay(overlay_calls):

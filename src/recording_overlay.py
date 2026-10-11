@@ -3,7 +3,7 @@ Passive on-screen recording status overlay for murmur.
 
 Everything here runs on the shared CustomTkinter UI thread owned by
 ``settings_gui``. The overlay only reflects session state: it never reads audio
-levels or transcript text, never takes focus, and passes clicks through.
+levels or transcript text and never takes focus. The pill accepts cancellation.
 """
 
 import contextlib
@@ -20,6 +20,9 @@ RECORDING = "recording"
 PROCESSING = "processing"
 SUCCESS = "success"
 ERROR = "error"
+CANCELLED = "cancelled"
+CANCELLED_DONE = "cancelled_done"
+CANCELLED_HIDE_MS = 1000
 
 SUCCESS_MESSAGE = "Copied to clipboard"
 SUCCESS_HIDE_MS = 2000
@@ -27,7 +30,14 @@ ERROR_HIDE_MS = 4000
 ANIMATION_FRAME_MS = 40
 
 # A session's stages only move forward, so a late request cannot rewind it.
-_SESSION_STAGES = {RECORDING: 0, PROCESSING: 1, SUCCESS: 2, ERROR: 2}
+_SESSION_STAGES = {
+    RECORDING: 0,
+    PROCESSING: 1,
+    SUCCESS: 2,
+    ERROR: 2,
+    CANCELLED: 3,
+    CANCELLED_DONE: 4,
+}
 _ANIMATED_STATES = frozenset({RECORDING, PROCESSING})
 
 _TRANSPARENT_KEY = "#010203"
@@ -39,7 +49,7 @@ _ERROR_COLOR = "#fbbf24"
 
 # Logical pixels at 96 DPI; scaled by the display DPI at draw time.
 _PILL_HEIGHT = 36
-_ICON_PILL_WIDTH = 64
+_ICON_PILL_WIDTH = 100
 _BOTTOM_MARGIN = 16
 _TEXT_PADDING = 14
 _TEXT_ICON_SIZE = 16
@@ -67,7 +77,7 @@ class RecordingOverlay:
     disables the overlay for the rest of the process after one diagnostic.
     """
 
-    def __init__(self, master, view_factory=None, clock=time.monotonic):
+    def __init__(self, master, view_factory=None, clock=time.monotonic, on_cancel=None):
         self._master = master
         self._view_factory = view_factory or OverlayWindow
         self._clock = clock
@@ -80,6 +90,19 @@ class RecordingOverlay:
         self._started_at = 0.0
         self._frame_job = None
         self._hide_job = None
+        self._on_cancel = on_cancel
+        self._cancelled_at = None
+
+    def cancel(self):
+        """Dispatch cancellation for the displayed session only."""
+        if self.state in _ANIMATED_STATES and self._on_cancel is not None:
+            try:
+                self._on_cancel(self._session)
+            except Exception as exc:
+                print(
+                    f"Overlay cancellation failed ({type(exc).__name__}).",
+                    file=sys.stderr,
+                )
 
     def request(self, state, session=None, message=""):
         """Show ``state`` for ``session`` unless a newer session or stage owns the overlay.
@@ -119,19 +142,37 @@ class RecordingOverlay:
             if session == self._session and stage < self._stage:
                 return False
 
+        if session != self._session:
+            self._cancelled_at = None
         self._cancel_jobs()
         if self._view is None:
             self._view = self._view_factory(self._master)
+            if hasattr(self._view, "set_cancel_callback"):
+                self._view.set_cancel_callback(self.cancel)
         self._session = session
         self._stage = stage
         self.state = state
-        self._message = SUCCESS_MESSAGE if state == SUCCESS else message
+        self._message = (
+            "Cancelled"
+            if state in {CANCELLED, CANCELLED_DONE}
+            else SUCCESS_MESSAGE
+            if state == SUCCESS
+            else message
+        )
         self._started_at = self._clock()
+        if state in {CANCELLED, CANCELLED_DONE} and self._cancelled_at is None:
+            self._cancelled_at = self._started_at
         self._render()
 
         if state in _ANIMATED_STATES:
             self._frame_job = self._master.after(ANIMATION_FRAME_MS, self._on_frame)
-        else:
+        elif state == CANCELLED_DONE:
+            remaining = max(
+                0,
+                CANCELLED_HIDE_MS - round((self._clock() - self._cancelled_at) * 1000),
+            )
+            self._hide_job = self._master.after(remaining, self._on_hide_timeout)
+        elif state != CANCELLED:
             delay = SUCCESS_HIDE_MS if state == SUCCESS else ERROR_HIDE_MS
             self._hide_job = self._master.after(delay, self._on_hide_timeout)
         return True
@@ -183,7 +224,7 @@ class RecordingOverlay:
 
 
 class OverlayWindow:
-    """Borderless, topmost, click-through pill above the primary work area."""
+    """Borderless, topmost, non-activating pill above the primary work area."""
 
     def __init__(self, master):
         self._window = window = tk.Toplevel(master)
@@ -207,8 +248,105 @@ class OverlayWindow:
             raise RuntimeError("Could not make recording overlay passive")
         self._geometry = None
         self._visible = False
+        self._state = HIDDEN
+        self._cancel_callback = None
+        self._hover = False
+        self._tooltip_job = None
+        self._tooltip = None
+        self._canvas.bind("<Button-1>", self._on_click)
+        self._canvas.bind("<Motion>", self._on_motion)
+        self._canvas.bind("<Leave>", self._on_leave)
+
+    def set_cancel_callback(self, callback):
+        self._cancel_callback = callback
+
+    def _in_cancel(self, event):
+        if self._state not in _ANIMATED_STATES or self._geometry is None:
+            return False
+        width, height = self._geometry[2:]
+        return width - 34 * self._scale <= event.x <= width - 2 * self._scale and (
+            2 * self._scale <= event.y <= height - 2 * self._scale
+        )
+
+    def _on_click(self, event):
+        if self._in_cancel(event) and self._cancel_callback:
+            self._cancel_callback()
+        return "break"
+
+    def _on_motion(self, event):
+        hover = self._in_cancel(event)
+        if hover != self._hover:
+            self._hover = hover
+            self._canvas.itemconfigure(
+                "cancel_hover", fill=_TRACK_COLOR if hover else _PILL_COLOR
+            )
+            self._clear_tooltip()
+            if hover:
+                self._tooltip_job = self._window.after(500, self._show_tooltip)
+
+    def _on_leave(self, event=None):
+        self._hover = False
+        self._canvas.itemconfigure("cancel_hover", fill=_PILL_COLOR)
+        self._clear_tooltip()
+
+    def _clear_tooltip(self):
+        if self._tooltip_job is not None:
+            self._window.after_cancel(self._tooltip_job)
+            self._tooltip_job = None
+        if self._tooltip is not None:
+            self._tooltip.destroy()
+            self._tooltip = None
+
+    def _show_tooltip(self):
+        try:
+            self._create_tooltip()
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                self._clear_tooltip()
+            print(
+                f"Overlay tooltip unavailable ({type(exc).__name__}).", file=sys.stderr
+            )
+
+    def _create_tooltip(self):
+        self._tooltip_job = None
+        if not self._hover or self._state not in _ANIMATED_STATES:
+            return
+        tip = self._tooltip = tk.Toplevel(self._window)
+        tip.withdraw()
+        tip.overrideredirect(True)
+        tip.attributes("-topmost", True)
+        if sys.platform == "win32":
+            # WS_EX_LAYERED needs layered attributes before Windows paints it.
+            tip.attributes("-transparentcolor", _TRANSPARENT_KEY)
+        tk.Label(
+            tip, text="Cancel dictation", bg=_PILL_COLOR, fg=_ICON_COLOR, padx=8, pady=4
+        ).pack()
+        x, y, width, _height = self._geometry
+        tip.geometry(
+            f"+{x + width - round(100 * self._scale)}+{y - round(32 * self._scale)}"
+        )
+        tip.update_idletasks()
+        hwnd = _make_passive(tip)
+        if hwnd is not None:
+            ctypes.windll.user32.SetWindowPos(
+                hwnd,
+                _HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE | _SWP_SHOWWINDOW,
+            )
+        elif sys.platform != "win32":
+            tip.deiconify()
+        else:
+            # Never fall back to Tk deiconify on Windows, which may steal focus.
+            self._clear_tooltip()
 
     def show(self, state, message, elapsed):
+        self._state = state
+        if state not in _ANIMATED_STATES:
+            self._on_leave()
         text_width = self._font.measure(message) if message else 0
         width, height = overlay_size(state, text_width, self._scale)
         self._draw(state, message, elapsed, width, height)
@@ -226,6 +364,7 @@ class OverlayWindow:
             self._visible = True
 
     def hide(self):
+        self._on_leave()
         if not self._visible:
             return
         self._visible = False
@@ -235,6 +374,7 @@ class OverlayWindow:
             self._window.withdraw()
 
     def destroy(self):
+        self._clear_tooltip()
         self._visible = False
         self._window.destroy()
 
@@ -261,15 +401,17 @@ class OverlayWindow:
         center_y = height / 2
 
         if state == RECORDING:
-            _draw_bars(canvas, width / 2, center_y, elapsed, scale)
+            _draw_bars(canvas, 32 * scale, center_y, elapsed, scale)
         elif state == PROCESSING:
-            _draw_spinner(canvas, width / 2, center_y, elapsed, scale)
+            _draw_spinner(canvas, 32 * scale, center_y, elapsed, scale)
         else:
             icon_left = _TEXT_PADDING * scale
             if state == SUCCESS:
                 _draw_checkmark(canvas, icon_left, center_y, scale)
-            else:
+            elif state == ERROR:
                 _draw_warning(canvas, icon_left, center_y, scale)
+            else:
+                _draw_x(canvas, icon_left + 8 * scale, center_y, scale)
             canvas.create_text(
                 icon_left + (_TEXT_ICON_SIZE + _TEXT_ICON_GAP) * scale,
                 center_y,
@@ -278,6 +420,20 @@ class OverlayWindow:
                 fill=_ICON_COLOR,
                 font=self._font,
             )
+        if state in _ANIMATED_STATES:
+            canvas.create_line(
+                62 * scale, 8 * scale, 62 * scale, height - 8 * scale, fill=_TRACK_COLOR
+            )
+            canvas.create_oval(
+                width - 34 * scale,
+                2 * scale,
+                width - 2 * scale,
+                height - 2 * scale,
+                outline="",
+                fill=_TRACK_COLOR if self._hover else _PILL_COLOR,
+                tags="cancel_hover",
+            )
+            _draw_x(canvas, width - 18 * scale, center_y, scale)
 
 
 def overlay_size(state, text_width, scale):
@@ -311,7 +467,7 @@ def _primary_work_area(window):
 
 
 def _make_passive(window):
-    """Make the window click-through and non-activating; return its HWND."""
+    """Keep the window non-activating while accepting clicks on opaque pixels."""
     if sys.platform != "win32":
         return None
     try:
@@ -343,9 +499,8 @@ def _make_passive(window):
         user32.SetWindowLongPtrW(
             hwnd,
             _GWL_EXSTYLE,
-            style
+            (style & ~_WS_EX_TRANSPARENT)
             | _WS_EX_LAYERED
-            | _WS_EX_TRANSPARENT
             | _WS_EX_NOACTIVATE
             | _WS_EX_TOOLWINDOW,
         )
@@ -361,6 +516,19 @@ def _draw_pill(canvas, width, height):
     canvas.create_oval(0, 0, bottom, bottom, **options)
     canvas.create_oval(right - bottom, 0, right, bottom, **options)
     canvas.create_rectangle(height / 2, 0, width - height / 2, height, **options)
+
+
+def _draw_x(canvas, center_x, center_y, scale):
+    for direction in (-1, 1):
+        canvas.create_line(
+            center_x - 4 * scale,
+            center_y - direction * 4 * scale,
+            center_x + 4 * scale,
+            center_y + direction * 4 * scale,
+            fill=_ICON_COLOR,
+            width=2 * scale,
+            capstyle=tk.ROUND,
+        )
 
 
 def _draw_bars(canvas, center_x, center_y, elapsed, scale):

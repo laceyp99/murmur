@@ -7,6 +7,40 @@ from src import settings_gui as settings_module
 from src.config import DEFAULT_CONFIG
 
 
+def test_overlay_cancel_dispatch_uses_latest_callback_and_session(monkeypatch):
+    calls = []
+    threads = []
+    monkeypatch.setattr(settings_module, "_overlay_cancel_callback", None)
+    monkeypatch.setattr(
+        settings_module.threading,
+        "Thread",
+        lambda **kwargs: SimpleNamespace(start=lambda: threads.append(kwargs)),
+    )
+    settings_module._dispatch_overlay_cancel(1)
+    assert threads == []
+    settings_module.set_overlay_cancel_callback(
+        lambda session: calls.append(("old", session))
+    )
+    settings_module.set_overlay_cancel_callback(
+        lambda session: calls.append(("new", session))
+    )
+    settings_module._dispatch_overlay_cancel(7)
+    assert calls == []
+    assert threads[0]["daemon"] is True
+    threads[0]["target"](*threads[0]["args"])
+    assert calls == [("new", 7)]
+
+
+def test_overlay_background_cancel_failure_omits_exception_contents(capsys):
+    def fail(_session):
+        raise ValueError("private transcript")
+
+    settings_module._run_overlay_cancel(fail, 7)
+    error = capsys.readouterr().err
+    assert "ValueError" in error
+    assert "private transcript" not in error
+
+
 @pytest.mark.parametrize(
     ("work_size", "decorations", "scaling", "size", "minimum"),
     [
