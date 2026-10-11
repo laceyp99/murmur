@@ -47,6 +47,43 @@ class HotkeyEvent:
     state: HotkeyState
 
 
+class _ChordGuard:
+    """Remember which activation-key presses a single-chord hotkey consumed.
+
+    The key hook calls `allow` for every activation-key event, and the hotkey
+    callback calls `claim` when the chord matches.
+    """
+
+    def __init__(self) -> None:
+        self._held: set[int] = set()
+        self._fresh: int | None = None
+        self._consumed: set[int] = set()
+
+    def allow(self, event: keyboard.KeyboardEvent) -> bool:
+        """Return False for repeats and release of a consumed key."""
+        consumed = event.scan_code in self._consumed
+        if event.event_type == keyboard.KEY_UP:
+            self._held.discard(event.scan_code)
+            self._fresh = None
+            self._consumed.discard(event.scan_code)
+        else:
+            self._fresh = None if event.scan_code in self._held else event.scan_code
+            self._held.add(event.scan_code)
+        # Keep suppressing after modifiers are released, when add_hotkey no
+        # longer matches the chord and would leak key-up to a focused player.
+        return not consumed
+
+    def claim(self) -> bool:
+        """Consume the fresh press that completed the chord, if there is one."""
+        # A key held before the chord matched already reached the app.
+        # Let its repeats and release through instead of consuming it.
+        if self._fresh is None:
+            return False
+        self._consumed.add(self._fresh)
+        self._fresh = None
+        return True
+
+
 class HotkeyManager:
     """
     Manages global hotkey registration and state.
@@ -63,12 +100,8 @@ class HotkeyManager:
         self._on_state_change: Callable[[HotkeyState], None] | None = None
         self._hotkey_registered: bool = False
         self._last_registration_error: str | None = None
-        self._remove_hotkey: Callable[[], None] | None = None
-        self._key_hooks: list[Callable[[], None]] = []
-        self._activation_keys: set[int] = set()
-        self._held_activation_keys: set[int] = set()
-        self._fresh_activation_key: int | None = None
-        self._consumed_keys: set[int] = set()
+        self._removers: list[Callable[[], None]] = []
+        self._guard: _ChordGuard | None = None
         self._lock = threading.Lock()
 
     def register(
@@ -98,23 +131,33 @@ class HotkeyManager:
         try:
             steps = keyboard.parse_hotkey_combinations(self.config.hotkey)
             # Sequence hotkeys need their key-up events to advance library state.
-            if len(steps) == 1:
-                self._activation_keys = {
+            activation_keys = (
+                {
                     scan_code
                     for combination in steps[0]
                     for scan_code in combination
                     if not keyboard.is_modifier(scan_code)
                 }
-                for scan_code in sorted(self._activation_keys):
-                    self._key_hooks.append(
+                if len(steps) == 1
+                else set()
+            )
+            # Modifier-only hotkeys have no activation key to guard.
+            if activation_keys:
+                guard = _ChordGuard()
+                self._guard = guard
+                for scan_code in sorted(activation_keys):
+                    # keyboard tracks hooks by callback, so each key needs its own.
+                    self._removers.append(
                         keyboard.hook_key(
                             scan_code,
-                            lambda event: self._filter_consumed_key(event),
+                            lambda event: guard.allow(event),
                             suppress=True,
                         )
                     )
-            self._remove_hotkey = keyboard.add_hotkey(
-                self.config.hotkey, self._on_hotkey_pressed, suppress=True
+            self._removers.append(
+                keyboard.add_hotkey(
+                    self.config.hotkey, self._on_hotkey_pressed, suppress=True
+                )
             )
             self._hotkey_registered = True
             self._last_registration_error = None
@@ -128,38 +171,13 @@ class HotkeyManager:
 
     def unregister(self) -> None:
         """Unregister the global hotkey."""
-        if self._remove_hotkey is not None:
+        for remove in reversed(self._removers):
             with contextlib.suppress(Exception):
-                self._remove_hotkey()
-            self._remove_hotkey = None
-        for remove_hook in self._key_hooks:
-            with contextlib.suppress(Exception):
-                remove_hook()
-        self._key_hooks.clear()
-        self._activation_keys.clear()
-        self._held_activation_keys.clear()
-        self._fresh_activation_key = None
-        self._consumed_keys.clear()
+                remove()
+        self._removers.clear()
+        self._guard = None
         self._hotkey_registered = False
         self._last_registration_error = None
-
-    def _filter_consumed_key(self, event: keyboard.KeyboardEvent) -> bool:
-        """Consume repeats and release of a key used to activate dictation."""
-        consumed = event.scan_code in self._consumed_keys
-        if event.event_type == keyboard.KEY_UP:
-            self._held_activation_keys.discard(event.scan_code)
-            self._fresh_activation_key = None
-            self._consumed_keys.discard(event.scan_code)
-        else:
-            self._fresh_activation_key = (
-                None
-                if event.scan_code in self._held_activation_keys
-                else event.scan_code
-            )
-            self._held_activation_keys.add(event.scan_code)
-        # Keep suppressing after modifiers are released, when add_hotkey no
-        # longer matches the chord and would leak key-up to a focused player.
-        return not consumed
 
     def get_last_registration_error(self) -> str | None:
         """Return the last registration failure message, if any."""
@@ -168,13 +186,9 @@ class HotkeyManager:
     def _on_hotkey_pressed(self) -> bool:
         """Handle hotkey press event."""
         with self._lock:
-            if self._activation_keys:
-                # A key held before the chord matched already reached the app.
-                # Let its repeats and release through instead of consuming it.
-                if self._fresh_activation_key is None:
-                    return True
-                self._consumed_keys.add(self._fresh_activation_key)
-                self._fresh_activation_key = None
+            guard = self._guard
+            if guard is not None and not guard.claim():
+                return True
             if self._state == HotkeyState.IDLE:
                 self._set_state(HotkeyState.RECORDING)
                 if self._on_start:
