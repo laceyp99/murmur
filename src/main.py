@@ -306,10 +306,10 @@ class MurmurApp:
             if self._was_media_playing:
                 self.media_controller.play()
                 self._was_media_playing = False
-            if not self._cancel_event.is_set():
-                with self._recording_stop_lock:
+            with self._recording_stop_lock:
+                if not self._cancel_event.is_set():
                     self._session_active = False
-                self.hotkey_manager.set_idle()
+                    self.hotkey_manager.set_idle()
             return
 
         # Only an input stream that actually started earns the recording cue.

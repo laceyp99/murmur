@@ -1576,6 +1576,83 @@ def test_cancel_during_startup_waits_for_stream_then_stops_it(
     assert overlay_calls[-1][0] == main_module.CANCELLED_DONE
 
 
+def test_failed_start_does_not_release_session_claimed_by_cancellation(monkeypatch):
+    app = make_stop_app(None)
+    app.config.pause_media_while_recording = False
+    app.notifications.notify_recording_started = lambda: None
+    app.recorder.set_capture_error_callback = lambda callback: None
+    armed = threading.Event()
+    release_boundary = threading.Event()
+    cancellation_claimed = threading.Event()
+    release_cleanup = threading.Event()
+    errors = []
+    lock = threading.RLock()
+
+    class ReleaseBoundaryLock:
+        """Let cancellation claim the failed session before release takes its lock."""
+
+        def __enter__(self):
+            if threading.current_thread() is starter and armed.is_set():
+                armed.clear()
+                release_boundary.set()
+                assert cancellation_claimed.wait(2)
+            lock.acquire()
+            return self
+
+        def __exit__(self, *args):
+            lock.release()
+
+    def fail_start():
+        armed.set()
+        raise RuntimeError("microphone unavailable")
+
+    finish_stop = app._finish_recording_stop
+
+    def delayed_cleanup():
+        cancellation_claimed.set()
+        assert release_cleanup.wait(2)
+        finish_stop()
+
+    def start():
+        try:
+            app._on_recording_start()
+        except Exception as exc:
+            errors.append(exc)
+
+    def cancel():
+        try:
+            assert release_boundary.wait(2)
+            app._on_recording_cancel(app._overlay_session)
+        except Exception as exc:
+            errors.append(exc)
+
+    monkeypatch.setattr(app, "_recording_stop_lock", ReleaseBoundaryLock())
+    monkeypatch.setattr(app, "_start_live_transcription", lambda: None)
+    monkeypatch.setattr(app, "_start_live_segmentation", lambda: None)
+    monkeypatch.setattr(app.recorder, "start_recording", fail_start, raising=False)
+    monkeypatch.setattr(app, "_finish_recording_stop", delayed_cleanup)
+    starter = threading.Thread(target=start)
+    canceller = threading.Thread(target=cancel)
+    starter.start()
+    canceller.start()
+    try:
+        assert cancellation_claimed.wait(2)
+        starter.join(2)
+        assert not starter.is_alive()
+        assert app._cancel_event.is_set()
+        assert app._session_active
+        assert app.hotkey_manager.idle_calls == 0
+    finally:
+        release_cleanup.set()
+        starter.join(2)
+        canceller.join(2)
+    assert not canceller.is_alive()
+    assert not errors
+    assert app.hotkey_manager.idle_calls == 1
+    assert not app._session_active
+    assert app.recorder.stop_calls == 1
+
+
 def test_stop_app_closes_overlay(overlay_calls):
     app = make_stop_app(None)
     app._running = True
