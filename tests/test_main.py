@@ -1037,6 +1037,57 @@ def test_late_capture_error_does_not_strand_hotkey_after_manual_stop():
     assert app.notifications.errors == []
 
 
+@pytest.mark.parametrize(
+    ("enabled", "playing", "pause_succeeded", "recording_failed", "expected_plays"),
+    [
+        (True, True, True, False, 1),
+        (True, True, False, False, 0),
+        (True, False, True, False, 0),
+        (False, True, True, False, 0),
+        (True, True, True, True, 1),
+        (True, True, False, True, 0),
+    ],
+)
+def test_media_resumes_only_after_successful_pause(
+    monkeypatch, enabled, playing, pause_succeeded, recording_failed, expected_plays
+):
+    app = make_app(segmenter=None, transcriber=FakeTranscriber())
+    app.config.pause_media_while_recording = enabled
+    app._was_media_playing = True
+    app.notifications = FakeNotifications()
+    app.notifications.notify_recording_started = lambda: None
+    app.hotkey_manager = FakeHotkeyManager()
+    app.tray = FakeTray()
+    app.recorder = FakeRecorder(None)
+    app.recorder.set_capture_error_callback = lambda callback: None
+    plays = []
+    pauses = []
+    app.media_controller = SimpleNamespace(
+        is_media_playing=lambda: playing,
+        pause=lambda: pauses.append(True) or pause_succeeded,
+        play=lambda: plays.append(True) or True,
+    )
+
+    def start_recording():
+        if recording_failed:
+            raise RuntimeError("microphone unavailable")
+
+    app.recorder.start_recording = start_recording
+    for name in (
+        "_start_live_transcription",
+        "_start_live_segmentation",
+        "_stop_live_transcription",
+        "_stop_live_segmentation",
+    ):
+        monkeypatch.setattr(app, name, lambda: None)
+    app._on_recording_start()
+    if not recording_failed:
+        app._on_recording_stop()
+    assert len(pauses) == int(enabled and playing)
+    assert len(plays) == expected_plays
+    assert app._was_media_playing is False
+
+
 def test_accepted_capture_error_cannot_stop_next_session(monkeypatch):
     app = make_app(segmenter=None, transcriber=FakeTranscriber())
     app.config.pause_media_while_recording = False
