@@ -12,6 +12,47 @@ from src.vad import (
 )
 
 
+def test_cancel_discards_queued_audio_and_skips_trailing_speech_flush():
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+    emitted = []
+
+    class GatedVad:
+        def is_speech(self, pcm16, sample_rate):
+            calls.append(sample_rate)
+            entered.set()
+            assert release.wait(timeout=2.0)
+            return True
+
+    worker = LiveVADSegmentationWorker(
+        sample_rate=16000,
+        frame_duration_ms=20,
+        start_padding_ms=0,
+        end_padding_ms=0,
+        silence_duration_ms=20,
+        min_segment_duration_ms=20,
+        merge_gap_ms=0,
+        vad=GatedVad(),
+        on_segment=emitted.append,
+    )
+    worker.start()
+    try:
+        worker.submit_audio_block(np.ones(480, dtype=np.float32))
+        assert entered.wait(timeout=2.0)
+        worker.submit_audio_block(np.ones(320, dtype=np.float32))
+        worker.cancel()
+        worker.submit_audio_block(np.ones(320, dtype=np.float32))
+        assert worker._thread.is_alive()
+    finally:
+        release.set()
+        worker.stop()
+
+    assert calls == [16000]
+    assert emitted == []
+    assert worker._thread is None
+
+
 class FakeVad:
     def __init__(self, speech_flags):
         self._speech_flags = list(speech_flags)

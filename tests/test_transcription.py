@@ -1,3 +1,5 @@
+from threading import Event
+
 import numpy as np
 import pytest
 
@@ -5,6 +7,7 @@ pytest.importorskip("torch")
 pytest.importorskip("whisper")
 
 from src.audio import AudioData
+from src.cancellation import TranscriptionCancelledError
 from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
 from src.transcription import (
     LOGPROB_THRESHOLD,
@@ -61,6 +64,56 @@ class FakeLLMPostProcessor:
         if self.error is not None:
             raise self.error
         return True
+
+
+def test_cancel_during_whisper_discards_result_and_skips_next_segment_and_llm():
+    cancelled = Event()
+
+    class CancellingModel(FakeModel):
+        def transcribe(self, *args, **kwargs):
+            result = super().transcribe(*args, **kwargs)
+            cancelled.set()
+            return result
+
+    config = FakeConfig()
+    config.ollama_enabled = True
+    model = CancellingModel(["first", "second"])
+    processor = FakeLLMPostProcessor(response="cleaned")
+    transcriber = Transcriber(
+        config=config, model=model, device="cpu", llm_post_processor=processor
+    )
+    audio = AudioData(np.ones(320, dtype=np.float32), 16000, 0.02)
+
+    with pytest.raises(TranscriptionCancelledError):
+        transcriber.transcribe_segments([audio, audio], cancel_event=cancelled)
+
+    assert len(model.calls) == 1
+    assert processor.calls == []
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_cancel_during_llm_discards_return_and_suppresses_fallback(raises):
+    cancelled = Event()
+
+    class CancellingProcessor(FakeLLMPostProcessor):
+        def process(self, text):
+            self.calls.append(text)
+            cancelled.set()
+            if raises:
+                raise RuntimeError("failed after cancellation")
+            return "late cleanup"
+
+    config = FakeConfig()
+    config.ollama_enabled = True
+    processor = CancellingProcessor()
+    transcriber = Transcriber(
+        config=config, model=FakeModel([]), device="cpu", llm_post_processor=processor
+    )
+
+    with pytest.raises(TranscriptionCancelledError):
+        transcriber.finalize_text("hello", cancel_event=cancelled)
+
+    assert processor.calls == ["Hello."]
 
 
 def test_whisper_segment_policy_accepts_likely_speech():

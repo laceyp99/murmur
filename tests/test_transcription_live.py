@@ -1,4 +1,7 @@
+from threading import Event
 from types import SimpleNamespace
+
+import pytest
 
 from src.transcription_live import LiveTranscriptionWorker, TranscriptAccumulator
 
@@ -22,6 +25,53 @@ def make_segment(segment_id, duration=0.5):
     return SimpleNamespace(
         segment_id=segment_id, audio=[], sample_rate=16000, duration=duration
     )
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_cancel_drops_queue_and_late_result_without_retry_or_callbacks(raises):
+    entered = Event()
+    release = Event()
+    calls = []
+    callbacks = []
+
+    class GatedTranscriber:
+        def transcribe_segment(self, segment):
+            calls.append(segment.segment_id)
+            entered.set()
+            assert release.wait(timeout=2.0)
+            if raises:
+                raise RuntimeError("late failure")
+            return "late result"
+
+    accumulator = TranscriptAccumulator()
+    worker = LiveTranscriptionWorker(
+        transcriber=GatedTranscriber(),
+        accumulator=accumulator,
+        on_segment_transcribed=lambda chunk: callbacks.append("transcribed"),
+        on_chunk_appended=lambda chunk, text: callbacks.append("appended"),
+        on_segment_failed=lambda *args: callbacks.append("failed"),
+        on_worker_degraded=lambda message: callbacks.append("degraded"),
+        max_segment_retries=2,
+    )
+    worker.start()
+    try:
+        worker.submit_segment(make_segment(0))
+        assert entered.wait(timeout=2.0)
+        worker.submit_segment(make_segment(1))
+        worker.cancel()
+        worker.submit_segment(make_segment(2))
+        assert worker._thread.is_alive()
+        assert calls == [0]
+    finally:
+        release.set()
+        worker.stop()
+
+    assert worker._thread is None
+    assert calls == [0]
+    assert callbacks == []
+    assert accumulator.get_text() == ""
+    assert worker.failure_count == 0
+    assert worker.is_degraded() is False
 
 
 def test_transcript_accumulator_returns_text_in_segment_order():

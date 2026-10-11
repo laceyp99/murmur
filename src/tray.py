@@ -2,6 +2,7 @@
 System tray management for murmur.
 """
 
+import sys
 import threading
 
 from PIL import Image
@@ -15,9 +16,16 @@ class TrayManager:
     Manages the system tray icon and menu for murmur.
     """
 
-    def __init__(self, on_exit_callback=None):
+    def __init__(
+        self,
+        on_exit_callback=None,
+        on_cancel_callback=None,
+        get_cancel_session_callback=None,
+    ):
         self.config = get_config()
         self.on_exit_callback = on_exit_callback
+        self.on_cancel_callback = on_cancel_callback
+        self.get_cancel_session_callback = get_cancel_session_callback
         self.icon = None
         self._status_text = "Ready"
         self._settings_lock = threading.Lock()
@@ -55,6 +63,38 @@ class TrayManager:
             self.on_exit_callback()
         icon.stop()
 
+    def _can_cancel(self, item=None):
+        try:
+            return bool(
+                self.on_cancel_callback
+                and self.get_cancel_session_callback
+                and self.get_cancel_session_callback() is not None
+            )
+        except Exception as exc:
+            print(
+                f"Tray cancellation status unavailable ({type(exc).__name__}).",
+                file=sys.stderr,
+            )
+            return False
+
+    def _on_cancel(self, icon=None, item=None):
+        try:
+            if not self.on_cancel_callback or not self.get_cancel_session_callback:
+                return
+            session = self.get_cancel_session_callback()
+            if session is not None:
+                threading.Thread(
+                    target=self._run_cancel, args=(session,), daemon=True
+                ).start()
+        except Exception as exc:
+            print(f"Tray cancellation failed ({type(exc).__name__}).", file=sys.stderr)
+
+    def _run_cancel(self, session):
+        try:
+            self.on_cancel_callback(session)
+        except Exception as exc:
+            print(f"Tray cancellation failed ({type(exc).__name__}).", file=sys.stderr)
+
     def run(self):
         """Start the system tray icon loop."""
         try:
@@ -73,6 +113,7 @@ class TrayManager:
                     enabled=False,
                 ),
                 pystray.Menu.SEPARATOR,
+                MenuItem("Cancel dictation", self._on_cancel, enabled=self._can_cancel),
                 MenuItem("Settings", self._on_settings),
                 MenuItem("Exit", self._on_exit),
             )

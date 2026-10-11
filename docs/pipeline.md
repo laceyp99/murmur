@@ -23,6 +23,10 @@ flowchart LR
     Refresh["Settings Refresh or stopped input"] --> DeferredRefresh["Refresh PortAudio after stream closes"]
     DeferredRefresh --> InputResolver
     Recorder -->|stream started| OverlayRecording["Optional overlay: recording bars"]
+    OverlayRecording --> Cancel["Pill X or tray Cancel dictation"]
+    OverlayProcessing --> Cancel
+    Cancel --> Discard["Stop capture, discard queued work,<br/>suppress delivery and saving"]
+    Discard --> Cancelled["Cancelled until active call finishes,<br/>then Ready"]
 
     Recorder --> Blocks["100 ms float32 audio blocks"]
     Blocks --> FullBuffer["Full recording buffer"]
@@ -121,14 +125,15 @@ is produced.
 ### Recording overlay
 
 When **Show recording overlay** is on, a small dark pill above the primary
-display's taskbar mirrors the session. It is status feedback only: it never
-shows transcript text, reads no audio levels, takes no focus, and passes clicks
-through to the app underneath.
+display's taskbar mirrors the session. It never shows transcript text, reads no
+audio levels, and takes no focus. The visible pill absorbs clicks; only its X
+button performs an action. Clicks outside its rounded shape pass through.
 
 | Session moment | Overlay |
 | --- | --- |
-| Input stream started successfully | Three gently pulsing bars |
-| Capture stopped by hotkey or maximum duration | Icon-only loading spinner |
+| Input stream started successfully | Three gently pulsing bars and X |
+| Capture stopped by hotkey or maximum duration | Loading spinner and X |
+| User cancels before delivery | `Cancelled`, visible until workers finish and for at least 1 second |
 | Final text copied to the clipboard | Checkmark and `Copied to clipboard`, hidden after about 2 seconds |
 | Start failure, no audio, no speech, transcription failure, or clipboard failure | Warning symbol and a fixed short message, hidden after about 4 seconds |
 
@@ -141,6 +146,26 @@ settings window, and `MurmurApp` only queues requests to it. Any overlay failure
 is contained there and logged once without content, so capture, fallback,
 cleanup, and clipboard output continue unchanged. Optional media pause/resume
 warnings stay in the tray status and console rather than the overlay.
+
+### Cancellation
+
+The pill's X and the tray's **Cancel dictation** action discard the current
+session during capture or processing, including optional Ollama cleanup.
+Cancellation stops capture, drops queued live work, skips remaining processing
+and fallback stages, and suppresses clipboard output and opt-in training-data
+saving. Partial text is not delivered. Media paused by the session resumes.
+
+Whisper and Ollama calls already running may finish safely, but their results
+are ignored. The pill immediately shows only `Cancelled`; new recordings remain
+blocked until workers and any active call finish. Audio and accumulated text
+are then released, and the app returns to Ready. Feedback remains visible for
+at least one second, unless a new recording replaces it.
+
+Cancellation and delivery atomically claim the session. If delivery has already
+claimed it, cancellation does nothing and the normal result is shown. If
+cancellation claims it first, the existing clipboard is left untouched and no
+training-data entry is saved. The tray action also works with the overlay
+disabled or unavailable; the normal recording hotkey is unchanged.
 
 ## Implementation Map
 

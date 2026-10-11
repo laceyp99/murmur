@@ -118,6 +118,7 @@ class LiveTranscriptionWorker:
         self._thread: threading.Thread | None = None
         self._running = False
         self._state_lock = threading.RLock()
+        self._cancelled = threading.Event()
         self.has_failures = False
         self.failure_count = 0
         self.last_error: str | None = None
@@ -138,11 +139,23 @@ class LiveTranscriptionWorker:
 
     def submit_segment(self, segment: LiveSegmentLike) -> None:
         """Queue a sealed segment for serial transcription."""
-        if not self._running:
-            return
-
-        self._queue.put(segment)
+        with self._state_lock:
+            if not self._running or self._cancelled.is_set():
+                return
+            self._queue.put(segment)
         self._invoke_callback("on_segment_queued", segment)
+
+    def cancel(self) -> None:
+        """Discard queued work without waiting for an active model call."""
+        with self._state_lock:
+            self._cancelled.set()
+            self._running = False
+            while True:
+                try:
+                    self._queue.get_nowait()
+                except Empty:
+                    break
+            self._queue.put(None)
 
     def stop(self) -> None:
         """Stop the background worker after finishing already queued segments.
@@ -151,11 +164,10 @@ class LiveTranscriptionWorker:
         segments already queued before the shutdown sentinel may still be
         transcribed before the worker thread exits.
         """
-        if not self._running:
-            return
-
-        self._running = False
-        self._queue.put(None)
+        with self._state_lock:
+            if self._running:
+                self._running = False
+                self._queue.put(None)
         if self._thread is not None:
             self._thread.join()
             self._thread = None
@@ -169,11 +181,11 @@ class LiveTranscriptionWorker:
                     continue
                 break
 
-            if segment is None:
+            if segment is None or self._cancelled.is_set():
                 break
 
             chunk = self._transcribe_segment_with_retry(segment)
-            if chunk is None:
+            if chunk is None or self._cancelled.is_set():
                 continue
 
             self._invoke_callback("on_segment_transcribed", chunk)
@@ -190,10 +202,14 @@ class LiveTranscriptionWorker:
         last_error: Exception | None = None
 
         for attempt_count in range(1, self.max_segment_retries + 2):
+            if self._cancelled.is_set():
+                return None
             start_time = time.time()
             try:
                 text = self.transcriber.transcribe_segment(segment)
             except Exception as exc:
+                if self._cancelled.is_set():
+                    return None
                 last_error = exc
                 if attempt_count <= self.max_segment_retries:
                     continue

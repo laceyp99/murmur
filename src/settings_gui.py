@@ -220,6 +220,28 @@ _ollama_connection_test_results = queue.Queue()
 _settings_thread = None
 _settings_thread_lock = threading.Lock()
 _overlay_unavailable = False
+_overlay_cancel_callback = None
+
+
+def set_overlay_cancel_callback(callback):
+    """Register cancellation without creating the UI or capturing an old callback."""
+    global _overlay_cancel_callback
+    _overlay_cancel_callback = callback
+
+
+def _dispatch_overlay_cancel(session):
+    callback = _overlay_cancel_callback
+    if callback is not None:
+        threading.Thread(
+            target=_run_overlay_cancel, args=(callback, session), daemon=True
+        ).start()
+
+
+def _run_overlay_cancel(callback, session):
+    try:
+        callback(session)
+    except Exception as exc:
+        print(f"Overlay cancellation failed ({type(exc).__name__}).", file=sys.stderr)
 
 
 def _drain_settings_requests():
@@ -487,7 +509,7 @@ def _run_settings_ui(return_focus=False):
             # or the first hand-back did not take effect.
             root.after(_FOCUS_RECHECK_MS, _return_foreground, previous_foreground, root)
         service = _SettingsWindowService(root)
-        overlay = RecordingOverlay(root)
+        overlay = RecordingOverlay(root, on_cancel=_dispatch_overlay_cancel)
 
         def process_requests():
             try:
