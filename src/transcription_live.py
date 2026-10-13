@@ -244,7 +244,7 @@ class LiveTranscriptionWorker:
             if should_notify:
                 self._degraded_notified = True
 
-        print(f"⚠️ {message}")
+        print(f"Warning: {message}")
         if should_notify:
             self._invoke_callback("on_worker_degraded", message)
 
