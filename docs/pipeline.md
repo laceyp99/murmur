@@ -35,7 +35,8 @@ flowchart LR
 
     LiveVad --> Frames["20 ms VAD frames"]
     Frames --> SpeechSegments["Sealed live speech segments"]
-    SpeechSegments --> LiveWhisper["Serial live Whisper transcription"]
+    SpeechSegments --> LivePrepare["Resample to 16 kHz + normalize"]
+    LivePrepare --> LiveWhisper["Serial live Whisper transcription"]
     LiveWhisper --> Accumulator["TranscriptAccumulator"]
 
     HotkeyStop["Stop hotkey"] --> AppStop["MurmurApp._on_recording_stop"]
@@ -48,8 +49,10 @@ flowchart LR
     LiveDecision -->|no or degraded| Offline["Fallback from full AudioData"]
     FullBuffer --> Offline
     Offline --> OfflineVad{"Offline VAD available and finds speech?"}
-    OfflineVad -->|yes| OfflineWhisper["Whisper segment transcription"]
-    OfflineVad -->|no| FullClip["Whisper full clip"]
+    OfflineVad -->|yes| OfflinePrepare["Resample segments to 16 kHz + normalize"]
+    OfflinePrepare --> OfflineWhisper["Whisper segment transcription"]
+    OfflineVad -->|no| FullPrepare["Resample full clip to 16 kHz + normalize"]
+    FullPrepare --> FullClip["Whisper full clip"]
     OfflineWhisper --> OfflineCleanup["transcribe_segments<br/>Whisper + join + cleanup"]
     FullClip --> OfflineCleanup
 
@@ -120,6 +123,19 @@ enough trailing silence.
 serially. It does not apply document-level cleanup per segment. Instead, it
 stores ordered `TranscriptChunk` objects in `TranscriptAccumulator`, preserving
 segment order by `segment_id`.
+
+All transcription paths use each clip or segment's source sample rate to
+resample to Whisper's 16 kHz rate before amplitude normalization and inference.
+`Transcriber` reuses `vad_audio.resample_audio()` for this conversion and skips
+resampling for 16 kHz input. The original waveform and segment timing metadata
+remain at the recording rate, preserving the full recording for fallback.
+
+Recording defaults to 16 kHz, but other configured rates remain supported when
+the input device accepts them. Live VAD supports 8, 16, 32, and 48 kHz; other
+rates use the offline fallback. Higher recording rates use larger buffers and
+require conversion before inference. The shared resampler uses linear
+interpolation without an anti-aliasing filter, so this conversion preserves
+timing but is not a guarantee of equal recognition quality across rates.
 
 ### Finalization
 
@@ -195,7 +211,7 @@ disabled or unavailable; the normal recording hotkey is unchanged.
 | Live VAD | [`src/vad_live.py`](https://github.com/laceyp99/murmur/blob/main/src/vad_live.py) | Converts blocks into frames and emits sealed speech segments. |
 | Offline VAD | [`src/vad_segmenter.py`](https://github.com/laceyp99/murmur/blob/main/src/vad_segmenter.py) | Segments full clips during fallback or non-live processing. |
 | Live transcription | [`src/transcription_live.py`](https://github.com/laceyp99/murmur/blob/main/src/transcription_live.py) | Serial queue, retry, ordered accumulation, metrics. |
-| Whisper transcription | [`src/transcription.py`](https://github.com/laceyp99/murmur/blob/main/src/transcription.py) | Loads Whisper, normalizes audio, transcribes segments. |
+| Whisper transcription | [`src/transcription.py`](https://github.com/laceyp99/murmur/blob/main/src/transcription.py) | Loads Whisper, resamples and normalizes audio, transcribes segments. |
 | LLM cleanup | [`src/llm_postprocess.py`](https://github.com/laceyp99/murmur/blob/main/src/llm_postprocess.py) | Optional Ollama pass with conservative acceptance checks. |
 | Delivery and persistence | [`src/main.py`](https://github.com/laceyp99/murmur/blob/main/src/main.py) | Copies text, reports the result, and invokes opt-in logging. |
 | Recording overlay | [`src/recording_overlay.py`](https://github.com/laceyp99/murmur/blob/main/src/recording_overlay.py) | Passive status pill; state requests are queued through `src/settings_gui.py`. |

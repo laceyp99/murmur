@@ -15,6 +15,7 @@ from src.transcription import (
     Transcriber,
     _should_accept_whisper_segment,
 )
+from src.vad_types import LiveSpeechSegment
 
 
 class FakeConfig:
@@ -64,6 +65,67 @@ class FakeLLMPostProcessor:
         if self.error is not None:
             raise self.error
         return True
+
+
+@pytest.mark.parametrize("sample_rate", [8000, 16000, 32000, 44100, 48000])
+@pytest.mark.parametrize("entrypoint", ["transcribe", "transcribe_segments", "live"])
+def test_transcription_preserves_waveform_duration_and_pitch(sample_rate, entrypoint):
+    # A one-second tone must remain one second at the same frequency for Whisper.
+    positions = np.arange(sample_rate) / sample_rate
+    audio = (0.5 * np.sin(2 * np.pi * 440 * positions)).astype(np.float32)
+    original_audio = audio.copy()
+    model = FakeModel(["hello"])
+    transcriber = Transcriber(config=FakeConfig(), model=model, device="cpu")
+    clip = AudioData(audio=audio, sample_rate=sample_rate, duration=1.0)
+
+    if entrypoint == "transcribe":
+        assert transcriber.transcribe(clip) == "Hello."
+    elif entrypoint == "transcribe_segments":
+        result = transcriber.transcribe_segments([clip])
+        assert result.text == "Hello."
+        assert result.segments[0].duration == 1.0
+    else:
+        segment = LiveSpeechSegment(
+            start_sample=0,
+            end_sample=sample_rate,
+            sample_rate=sample_rate,
+            audio=audio,
+            segment_id=0,
+        )
+        assert transcriber.transcribe_segment(segment) == "hello"
+        assert segment.duration == 1.0
+
+    prepared_audio = model.calls[0]["audio"]
+    assert prepared_audio.shape == (16000,)
+    assert prepared_audio.dtype == np.float32
+    assert np.max(np.abs(prepared_audio)) == pytest.approx(1.0)
+    peak_frequency = np.argmax(np.abs(np.fft.rfft(prepared_audio)))
+    assert peak_frequency == 440
+    np.testing.assert_array_equal(audio, original_audio)
+    if sample_rate == 16000:
+        np.testing.assert_array_equal(prepared_audio, audio / np.max(np.abs(audio)))
+
+
+@pytest.mark.parametrize("sample_rate", [8000, 16000, 48000])
+def test_transcribe_empty_audio_skips_whisper(sample_rate):
+    model = FakeModel([])
+    transcriber = Transcriber(config=FakeConfig(), model=model, device="cpu")
+    clip = AudioData(np.array([], dtype=np.float32), sample_rate, 0.0)
+
+    assert transcriber.transcribe(clip) == ""
+    assert model.calls == []
+
+
+@pytest.mark.parametrize("sample_rate", [0, -16000])
+def test_transcribe_rejects_invalid_source_rate(sample_rate):
+    model = FakeModel([])
+    transcriber = Transcriber(config=FakeConfig(), model=model, device="cpu")
+    clip = AudioData(np.ones(320, dtype=np.float32), sample_rate, 0.02)
+
+    with pytest.raises(ValueError, match="sample_rate must be positive"):
+        transcriber.transcribe(clip)
+
+    assert model.calls == []
 
 
 def test_cancel_during_whisper_discards_result_and_skips_next_segment_and_llm():
