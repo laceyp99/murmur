@@ -47,6 +47,52 @@ class HotkeyEvent:
     state: HotkeyState
 
 
+class RecordingRequest:
+    """One hotkey attempt whose cancel/commit boundary is atomic."""
+
+    def __init__(self, identity: int):
+        self.identity = identity
+        self.cancelled = threading.Event()
+        self._lock = threading.Lock()
+        self._committed = False
+        self._active = True
+
+    def commit_capture(self) -> bool:
+        """Commit capture unless an earlier stop or shutdown cancelled it."""
+        with self._lock:
+            if not self._active or self.cancelled.is_set():
+                return False
+            self._committed = True
+            return True
+
+    def request_stop(self) -> bool:
+        """Record a stop and return whether capture had already committed."""
+        with self._lock:
+            committed = self._committed
+            if not committed:
+                self.cancelled.set()
+            return committed
+
+    def invalidate(self) -> None:
+        """Make callbacks from a superseded attempt harmless."""
+        with self._lock:
+            self._active = False
+            if not self._committed:
+                self.cancelled.set()
+
+    @property
+    def capture_committed(self) -> bool:
+        """Whether this attempt crossed the successful capture boundary."""
+        with self._lock:
+            return self._committed and self._active
+
+    @property
+    def is_active(self) -> bool:
+        """Whether this request still owns hotkey activation callbacks."""
+        with self._lock:
+            return self._active
+
+
 class _ChordGuard:
     """Remember which activation-key presses a single-chord hotkey consumed.
 
@@ -95,19 +141,22 @@ class HotkeyManager:
     def __init__(self):
         self.config = get_config()
         self._state: HotkeyState = HotkeyState.IDLE
-        self._on_start: Callable[[], None] | None = None
-        self._on_stop: Callable[[], None] | None = None
+        self._on_start: Callable[[RecordingRequest], None] | None = None
+        self._on_stop: Callable[[RecordingRequest, bool], None] | None = None
         self._on_state_change: Callable[[HotkeyState], None] | None = None
         self._hotkey_registered: bool = False
         self._last_registration_error: str | None = None
         self._removers: list[Callable[[], None]] = []
         self._guard: _ChordGuard | None = None
         self._lock = threading.Lock()
+        self._request: RecordingRequest | None = None
+        self._request_id = 0
+        self._stopped = False
 
     def register(
         self,
-        on_start: Callable[[], None] | None = None,
-        on_stop: Callable[[], None] | None = None,
+        on_start: Callable[[RecordingRequest], None] | None = None,
+        on_stop: Callable[[RecordingRequest, bool], None] | None = None,
         on_state_change: Callable[[HotkeyState], None] | None = None,
     ) -> bool:
         """
@@ -186,19 +235,30 @@ class HotkeyManager:
     def _on_hotkey_pressed(self) -> bool:
         """Handle hotkey press event."""
         with self._lock:
+            if self._stopped:
+                return True
             guard = self._guard
             if guard is not None and not guard.claim():
                 return True
             if self._state == HotkeyState.IDLE:
+                if self._request is not None:
+                    self._request.invalidate()
+                self._request_id += 1
+                request = RecordingRequest(self._request_id)
+                self._request = request
                 self._set_state(HotkeyState.RECORDING)
                 if self._on_start:
                     # Run callback in separate thread to avoid blocking
-                    threading.Thread(target=self._on_start).start()
+                    threading.Thread(target=self._on_start, args=(request,)).start()
 
             elif self._state == HotkeyState.RECORDING:
                 self._set_state(HotkeyState.PROCESSING)
-                if self._on_stop:
-                    threading.Thread(target=self._on_stop).start()
+                request = self._request
+                if request is not None and self._on_stop:
+                    committed = request.request_stop()
+                    threading.Thread(
+                        target=self._on_stop, args=(request, committed)
+                    ).start()
             return False
 
     def _set_state(self, state: HotkeyState) -> None:
@@ -210,7 +270,24 @@ class HotkeyManager:
     def set_idle(self) -> None:
         """Set state back to idle (called after processing complete)."""
         with self._lock:
+            if self._request is not None:
+                self._request.invalidate()
+                self._request = None
             self._set_state(HotkeyState.IDLE)
+
+    def stop_requests(self) -> RecordingRequest | None:
+        """Reject future activations and cancel any preparation in progress."""
+        with self._lock:
+            self._stopped = True
+            request = self._request
+            if request is not None:
+                request.request_stop()
+            return request
+
+    def is_current_request(self, request: RecordingRequest) -> bool:
+        """Reject a callback delayed past a later hotkey attempt."""
+        with self._lock:
+            return self._request is request and not self._stopped
 
     def set_processing(self) -> None:
         """Set state to processing."""
