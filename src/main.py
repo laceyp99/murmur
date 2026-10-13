@@ -251,6 +251,7 @@ class MurmurApp:
         if self._shutdown_event.is_set():
             return
         self._shutdown_event.set()
+        self._close_overlay()
         self.hotkey_manager.stop_requests()
         with self._recording_stop_lock:
             if self._session_active and not self._delivery_started:
@@ -261,23 +262,20 @@ class MurmurApp:
             else:
                 should_stop = False
         self._running = False
-        try:
-            with contextlib.suppress(Exception):
-                self.hotkey_manager.unregister()
-            with contextlib.suppress(Exception):
-                self.tray.stop()
-            if should_stop:
-                self._finish_recording_stop()
-            else:
-                with self._lifecycle_lock:
-                    try:
-                        if self.recorder.is_recording():
-                            self.recorder.stop_recording()
-                    except Exception:
-                        print("Warning: Failed to stop recording during shutdown")
-                    self._resume_owned_media()
-        finally:
-            self._close_overlay()
+        with contextlib.suppress(Exception):
+            self.hotkey_manager.unregister()
+        with contextlib.suppress(Exception):
+            self.tray.stop()
+        if should_stop:
+            self._finish_recording_stop()
+        else:
+            with self._lifecycle_lock:
+                try:
+                    if self.recorder.is_recording():
+                        self.recorder.stop_recording()
+                except Exception:
+                    print("Warning: Failed to stop recording during shutdown")
+                self._resume_owned_media()
 
         print("\nmurmur stopped.")
 
@@ -476,6 +474,7 @@ class MurmurApp:
                     and not self._shutdown_event.is_set()
                 ):
                     self._current_request = None
+                    self.tray.set_status("Ready")
                     self.hotkey_manager.set_idle()
                 return
             self._cancel_event.set()

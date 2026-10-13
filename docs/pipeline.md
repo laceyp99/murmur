@@ -221,8 +221,9 @@ are ignored. The pill immediately shows only `Cancelled`; new recordings remain
 blocked until workers and any active call finish. Audio and accumulated text
 are then released, and the app returns to Ready. Feedback remains visible for
 at least one second, unless a new recording replaces it. Preparation cancellation
-does not create a pill. Exit closes the overlay and completes shutdown rather
-than returning to Ready. Already executing calls are not forcibly terminated;
+does not create a pill. Exit requests overlay closure before waiting for active
+calls and completes shutdown rather than returning to Ready. Already executing
+calls are not forcibly terminated;
 they can delay process exit while their results are ignored.
 
 Cancellation and delivery atomically claim the session. If delivery has already
