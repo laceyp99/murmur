@@ -79,10 +79,11 @@ All configured models receive the same request profile: thinking disabled,
 Before sending a request, murmur conservatively estimates the complete message
 token count as the larger of words divided by `0.75` or characters divided by
 `4`, rounded up. The output allowance is the largest of three tokens per input
-word, input characters divided by `4` rounded up, or 64 tokens. It has no separate
-1,024-token cap. The complete input and output allowance must fit together while
-keeping 10% of the context unused. Requests that exceed that budget bypass
-Ollama and return the locally cleaned transcript. This fallback emits a
+word, input characters divided by `4` rounded up, or 64 tokens. The cleanup
+instructions, transcript, and space reserved for the response must fit within
+90% of the model's context window. The remaining 10% provides a buffer for
+errors in our token estimates. Requests that exceed that budget bypass Ollama
+and return the locally cleaned transcript. This fallback emits a
 content-safe operational log message without transcript text or a desktop warning.
 
 ```mermaid
