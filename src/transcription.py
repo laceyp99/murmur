@@ -13,12 +13,14 @@ from typing import Protocol
 import numpy as np
 import torch
 import whisper
+from whisper.audio import SAMPLE_RATE as WHISPER_SAMPLE_RATE
 
 from .audio import AudioData
 from .cancellation import check_cancelled
 from .config import get_config
 from .llm_postprocess import LLMPostProcessor, OllamaClient
 from .user_vocab import load_user_vocab
+from .vad_audio import resample_audio
 
 NO_SPEECH_THRESHOLD = 0.4
 LOGPROB_THRESHOLD = -0.6
@@ -218,7 +220,7 @@ class Transcriber:
         for index, segment in enumerate(segments):
             check_cancelled(cancel_event)
             start_time = time.time()
-            text = self._transcribe_segment_audio(segment.audio)
+            text = self._transcribe_segment_audio(segment.audio, segment.sample_rate)
             check_cancelled(cancel_event)
             elapsed = time.time() - start_time
 
@@ -247,14 +249,14 @@ class Transcriber:
 
     def transcribe_segment(self, segment: AudioSegmentLike) -> str:
         """Transcribe one segment without document-level cleanup."""
-        return self._transcribe_segment_audio(segment.audio)
+        return self._transcribe_segment_audio(segment.audio, segment.sample_rate)
 
-    def _transcribe_segment_audio(self, audio: np.ndarray) -> str:
+    def _transcribe_segment_audio(self, audio: np.ndarray, sample_rate: int) -> str:
         """Transcribe one waveform segment without final document cleanup."""
         if self._model is None:
             self.load_model()
 
-        prepared_audio = self._prepare_audio(audio)
+        prepared_audio = self._prepare_audio(audio, sample_rate)
         if prepared_audio.size == 0:
             return ""
 
@@ -299,11 +301,19 @@ class Transcriber:
 
         return text
 
-    def _prepare_audio(self, audio: np.ndarray) -> np.ndarray:
-        """Convert audio to a normalized float32 mono waveform for Whisper."""
+    def _prepare_audio(self, audio: np.ndarray, sample_rate: int) -> np.ndarray:
+        """Resample source audio to Whisper's rate and normalize its amplitude."""
+        if sample_rate <= 0:
+            raise ValueError("sample_rate must be positive")
+
         normalized_audio = np.asarray(audio, dtype=np.float32).reshape(-1)
         if normalized_audio.size == 0:
             return normalized_audio
+
+        if sample_rate != WHISPER_SAMPLE_RATE:
+            normalized_audio = resample_audio(
+                normalized_audio, sample_rate, WHISPER_SAMPLE_RATE
+            )
 
         peak = np.max(np.abs(normalized_audio))
         if peak > 0:
