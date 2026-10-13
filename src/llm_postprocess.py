@@ -164,7 +164,7 @@ class OllamaClient:
         """Load an already-installed model into memory without downloading it."""
         if not self.is_model_available():
             print(
-                f"⚠️ Ollama model '{self.model_name}' is not installed locally; skipping warmup."
+                f"Warning: Ollama model '{self.model_name}' is not installed locally; skipping warmup."
             )
             return False
 
@@ -300,7 +300,7 @@ class LLMPostProcessor:
             return normalized_result
 
         print(
-            "⚠️ Ollama post-processing returned invalid output; using original transcript."
+            "Warning: Ollama post-processing returned invalid output; using original transcript."
         )
         return cleaned_input
 

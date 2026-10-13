@@ -178,7 +178,7 @@ class Transcriber:
                 user_vocab=load_user_vocab(),
             )
         except Exception as exc:
-            print(f"⚠️ Ollama post-processor unavailable: {exc}")
+            print(f"Warning: Ollama post-processor unavailable: {exc}")
             self._llm_post_processor = None
 
         return self._llm_post_processor
@@ -199,7 +199,7 @@ class Transcriber:
         try:
             return bool(client.warm())
         except Exception as exc:
-            print(f"⚠️ Ollama model warmup failed: {exc}")
+            print(f"Warning: Ollama model warmup failed: {exc}")
             return False
 
     def transcribe_segments(

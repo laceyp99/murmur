@@ -121,11 +121,11 @@ class DataLogger:
             with self.metadata_file.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(asdict(log_entry), ensure_ascii=False) + "\n")
 
-            print(f"📁 Logged to {audio_filename}")
+            print(f"Logged to {audio_filename}")
             return log_entry
 
         except Exception as e:
-            print(f"⚠️ Failed to log data: {e}")
+            print(f"Warning: Failed to log data: {e}")
             return None
 
     def _save_wav(self, path: Path, audio_data: AudioData) -> None:

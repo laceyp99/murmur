@@ -91,6 +91,10 @@ prefers `venv\Scripts\pythonw.exe` for source development, then uses
 `dist\murmur\murmur.exe` when a packaged build exists, and finally falls back
 to `pythonw.exe` from `PATH`.
 
+Operational status messages use ASCII prefixes so redirected Windows streams
+such as `cp1252` can report recording start, stop, and finalization. Windowless
+launches through `run.py` discard output when stdout or stderr is missing.
+
 ## Build a packaged release
 
 The packaged release keeps the Python source workflow above unchanged while
