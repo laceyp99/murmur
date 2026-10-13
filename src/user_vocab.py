@@ -28,11 +28,13 @@ def load_user_vocab(path: Path | None = None) -> dict[str, str]:
     try:
         raw_data = json.loads(vocab_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        print(f"⚠️ Failed to load user vocabulary from '{vocab_path}': {exc}")
+        print(f"Warning: Failed to load user vocabulary from '{vocab_path}': {exc}")
         return {}
 
     if not isinstance(raw_data, dict):
-        print(f"⚠️ User vocabulary file '{vocab_path}' must contain a JSON object.")
+        print(
+            f"Warning: User vocabulary file '{vocab_path}' must contain a JSON object."
+        )
         return {}
 
     vocab: dict[str, str] = {}
@@ -56,4 +58,4 @@ def save_user_vocab(vocab: Mapping[str, str], path: Path | None = None) -> None:
             encoding="utf-8",
         )
     except OSError as exc:
-        print(f"⚠️ Failed to save user vocabulary to '{vocab_path}': {exc}")
+        print(f"Warning: Failed to save user vocabulary to '{vocab_path}': {exc}")
