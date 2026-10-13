@@ -157,7 +157,7 @@ class MurmurApp:
                 )
 
         if recovery_message:
-            print(f"⚠️ {recovery_message}")
+            print(f"Warning: {recovery_message}")
             self.notifications.notify("murmur", recovery_message)
 
         if not success:
@@ -167,7 +167,7 @@ class MurmurApp:
 
         config_notice = self.config.consume_startup_notice()
         if config_notice:
-            print(f"⚠️ {config_notice}")
+            print(f"Warning: {config_notice}")
             self.notifications.notify("murmur", config_notice)
 
         print(f"\n{'=' * 50}")
@@ -264,7 +264,7 @@ class MurmurApp:
 
     def _start_recording_session(self) -> None:
         """Serialize startup with teardown so a cancelled start cannot leak capture."""
-        print("🎤 Recording started...")
+        print("Recording started...")
         self._live_pipeline_degraded = False
         self._live_pipeline_degraded_reason = None
         self._recording_limit_stop_started = False
@@ -292,7 +292,7 @@ class MurmurApp:
         ):
             self._was_media_playing = self.media_controller.pause()
             if not self._was_media_playing:
-                print("⚠️ Failed to pause media playback")
+                print("Warning: Failed to pause media playback")
                 self.notifications.notify("murmur", "Could not pause media playback")
 
         try:
@@ -396,7 +396,7 @@ class MurmurApp:
 
     def _stop_and_finalize_session(self) -> None:
         """Preserve normal stop's drain path and discard deliberately cancelled work."""
-        print("⏹️ Recording stopped.")
+        print("Recording stopped.")
         if not self._cancel_event.is_set():
             self.tray.set_status("Finalizing...")
         finalization_started_at = time.perf_counter()
@@ -408,7 +408,7 @@ class MurmurApp:
             # Resume media if it was playing before recording.
             if self._was_media_playing:
                 if not self.media_controller.play():
-                    print("⚠️ Failed to resume media playback")
+                    print("Warning: Failed to resume media playback")
                     self.notifications.notify(
                         "murmur", "Could not resume media playback"
                     )
@@ -428,7 +428,7 @@ class MurmurApp:
                 finalization_started_at=finalization_started_at,
             )
         else:
-            print("⚠️ No audio data captured.")
+            print("Warning: No audio data captured.")
             self._show_overlay(ERROR, OVERLAY_NO_AUDIO)
 
     def _on_recording_limit_reached(
@@ -488,7 +488,9 @@ class MurmurApp:
             reason = (
                 self._live_pipeline_degraded_reason or "Live transcription degraded"
             )
-            print(f"⚠️ {reason}. Recomputing final transcript from the full recording.")
+            print(
+                f"Warning: {reason}. Recomputing final transcript from the full recording."
+            )
             self._process_audio(
                 audio_data,
                 finalization_started_at=finalization_started_at,
@@ -525,7 +527,7 @@ class MurmurApp:
         """Process recorded audio through transcription."""
         self.hotkey_manager.set_processing()
 
-        print(f"📝 Processing {audio_data.duration:.1f}s of audio...")
+        print(f"Processing {audio_data.duration:.1f}s of audio...")
 
         try:
             text = self._transcribe_audio(audio_data)
@@ -550,7 +552,7 @@ class MurmurApp:
         segmenter = self._get_segmenter(audio_data.sample_rate)
         if segmenter is None:
             reason = self._vad_disabled_reason or "VAD unavailable"
-            print(f"⚠️ {reason}. Falling back to full clip.")
+            print(f"Warning: {reason}. Falling back to full clip.")
             return self.transcriber.transcribe(
                 audio_data, cancel_event=self._cancel_event
             )
@@ -558,7 +560,9 @@ class MurmurApp:
         try:
             segments = segmenter.segment_audio(audio_data.audio)
         except Exception as exc:
-            print(f"⚠️ VAD segmentation failed: {exc}. Falling back to full clip.")
+            print(
+                f"Warning: VAD segmentation failed: {exc}. Falling back to full clip."
+            )
             check_cancelled(self._cancel_event)
             return self.transcriber.transcribe(
                 audio_data, cancel_event=self._cancel_event
@@ -567,7 +571,9 @@ class MurmurApp:
         check_cancelled(self._cancel_event)
 
         if not segments:
-            print("⚠️ No VAD speech segments detected. Falling back to full clip.")
+            print(
+                "Warning: No VAD speech segments detected. Falling back to full clip."
+            )
             return self.transcriber.transcribe(
                 audio_data, cancel_event=self._cancel_event
             )
@@ -615,7 +621,7 @@ class MurmurApp:
                 return
             self._delivery_started = True
         if not text:
-            print("⚠️ No speech detected.")
+            print("Warning: No speech detected.")
             self.notifications.notify("murmur", "No speech detected.")
             self._show_overlay(ERROR, OVERLAY_NO_SPEECH)
             return
@@ -716,14 +722,16 @@ class MurmurApp:
         self._stop_live_segmentation()
 
         if self._live_vad_disabled_reason is not None:
-            print(f"⚠️ {self._live_vad_disabled_reason}. Live segmentation disabled.")
+            print(
+                f"Warning: {self._live_vad_disabled_reason}. Live segmentation disabled."
+            )
             return
 
         try:
             worker = self._build_live_segmenter(self.recorder.sample_rate)
         except Exception as exc:
             self._live_vad_disabled_reason = f"Live VAD unavailable: {exc}"
-            print(f"⚠️ {self._live_vad_disabled_reason}")
+            print(f"Warning: {self._live_vad_disabled_reason}")
             self.recorder.set_block_callback(None)
             self.recorder.set_block_callback_error_handler(None)
             return
@@ -845,7 +853,7 @@ class MurmurApp:
 
         self._live_pipeline_degraded = True
         self._live_pipeline_degraded_reason = message
-        print(f"⚠️ {message}")
+        print(f"Warning: {message}")
 
     def _on_live_block_callback_error(self, exc: Exception) -> None:
         """Handle a recorder block callback failure during live segmentation."""

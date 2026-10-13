@@ -1,3 +1,7 @@
+import importlib.metadata
+import io
+import runpy
+import sys
 import threading
 from types import SimpleNamespace
 
@@ -1297,6 +1301,100 @@ def make_stop_app(audio_data):
     app._stop_live_segmentation = lambda: None
     app._stop_live_transcription = lambda: None
     return app
+
+
+@pytest.mark.parametrize(
+    ("entrypoint", "encoding"),
+    [
+        ("script", "cp1252"),
+        ("script", "ascii"),
+        ("script", None),
+        ("console", "cp1252"),
+        ("console", "ascii"),
+        ("module", "cp1252"),
+        ("module", "ascii"),
+    ],
+)
+@pytest.mark.parametrize("outcome", ["copied", "no_audio", "start_failure"])
+def test_entrypoints_record_with_restricted_output(
+    monkeypatch, entrypoint, encoding, outcome
+):
+    """Exercise real start/stop and offline finalization without desktop hardware."""
+    import run
+
+    app = make_stop_app(None if outcome == "no_audio" else make_audio_data())
+    app.segmenter = FakeSegmenter()
+    app.config.pause_media_while_recording = True
+    app.notifications.notify_recording_started = lambda: None
+    app.recorder.set_capture_error_callback = lambda callback: None
+    starts = []
+    copies = []
+
+    def start_recording():
+        starts.append(True)
+        if outcome == "start_failure":
+            raise RuntimeError("microphone unavailable")
+
+    app.recorder.start_recording = start_recording
+    # Trigger warning output before capture; stop also exercises the VAD fallback.
+    app.media_controller.is_media_playing = lambda: True
+    app.media_controller.pause = lambda: False
+    app._start_live_transcription = lambda: None
+    app._start_live_segmentation = lambda: None
+    app.start = app._on_recording_start
+    app.tray.run = (
+        app._on_recording_stop if outcome != "start_failure" else lambda: None
+    )
+    app.stop = lambda: None
+    monkeypatch.setattr(main_module, "MurmurApp", lambda **kwargs: app)
+    monkeypatch.setattr(
+        main_module, "copy_to_clipboard", lambda text: copies.append(text) or True
+    )
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+
+    with (
+        io.BytesIO() as output,
+        io.TextIOWrapper(
+            output, encoding=encoding or "ascii", errors="strict"
+        ) as stream,
+        monkeypatch.context() as streams,
+    ):
+        streams.setattr(sys, "stdout", stream if encoding else None)
+        streams.setattr(sys, "stderr", stream if encoding else None)
+        try:
+            if entrypoint == "script":
+                # run.py is also used by pythonw, the VBS launcher and packaging.
+                runpy.run_path(run.__file__, run_name="__main__")
+            elif entrypoint == "module":
+                runpy.run_module("src", run_name="__main__")
+            else:
+                console = next(
+                    entry
+                    for entry in importlib.metadata.distribution("murmur").entry_points
+                    if entry.name == "murmur" and entry.group == "console_scripts"
+                )
+                console.load()()
+            if encoding:
+                assert sys.stdout is stream
+                stream.flush()
+                messages = output.getvalue().decode(encoding)
+                assert "Recording started..." in messages
+                assert "Warning: Failed to pause media playback" in messages
+                if outcome != "start_failure":
+                    assert "Recording stopped." in messages
+                if outcome == "copied":
+                    assert "copied to clipboard." in messages
+        finally:
+            if encoding is None:
+                sys.stdout.close()
+                sys.stderr.close()
+
+    assert starts == [True]
+    assert app.recorder.stop_calls == int(outcome != "start_failure")
+    assert copies == (["Fallback text."] if outcome == "copied" else [])
+    assert app.hotkey_manager.idle_calls == 1
+    assert app._session_active is False
+    assert not app.notifications.errors or outcome == "start_failure"
 
 
 def test_stop_shows_processing_then_copied(monkeypatch, overlay_calls):
