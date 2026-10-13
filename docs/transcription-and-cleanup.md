@@ -78,10 +78,13 @@ All configured models receive the same request profile: thinking disabled,
 
 Before sending a request, murmur conservatively estimates the complete message
 token count as the larger of words divided by `0.75` or characters divided by
-`4`, rounded up. It also reserves the configured output allowance and keeps 10%
-of the context unused. Requests that exceed that budget bypass Ollama and return
-the locally cleaned transcript. This fallback emits a content-safe operational
-log message without transcript text or a desktop warning.
+`4`, rounded up. The output allowance is the largest of three tokens per input
+word, input characters divided by `4` rounded up, or 64 tokens. The cleanup
+instructions, transcript, and space reserved for the response must fit within
+90% of the model's context window. The remaining 10% provides a buffer for
+errors in our token estimates. Requests that exceed that budget bypass Ollama
+and return the locally cleaned transcript. This fallback emits a
+content-safe operational log message without transcript text or a desktop warning.
 
 ```mermaid
 flowchart TB
@@ -97,7 +100,9 @@ flowchart TB
     BuildMessages --> Budget{"Fits context budget?"}
     Budget -->|no| ReturnLocal
     Budget -->|yes| Ollama["Ollama chat request"]
-    Ollama --> Normalize["Normalize model output"]
+    Ollama --> Completion{"done=true and done_reason=stop?"}
+    Completion -->|yes| Normalize["Normalize model output"]
+    Completion -->|no| ReturnLocal
     Normalize --> Gate{"Acceptable output?"}
     Gate -->|yes| ReturnLLM["Return LLM cleaned text"]
     Gate -->|no| ReturnLocal
@@ -106,8 +111,14 @@ flowchart TB
 
 ## Ollama Acceptance Gate
 
-The LLM output is accepted only if it still looks like transcript text. The gate
-rejects output when it is:
+Before extracting text, the client requires `done=true` and `done_reason="stop"`
+for both dictionary and SDK-object responses. Output-limit completion
+(`done_reason="length"`), unfinished responses, and missing or unknown completion
+metadata return the locally cleaned transcript through the existing failure
+fallback. No partial model text is accepted or logged.
+
+The completed LLM output is accepted only if it still looks like transcript
+text. The gate rejects output when it is:
 
 - Empty.
 - Prefixed with common assistant-style preambles.

@@ -146,9 +146,22 @@ class OllamaClient:
             options={
                 "temperature": temperature,
                 "num_predict": max_tokens,
-                "num_ctx": 4096,
+                "num_ctx": CONTEXT_SIZE,
             },
         )
+
+        done = (
+            response.get("done")
+            if isinstance(response, Mapping)
+            else getattr(response, "done", None)
+        )
+        done_reason = (
+            response.get("done_reason")
+            if isinstance(response, Mapping)
+            else getattr(response, "done_reason", None)
+        )
+        if done is not True or done_reason != "stop":
+            raise RuntimeError("Ollama chat response did not complete normally.")
 
         return self._extract_chat_text(response)
 
@@ -275,7 +288,11 @@ class LLMPostProcessor:
             return cleaned_input
 
         messages = self.build_messages(cleaned_input)
-        max_tokens = min(max(len(cleaned_input.split()) * 3, 64), 1024)
+        max_tokens = max(
+            len(cleaned_input.split()) * 3,
+            ceil(len(cleaned_input) / 4),
+            64,
+        )
         if not self._fits_context(messages, max_tokens):
             print(
                 "Ollama cleanup skipped because the estimated request exceeded the context budget."
