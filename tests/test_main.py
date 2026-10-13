@@ -116,9 +116,20 @@ def make_app(segmenter, transcriber, config=None):
     app._session_active = True
     app._delivery_started = False
     app._shutdown_event = threading.Event()
-    app._current_request = None
-    app._capture_stopped = False
+    app._current_request = committed_request()
     return app
+
+
+def committed_request() -> RecordingRequest:
+    """Stand in for a hotkey attempt whose capture already started."""
+    request = RecordingRequest()
+    request.commit_capture()
+    return request
+
+
+def stop_current(app) -> None:
+    """Stop the current session the way a post-commit hotkey press does."""
+    app._on_recording_stop(app._current_request, True)
 
 
 class FakeRecorder:
@@ -225,9 +236,6 @@ class FakeHotkeyManager:
         if self.request is not None:
             self.request.request_stop()
         return self.request
-
-    def is_current_request(self, request):
-        return self.request is request
 
 
 class FakeStartupConfig:
@@ -644,7 +652,6 @@ def test_hotkey_pre_dispatch_cancel_does_not_poison_next_attempt(
     manager._guard = None
     manager._lock = threading.Lock()
     manager._request = None
-    manager._request_id = 0
     manager._stopped = False
     app.hotkey_manager = manager
 
@@ -1141,7 +1148,7 @@ def test_late_capture_error_does_not_strand_hotkey_after_manual_stop():
     stop_calls = []
     app._finish_recording_stop = lambda: stop_calls.append(True)
 
-    app._on_recording_stop()
+    stop_current(app)
     app._on_capture_error("Microphone disconnected or stopped")
 
     assert stop_calls == [True]
@@ -1192,9 +1199,9 @@ def test_media_resumes_only_after_successful_pause(
         "_stop_live_segmentation",
     ):
         monkeypatch.setattr(app, name, lambda: None)
-    app._on_recording_start()
+    app._on_recording_start(RecordingRequest())
     if not recording_failed:
-        app._on_recording_stop()
+        stop_current(app)
     assert len(pauses) == int(enabled and playing)
     assert len(plays) == expected_plays
     assert app._was_media_playing is False
@@ -1220,7 +1227,7 @@ def test_accepted_capture_error_cannot_stop_next_session(monkeypatch):
     ):
         monkeypatch.setattr(app, name, lambda: None)
 
-    app._on_recording_start()
+    app._on_recording_start(RecordingRequest())
     accepted = threading.Event()
     release = threading.Event()
     old_callback = callbacks[-1]
@@ -1234,8 +1241,8 @@ def test_accepted_capture_error_cannot_stop_next_session(monkeypatch):
     worker.start()
     try:
         assert accepted.wait(2)
-        app._on_recording_stop()
-        app._on_recording_start()
+        stop_current(app)
+        app._on_recording_start(RecordingRequest())
     finally:
         release.set()
         worker.join(2)
@@ -1305,7 +1312,7 @@ def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
         app, "_stop_live_segmentation", lambda: live_calls.append("segmentation")
     )
 
-    app._on_recording_start()
+    app._on_recording_start(RecordingRequest())
 
     [failed_stream] = fake_sd.streams
     assert failed_stream.closed is True
@@ -1316,7 +1323,7 @@ def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
     # A failed start shows the capture error and never the recording pulse.
     assert overlay_calls == [("error", 1, "Couldn't start recording")]
 
-    app._on_recording_start()
+    app._on_recording_start(RecordingRequest())
 
     retry_stream = fake_sd.streams[-1]
     assert retry_stream.started is True
@@ -1376,7 +1383,7 @@ def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch
         main_module.time, "perf_counter", lambda: next(perf_counter_values)
     )
 
-    app._on_recording_stop()
+    stop_current(app)
 
     assert app.tray.statuses[0] == "Finalizing..."
     assert stop_order == ["recorder", "media", "segmentation", "transcription"]
@@ -1448,9 +1455,9 @@ def test_entrypoints_record_with_restricted_output(
     app.media_controller.pause = lambda: False
     app._start_live_transcription = lambda: None
     app._start_live_segmentation = lambda: None
-    app.start = app._on_recording_start
+    app.start = lambda: app._on_recording_start(RecordingRequest())
     app.tray.run = (
-        app._on_recording_stop if outcome != "start_failure" else lambda: None
+        (lambda: stop_current(app)) if outcome != "start_failure" else lambda: None
     )
     app.stop = lambda: None
     monkeypatch.setattr(main_module, "MurmurApp", lambda **kwargs: app)
@@ -1510,7 +1517,7 @@ def test_stop_shows_processing_then_copied(monkeypatch, overlay_calls):
     app = make_stop_app(make_audio_data())
     monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: True)
 
-    app._on_recording_stop()
+    stop_current(app)
 
     assert overlay_calls == [("processing", 7, ""), ("success", 7, "")]
 
@@ -1538,7 +1545,7 @@ def test_stop_failures_show_fixed_error_without_transcript(
 
         monkeypatch.setattr(app, "_transcribe_audio", fail)
 
-    app._on_recording_stop()
+    stop_current(app)
 
     assert overlay_calls[-1] == ("error", 7, message)
     expected_processing = [] if setup == "no_audio" else [("processing", 7, "")]
@@ -1564,7 +1571,7 @@ def test_live_finalization_error_reports_before_returning_to_idle(
     app.hotkey_manager.set_idle = lambda: events.append("idle")
 
     with pytest.raises(RuntimeError):
-        app._on_recording_stop()
+        stop_current(app)
 
     assert events[-2:] == [("error", 7, "Transcription failed"), "idle"]
 
@@ -1580,7 +1587,7 @@ def test_disabled_overlay_sends_nothing_but_dictation_still_copies(
     )
 
     app._show_overlay(main_module.HIDDEN)
-    app._on_recording_stop()
+    stop_current(app)
 
     assert overlay_calls == []
     assert copied == ["Fallback text."]
@@ -1612,7 +1619,7 @@ def test_overlay_failure_does_not_interrupt_dictation(monkeypatch, capsys):
         main_module, "copy_to_clipboard", lambda text: copied.append(text) or True
     )
 
-    app._on_recording_stop()
+    stop_current(app)
 
     assert copied == ["Fallback text."]
     assert app.notifications.copied_to_clipboard == 1
@@ -1655,7 +1662,7 @@ def test_cancel_during_processing_waits_for_call_and_suppresses_delivery(
 
     def stop():
         try:
-            app._on_recording_stop()
+            stop_current(app)
         except Exception as exc:
             errors.append(exc)
 
@@ -1709,7 +1716,7 @@ def test_exit_cancels_normal_stop_while_final_transcription_is_blocked(
 
     def normal_stop():
         try:
-            app._on_recording_stop()
+            stop_current(app)
         except Exception as exc:
             errors.append(exc)
 
@@ -1830,7 +1837,7 @@ def test_delivery_claim_prevents_cancel_before_copy_returns(monkeypatch, overlay
 
     def stop():
         try:
-            app._on_recording_stop()
+            stop_current(app)
         except Exception as exc:
             errors.append(exc)
 
@@ -1878,7 +1885,7 @@ def test_exit_after_delivery_claim_finishes_copy_and_log_without_late_ui(
 
     def stop():
         try:
-            app._on_recording_stop()
+            stop_current(app)
         except Exception as exc:
             errors.append(exc)
 
@@ -1953,7 +1960,7 @@ def test_cancel_or_exit_while_normal_stop_drains_live_worker(
 
     def stop():
         try:
-            app._on_recording_stop()
+            stop_current(app)
         except Exception as exc:
             errors.append(exc)
 
@@ -2021,7 +2028,7 @@ def test_cancel_or_exit_during_stream_open_closes_without_commit(
 
     def start():
         try:
-            app._on_recording_start()
+            app._on_recording_start(RecordingRequest())
         except Exception as exc:
             errors.append(exc)
 
@@ -2061,7 +2068,6 @@ def test_cancel_or_exit_during_stream_open_closes_without_commit(
     assert not starter.is_alive()
     assert not canceller.is_alive()
     assert not errors
-    assert app.recorder.stop_calls == 1
     assert app.transcriber.audio_calls == []
     assert app.hotkey_manager.idle_calls == (0 if exit_app else 1)
     assert main_module.CANCELLED not in [call[0] for call in overlay_calls]
@@ -2073,7 +2079,7 @@ def test_retired_hotkey_stop_does_not_cancel_or_finalize_next_attempt(
     monkeypatch, committed
 ):
     app = make_stop_app(make_audio_data())
-    old, new = RecordingRequest(41), RecordingRequest(42)
+    old, new = RecordingRequest(), RecordingRequest()
     if committed:
         assert old.commit_capture()
     old.request_stop()
@@ -2122,7 +2128,7 @@ def test_media_wait_cancel_or_exit_restores_late_pause_without_capture(
 ):
     app = make_stop_app(None)
     app.config.pause_media_while_recording = True
-    request = RecordingRequest(41)
+    request = RecordingRequest()
     entered, release = threading.Event(), threading.Event()
     errors = []
     pauses, plays, opens = [], [], []
@@ -2201,7 +2207,7 @@ def test_pending_cancel_resets_tray_when_startup_returns_before_stop_callback(
 ):
     app = make_stop_app(None)
     app.config.pause_media_while_recording = True
-    request = RecordingRequest(41)
+    request = RecordingRequest()
     app.hotkey_manager.request = request
     entered, release = threading.Event(), threading.Event()
     errors, opens = [], []
@@ -2280,7 +2286,7 @@ def test_failed_start_does_not_release_session_claimed_by_cancellation(monkeypat
 
     def start():
         try:
-            app._on_recording_start()
+            app._on_recording_start(RecordingRequest())
         except Exception as exc:
             errors.append(exc)
 

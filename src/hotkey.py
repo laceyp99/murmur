@@ -50,8 +50,7 @@ class HotkeyEvent:
 class RecordingRequest:
     """One hotkey attempt whose cancel/commit boundary is atomic."""
 
-    def __init__(self, identity: int):
-        self.identity = identity
+    def __init__(self):
         self.cancelled = threading.Event()
         self._lock = threading.Lock()
         self._committed = False
@@ -88,7 +87,7 @@ class RecordingRequest:
 
     @property
     def is_active(self) -> bool:
-        """Whether this request still owns hotkey activation callbacks."""
+        """False once a later press or `set_idle()` has superseded this request."""
         with self._lock:
             return self._active
 
@@ -150,7 +149,6 @@ class HotkeyManager:
         self._guard: _ChordGuard | None = None
         self._lock = threading.Lock()
         self._request: RecordingRequest | None = None
-        self._request_id = 0
         self._stopped = False
 
     def register(
@@ -243,8 +241,7 @@ class HotkeyManager:
             if self._state == HotkeyState.IDLE:
                 if self._request is not None:
                     self._request.invalidate()
-                self._request_id += 1
-                request = RecordingRequest(self._request_id)
+                request = RecordingRequest()
                 self._request = request
                 self._set_state(HotkeyState.RECORDING)
                 if self._on_start:
@@ -283,11 +280,6 @@ class HotkeyManager:
             if request is not None:
                 request.request_stop()
             return request
-
-    def is_current_request(self, request: RecordingRequest) -> bool:
-        """Reject a callback delayed past a later hotkey attempt."""
-        with self._lock:
-            return self._request is request and not self._stopped
 
     def set_processing(self) -> None:
         """Set state to processing."""
