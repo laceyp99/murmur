@@ -1,9 +1,13 @@
 import hashlib
 import json
+from math import ceil
 from types import SimpleNamespace
+
+import pytest
 
 from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
 from src.llm_postprocess import (
+    CONTEXT_SIZE,
     DEFAULT_SYSTEM_PROMPT,
     FEW_SHOT_MESSAGES,
     LLMPostProcessor,
@@ -30,7 +34,11 @@ class FakeOllamaPackageClient:
         self.response = response
         self.calls = []
         self.list_response = {"models": []}
-        self.chat_response = {"message": {"content": ""}}
+        self.chat_response = {
+            "message": {"content": ""},
+            "done": True,
+            "done_reason": "stop",
+        }
 
     def generate(self, **kwargs):
         self.calls.append(kwargs)
@@ -84,7 +92,11 @@ def test_ollama_client_generate_extracts_object_response():
 
 def test_ollama_client_chat_uses_messages_and_options():
     fake_client = FakeOllamaPackageClient({"response": "ignored"})
-    fake_client.chat_response = {"message": {"content": "Cleaned output."}}
+    fake_client.chat_response = {
+        "message": {"content": "Cleaned output."},
+        "done": True,
+        "done_reason": "stop",
+    }
     client = OllamaClient(
         endpoint="http://localhost:11434",
         model_name=MODEL_NAME,
@@ -109,7 +121,7 @@ def test_ollama_client_chat_uses_messages_and_options():
             "options": {
                 "temperature": 0.0,
                 "num_predict": 42,
-                "num_ctx": 4096,
+                "num_ctx": CONTEXT_SIZE,
             },
         }
     ]
@@ -118,7 +130,9 @@ def test_ollama_client_chat_uses_messages_and_options():
 def test_llm_post_processor_builds_exact_evaluated_messages_and_returns_cleaned_text():
     fake_client = FakeOllamaPackageClient({"response": "ignored"})
     fake_client.chat_response = {
-        "message": {"content": "The report is ready. Please review it tomorrow."}
+        "message": {"content": "The report is ready. Please review it tomorrow."},
+        "done": True,
+        "done_reason": "stop",
     }
     processor = LLMPostProcessor(
         client=OllamaClient(
@@ -166,6 +180,164 @@ def test_llm_post_processor_context_budget_boundary():
     assert LLMPostProcessor._estimate_tokens(at_limit) == 3686 - max_tokens
     assert LLMPostProcessor._fits_context(at_limit, max_tokens) is True
     assert LLMPostProcessor._fits_context(over_limit, max_tokens) is False
+
+
+@pytest.mark.parametrize("response_kind", ["dict", "sdk"])
+@pytest.mark.parametrize(
+    ("done", "done_reason"),
+    [
+        (True, "stop"),
+        (True, "length"),
+        (True, "unknown"),
+        (True, None),
+        (False, "stop"),
+        (False, "length"),
+        (False, None),
+    ],
+)
+def test_llm_post_processor_requires_a_normal_completion(
+    response_kind, done, done_reason, capsys
+):
+    original = "Invoice is $100, due May 5."
+    content = "Invoice is $100."
+    if response_kind == "dict":
+        response = {
+            "message": {"content": content},
+            "done": done,
+            "done_reason": done_reason,
+        }
+    else:
+        from ollama import ChatResponse, Message
+
+        response = ChatResponse(
+            message=Message(role="assistant", content=content),
+            done=done,
+            done_reason=done_reason,
+        )
+
+    class ResponseClient:
+        def __init__(self):
+            self.calls = []
+
+        def chat(self, **kwargs):
+            self.calls.append(kwargs)
+            return response
+
+    client = ResponseClient()
+    processor = LLMPostProcessor(
+        OllamaClient("http://localhost:11434", MODEL_NAME, client=client)
+    )
+
+    result = processor.process(original)
+
+    assert result == (content if done is True and done_reason == "stop" else original)
+    assert len(client.calls) == 1
+    output = capsys.readouterr().out
+    assert "Invoice" not in output
+    if done is not True or done_reason != "stop":
+        assert "Ollama post-processing failed" in output
+
+
+@pytest.mark.parametrize(
+    ("done", "done_reason"),
+    [(True, None), (False, "stop"), (None, "stop")],
+)
+def test_llm_post_processor_requires_present_completion_fields(
+    done, done_reason, capsys
+):
+    response = {"message": {"content": "Invoice is $100."}}
+    if done is not None:
+        response["done"] = done
+    if done_reason is not None:
+        response["done_reason"] = done_reason
+
+    class ResponseClient:
+        def chat(self, **kwargs):
+            return response
+
+    original = "Invoice is $100, due May 5."
+    processor = LLMPostProcessor(
+        OllamaClient("http://localhost:11434", MODEL_NAME, client=ResponseClient())
+    )
+
+    assert processor.process(original) == original
+    assert "Ollama post-processing failed" in capsys.readouterr().out
+
+
+def test_llm_post_processor_skips_90_distinct_invoices_when_full_allowance_does_not_fit():
+    class CapturingClient:
+        def __init__(self):
+            self.calls = []
+
+        def chat(self, **kwargs):
+            self.calls.append(kwargs)
+            return "unused"
+
+    transcript = "\n".join(
+        f"Invoice {number:04d}: total $100.00, due May 5, 2026."
+        for number in range(1, 91)
+    )
+    client = CapturingClient()
+    processor = LLMPostProcessor(client=client)
+
+    assert processor.process(transcript) == transcript
+    assert client.calls == []
+
+
+@pytest.mark.parametrize(
+    ("transcript", "expected_budget"),
+    [("a" * 5000, 1250), ("word " * 500, 1500)],
+    ids=["character-dense", "long-multiword"],
+)
+def test_llm_post_processor_allows_output_budget_over_1024_when_it_fits(
+    transcript, expected_budget
+):
+    class CapturingClient:
+        def __init__(self):
+            self.calls = []
+
+        def chat(self, messages, **kwargs):
+            self.calls.append((messages, kwargs))
+            return "Cleaned transcript."
+
+    client = CapturingClient()
+    processor = LLMPostProcessor(client=client)
+    assert processor.process(transcript) == "Cleaned transcript."
+
+    assert client.calls[0][1]["max_tokens"] == expected_budget
+
+
+def test_llm_post_processor_context_boundary_controls_request_through_process():
+    class CapturingClient:
+        def __init__(self):
+            self.calls = []
+
+        def chat(self, messages, **kwargs):
+            self.calls.append(kwargs)
+            return "A cleaned transcript."
+
+    client = CapturingClient()
+    processor = LLMPostProcessor(client=client)
+
+    low, high = 1, 40000
+    while low < high:
+        middle = (low + high + 1) // 2
+        if processor._fits_context(
+            processor.build_messages("a" * middle), max(ceil(middle / 4), 64)
+        ):
+            low = middle
+        else:
+            high = middle - 1
+    boundary_size = low
+    boundary_text = "a" * boundary_size
+    expected_budget = max(ceil(boundary_size / 4), 64)
+
+    assert processor.process(boundary_text) == "A cleaned transcript."
+    assert len(client.calls) == 1
+    assert client.calls[0]["max_tokens"] == expected_budget
+
+    assert processor.process("a" * (boundary_size + 1)) == "a" * (boundary_size + 1)
+    assert len(client.calls) == 1
 
 
 def test_llm_post_processor_skips_oversize_input_without_calling_client(capsys):
@@ -228,7 +400,9 @@ def test_llm_post_processor_failure_output_is_content_safe(capsys):
 def test_llm_post_processor_normalizes_wrapped_output_before_accepting():
     fake_client = FakeOllamaPackageClient({"response": "ignored"})
     fake_client.chat_response = {
-        "message": {"content": '```text\n"Hello, world."\n```'}
+        "message": {"content": '```text\n"Hello, world."\n```'},
+        "done": True,
+        "done_reason": "stop",
     }
     processor = LLMPostProcessor(
         client=OllamaClient(
@@ -246,7 +420,9 @@ def test_llm_post_processor_rejects_assistant_preamble_output():
     fake_client.chat_response = {
         "message": {
             "content": "Here's the cleaned transcript: Hello, world.",
-        }
+        },
+        "done": True,
+        "done_reason": "stop",
     }
     processor = LLMPostProcessor(
         client=OllamaClient(
@@ -264,7 +440,9 @@ def test_llm_post_processor_allows_transcript_text_with_meta_like_phrases():
     fake_client.chat_response = {
         "message": {
             "content": "I corrected the deployment note as requested.",
-        }
+        },
+        "done": True,
+        "done_reason": "stop",
     }
     processor = LLMPostProcessor(
         client=OllamaClient(
@@ -289,7 +467,9 @@ def test_llm_post_processor_rejects_length_explosion_output():
                 "This transcript has been expanded with a long explanation that should not be accepted "
                 "because it is much longer than the original text and clearly exceeds the allowed output size."
             ),
-        }
+        },
+        "done": True,
+        "done_reason": "stop",
     }
     processor = LLMPostProcessor(
         client=OllamaClient(
@@ -307,7 +487,9 @@ def test_llm_post_processor_rejects_chat_or_list_shaped_output():
     fake_client.chat_response = {
         "message": {
             "content": "Assistant: Hello, world.\n- Fixed punctuation\n- Corrected capitalization",
-        }
+        },
+        "done": True,
+        "done_reason": "stop",
     }
     processor = LLMPostProcessor(
         client=OllamaClient(
@@ -325,7 +507,9 @@ def test_llm_post_processor_rejects_single_bullet_output():
     fake_client.chat_response = {
         "message": {
             "content": "- Hello, world.",
-        }
+        },
+        "done": True,
+        "done_reason": "stop",
     }
     processor = LLMPostProcessor(
         client=OllamaClient(
