@@ -6,23 +6,14 @@ failures degrade to a slower full-recording path instead of losing the user's
 dictation. A recording with no captured audio or a final transcription exception
 is reported as a failure and does not produce clipboard output.
 
-An explicit user cancellation deliberately discards the session. A second
-hotkey press during preparation cancels the pending start; **Exit** cancels
-preparation, capture, or processing and blocks further recordings. It does not
-trigger offline fallback, clipboard output, or training-data saving. Existing
-model calls may finish, with their results ignored. Playback Murmur successfully
-paused is restored once, including during Exit. A cancellation accepted during
-microphone opening closes any resulting stream rather than delivering its audio.
-Cancelled preparation does not show a recording pill, and shutdown cannot
-restart capture or show late recording/result feedback. This is distinct from a
-pipeline failure, which still preserves audio for fallback. See
-[Cancellation](pipeline.md#cancellation) for the delivery boundary.
-
-Cancellation must win the existing atomic delivery claim to prevent clipboard
-output and training-data saving. If delivery already claimed the session, its
-operation may complete while the app exits. Shutdown waits cooperatively for
-active calls to release their resources; it does not forcibly terminate a model
-call. A call that does not return can therefore delay process exit.
+Explicit cancellation, including cancellation requested by **Exit**, deliberately
+discards unfinished dictation instead of triggering offline fallback. When
+cancellation wins the delivery claim, it prevents clipboard output and
+training-data saving. If delivery already claimed the session, its operation
+may complete while the app exits. Pipeline failure still preserves audio for
+fallback; intentional discard does not. See
+[Cancellation](pipeline.md#cancellation) for startup, playback, overlay, and
+shutdown details.
 
 ## Fallback Overview
 

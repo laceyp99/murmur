@@ -167,9 +167,9 @@ registration failure stops startup.
 2. Press `Ctrl+Shift+Space` (or the configured hotkey) to prepare a recording.
    Murmur checks and pauses media first when that setting is enabled. Press
    again during preparation to cancel the pending recording without dictation
-   output. Once the microphone stream starts successfully, a small pill with
-   three pulsing bars appears above the taskbar on the primary display. If the
-   microphone cannot start, the pill shows a short error instead.
+   output. With the recording overlay enabled, wait for the pill's three pulsing
+   bars above the taskbar before speaking. It appears after the microphone
+   starts successfully; a failed start shows a short error instead.
 3. Speak normally. murmur captures 100 ms recorder blocks and processes sealed
    speech segments in background workers.
 4. Once recording has started, press the hotkey again to stop, or let the
@@ -187,22 +187,19 @@ not begun. Cancelled sessions are not saved to training data. The pill shows
 `Cancelled` immediately; an active model call may finish before another
 recording can start.
 
-Choosing **Exit** from the tray cancels any pending recording or processing
-result and quits. Murmur stops capture, discards queued work, and restores
-playback it successfully paused. Your clipboard stays unchanged and no training
-entry is saved if cancellation wins before delivery begins. A delivery already
-claimed may finish. Active model calls may finish safely with their cancelled
-results ignored, so process exit can take a moment. Exit does not finish or save
-the cancelled dictation for you.
-
-Cancelling preparation does not show a recording pill. If microphone opening
-has already begun, it may need to finish before Murmur can close the stream;
-audio from that cancelled attempt is discarded.
+Choosing **Exit** from the tray discards unfinished dictation and quits,
+restoring playback Murmur successfully paused. Cancelled dictation leaves your
+clipboard unchanged and is not saved to training data. A result whose delivery
+has already begun may still be copied and saved as you quit. Quitting can take a
+moment while an active model call finishes. See
+[Cancellation](pipeline.md#cancellation) for the detailed shutdown behavior.
 
 The overlay never takes focus. Its visible pill absorbs clicks, with only X
 performing an action; clicks outside the pill pass through. Turn it off with
 **Settings > General > Show recording overlay**. Windows toast notifications are
 off by default and can be enabled separately with **Enable notifications**.
+With the overlay disabled, the tray status changes from `Preparing...` to
+`Recording...` after capture starts.
 
 Windows reads the toast icon from a per-user registry entry that murmur does
 not create on its own. To show the murmur icon on toasts, run this once, and
