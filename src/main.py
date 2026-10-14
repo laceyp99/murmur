@@ -3,6 +3,7 @@ Main application module for murmur.
 Orchestrates audio recording, transcription, and clipboard operations.
 """
 
+import contextlib
 import sys
 import threading
 import time
@@ -12,7 +13,7 @@ from .autostart import set_autostart
 from .cancellation import TranscriptionCancelledError, check_cancelled
 from .clipboard import copy_to_clipboard
 from .config import DEFAULT_CONFIG, ConfigError, get_config
-from .hotkey import HotkeyManager, HotkeyState, is_hotkey_valid
+from .hotkey import HotkeyManager, HotkeyState, RecordingRequest, is_hotkey_valid
 from .logger import get_logger
 from .media_control import get_media_controller
 from .notifications import get_notification_manager
@@ -106,6 +107,8 @@ class MurmurApp:
         self._cancel_event = threading.Event()
         self._session_active = False
         self._delivery_started = False
+        self._shutdown_event = threading.Event()
+        self._current_request: RecordingRequest | None = None
 
         from .settings_gui import set_overlay_cancel_callback
 
@@ -131,7 +134,7 @@ class MurmurApp:
 
     def start(self) -> None:
         """Start the application and begin listening for hotkeys."""
-        if self._running:
+        if self._running or self._shutdown_event.is_set():
             return
 
         self._running = True
@@ -244,80 +247,147 @@ class MurmurApp:
 
     def stop(self) -> None:
         """Stop the application."""
-        if not self._running:
+        if self._shutdown_event.is_set():
             return
-
-        self._running = False
-        self.hotkey_manager.unregister()
-        self.tray.stop()
-
-        if self.recorder.is_recording():
-            self.recorder.stop_recording()
+        self._shutdown_event.set()
         self._close_overlay()
+        self.hotkey_manager.stop_requests()
+        with self._recording_stop_lock:
+            if self._session_active and not self._delivery_started:
+                self._cancel_event.set()
+                self._cancel_live_workers()
+                should_stop = not self._recording_stop_started
+                self._recording_stop_started = True
+            else:
+                should_stop = False
+        self._running = False
+        with contextlib.suppress(Exception):
+            self.hotkey_manager.unregister()
+        with contextlib.suppress(Exception):
+            self.tray.stop()
+        if should_stop:
+            self._finish_recording_stop()
+        else:
+            # Barrier: wait for in-flight startup or finalization before exiting.
+            with self._lifecycle_lock:
+                try:
+                    if self.recorder.is_recording():
+                        self.recorder.stop_recording()
+                except Exception:
+                    print("Warning: Failed to stop recording during shutdown")
+                self._resume_owned_media()
 
         print("\nmurmur stopped.")
 
-    def _on_recording_start(self) -> None:
+    def _on_recording_start(self, request: RecordingRequest) -> None:
         """Handle recording start."""
         with self._lifecycle_lock:
-            self._start_recording_session()
+            self._start_recording_session(request)
 
-    def _start_recording_session(self) -> None:
+    def _startup_abandoned(self, request: RecordingRequest) -> bool:
+        """Whether Exit or a stop cancelled this attempt before capture committed."""
+        # Superseding an uncommitted request also cancels it, so no is_active check.
+        return self._shutdown_event.is_set() or request.cancelled.is_set()
+
+    def _start_recording_session(self, request: RecordingRequest) -> None:
         """Serialize startup with teardown so a cancelled start cannot leak capture."""
-        print("Recording started...")
-        self._live_pipeline_degraded = False
-        self._live_pipeline_degraded_reason = None
-        self._recording_limit_stop_started = False
         with self._recording_stop_lock:
+            if self._startup_abandoned(request):
+                return
+            self._current_request = request
             self._recording_stop_started = False
             self._overlay_session += 1
             session = self._overlay_session
-            self._cancel_event = threading.Event()
+            self._cancel_event = request.cancelled
             self._session_active = True
             self._delivery_started = False
+        self._live_pipeline_degraded = False
+        self._live_pipeline_degraded_reason = None
+        self._recording_limit_stop_started = False
         self.recorder.set_capture_error_callback(
             lambda message: self._on_capture_error(message, session=session)
         )
         self.recorder.set_recording_limit_callback(
             lambda duration: self._on_recording_limit_reached(duration, session=session)
         )
-        self.notifications.notify_recording_started()
-        self.tray.set_status("Recording...")
+        self.tray.set_status("Preparing...")
 
         # Check and pause media if playing (when enabled)
         self._was_media_playing = False
-        if (
-            self.config.pause_media_while_recording
-            and self.media_controller.is_media_playing()
-        ):
-            self._was_media_playing = self.media_controller.pause()
-            if not self._was_media_playing:
-                print("Warning: Failed to pause media playback")
-                self.notifications.notify("murmur", "Could not pause media playback")
+        try:
+            media_playing = (
+                self.config.pause_media_while_recording
+                and self.media_controller.is_media_playing()
+            )
+            if media_playing and not self._startup_abandoned(request):
+                self._was_media_playing = self.media_controller.pause()
+                if not self._was_media_playing:
+                    print("Warning: Failed to pause media playback")
+                    self.notifications.notify(
+                        "murmur", "Could not pause media playback"
+                    )
+        except Exception:
+            print("Warning: Failed to pause media playback")
+            self.notifications.notify("murmur", "Could not pause media playback")
 
         try:
             self._start_live_transcription()
             self._start_live_segmentation()
+            # Last cheap exit before the microphone opens.
+            if self._startup_abandoned(request):
+                self._abort_startup()
+                return
             self.recorder.start_recording()
+            # The atomic commit is the boundary; a stop that won it gets no capture.
+            if self._shutdown_event.is_set() or not request.commit_capture():
+                with contextlib.suppress(Exception):
+                    self.recorder.stop_recording()
+                self._abort_startup()
+                return
         except Exception as e:
+            self._resume_owned_media()
             self._stop_live_transcription()
             self._stop_live_segmentation()
-            print(f"Error starting recording: {e}")
-            self.notifications.notify_error(f"Recording failed: {e}")
-            self.tray.set_status("Error")
-            self._show_overlay(ERROR, OVERLAY_START_FAILED)
-            # Resume media if we paused it but recording failed
-            if self._was_media_playing:
-                self.media_controller.play()
-                self._was_media_playing = False
+            if not self._startup_abandoned(request):
+                print(f"Error starting recording: {e}")
+                self.notifications.notify_error(f"Recording failed: {e}")
+                self.tray.set_status("Error")
+                self._show_overlay(ERROR, OVERLAY_START_FAILED)
             with self._recording_stop_lock:
                 if not self._cancel_event.is_set():
                     self._session_active = False
+                    if self._current_request is request:
+                        self._current_request = None
                     self.hotkey_manager.set_idle()
             return
 
         # Only an input stream that actually started earns the recording cue.
+        if self._shutdown_event.is_set():
+            return
+        print("Recording started...")
+        self.notifications.notify_recording_started()
+        self.tray.set_status("Recording...")
         self._show_overlay(RECORDING)
+
+    def _abort_startup(self) -> None:
+        """Undo a cancelled startup; the cancel owner releases the hotkey."""
+        self._cancel_live_workers()
+        self._resume_owned_media()
+        self._stop_live_transcription()
+        self._stop_live_segmentation()
+        self._session_active = False
+
+    def _resume_owned_media(self) -> None:
+        """Resume playback once when this attempt successfully paused it."""
+        if not self._was_media_playing:
+            return
+        self._was_media_playing = False
+        try:
+            if not self.media_controller.play():
+                print("Warning: Failed to resume media playback")
+                self.notifications.notify("murmur", "Could not resume media playback")
+        except Exception:
+            print("Warning: Failed to resume media playback")
 
     def _can_cancel(self) -> bool:
         """Whether the current session can still be discarded before delivery."""
@@ -334,22 +404,44 @@ class MurmurApp:
                 return self._overlay_session
             return None
 
-    def _on_recording_cancel(self, session: int | None = None) -> None:
-        """Claim cancellation and let the existing stop owner finish teardown."""
+    def _on_recording_cancel(
+        self,
+        session: int | None = None,
+        *,
+        pending_request: RecordingRequest | None = None,
+    ) -> None:
+        """Claim cancellation and let the existing stop owner finish teardown.
+
+        `pending_request` is a hotkey stop that arrived before capture committed.
+        """
         with self._recording_stop_lock:
+            if pending_request is not None and not pending_request.is_active:
+                return
             if (
                 not self._session_active
                 or self._delivery_started
-                or self._cancel_event.is_set()
                 or (session is not None and session != self._overlay_session)
             ):
+                if (
+                    pending_request is not None
+                    and not self._session_active
+                    and not self._shutdown_event.is_set()
+                ):
+                    # Startup never began or already backed out; release the hotkey.
+                    self._current_request = None
+                    self.tray.set_status("Ready")
+                    self.hotkey_manager.set_idle()
                 return
             self._cancel_event.set()
             owns_stop = not self._recording_stop_started
             self._recording_stop_started = True
             self.hotkey_manager.set_processing()
-            self.tray.set_status("Cancelled")
-            self._show_overlay(CANCELLED)
+            committed = (
+                self._current_request is None or self._current_request.capture_committed
+            )
+            if committed:
+                self.tray.set_status("Cancelled")
+                self._show_overlay(CANCELLED)
             # Keep feedback and discard requests ahead of the owner's Ready event.
             self._cancel_live_workers()
         if owns_stop:
@@ -361,15 +453,21 @@ class MurmurApp:
             if worker is not None:
                 worker.cancel()
 
-    def _on_recording_stop(self) -> None:
+    def _on_recording_stop(self, request: RecordingRequest, committed: bool) -> None:
         """Handle recording stop via hotkey."""
-        if not self._claim_recording_stop():
-            return
-        self._finish_recording_stop()
+        if not committed:
+            self._on_recording_cancel(pending_request=request)
+        elif self._claim_recording_stop(request=request):
+            self._finish_recording_stop()
 
-    def _claim_recording_stop(self, *, session: int | None = None) -> bool:
+    def _claim_recording_stop(
+        self, *, session: int | None = None, request: RecordingRequest | None = None
+    ) -> bool:
         """Allow only one stop path to finalize the current recording."""
         with self._recording_stop_lock:
+            # A stop delayed past this request's session no longer owns it.
+            if request is not None and self._current_request is not request:
+                return False
             if self._recording_stop_started or (
                 session is not None and session != self._overlay_session
             ):
@@ -388,11 +486,20 @@ class MurmurApp:
                 # All worker/model work is done before another session is allowed.
                 self.live_transcript_accumulator = None
                 with self._recording_stop_lock:
-                    if self._cancel_event.is_set():
+                    if (
+                        self._cancel_event.is_set()
+                        and not self._shutdown_event.is_set()
+                        and (
+                            self._current_request is None
+                            or self._current_request.capture_committed
+                        )
+                    ):
                         self._show_overlay(CANCELLED_DONE)
                     self._session_active = False
-                    self.tray.set_status("Ready")
-                    self.hotkey_manager.set_idle()
+                    self._current_request = None
+                    if not self._shutdown_event.is_set():
+                        self.tray.set_status("Ready")
+                        self.hotkey_manager.set_idle()
 
     def _stop_and_finalize_session(self) -> None:
         """Preserve normal stop's drain path and discard deliberately cancelled work."""
@@ -406,13 +513,7 @@ class MurmurApp:
             if audio_data is not None and not self._cancel_event.is_set():
                 self._show_overlay(PROCESSING)
             # Resume media if it was playing before recording.
-            if self._was_media_playing:
-                if not self.media_controller.play():
-                    print("Warning: Failed to resume media playback")
-                    self.notifications.notify(
-                        "murmur", "Could not resume media playback"
-                    )
-                self._was_media_playing = False
+            self._resume_owned_media()
         finally:
             if self._cancel_event.is_set():
                 self._cancel_live_workers()
@@ -622,13 +723,16 @@ class MurmurApp:
             self._delivery_started = True
         if not text:
             print("Warning: No speech detected.")
-            self.notifications.notify("murmur", "No speech detected.")
-            self._show_overlay(ERROR, OVERLAY_NO_SPEECH)
+            if not self._shutdown_event.is_set():
+                self.notifications.notify("murmur", "No speech detected.")
+                self._show_overlay(ERROR, OVERLAY_NO_SPEECH)
             return
 
         copied = copy_to_clipboard(text)
         runtime = time.perf_counter() - finalization_started_at
         log_entry = self.logger.log(audio_data, text, runtime, live_segment_metrics)
+        if self._shutdown_event.is_set():
+            return
 
         if copied:
             print(f"Finalized in {runtime:.1f}s; copied to clipboard.")
@@ -648,6 +752,8 @@ class MurmurApp:
     def _show_overlay(self, state: str, message: str = "") -> None:
         """Mirror session state in the optional overlay without affecting dictation."""
         try:
+            if self._shutdown_event.is_set():
+                return
             if not self.config.show_recording_overlay:
                 # Clear anything shown before the setting was switched off.
                 if self._overlay_shown:

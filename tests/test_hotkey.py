@@ -1,3 +1,4 @@
+import threading
 from types import SimpleNamespace
 
 import keyboard
@@ -179,3 +180,37 @@ def test_sequence_hotkey_retains_library_release_handling(hotkey_events):
             assert not dispatch(key, keyboard.KEY_DOWN)
             assert not dispatch(key, keyboard.KEY_UP)
     assert states == [HotkeyState.RECORDING, HotkeyState.PROCESSING]
+
+
+def test_second_press_cancels_request_before_start_callback_initializes(hotkey_events):
+    manager, _, dispatch, _ = hotkey_events
+    manager.unregister()
+    entered = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    requests = []
+    outcomes = []
+
+    def start(request):
+        requests.append(request)
+        entered.set()
+        assert release.wait(2)
+        outcomes.append(request.commit_capture())
+        finished.set()
+
+    manager.config.hotkey = "ctrl+shift+space"
+    assert manager.register(on_start=start, on_stop=lambda request, committed: None)
+    try:
+        for key in ("ctrl", "shift", "space"):
+            dispatch(key, keyboard.KEY_DOWN)
+        assert entered.wait(2)
+        for key in ("ctrl", "shift", "space"):
+            dispatch(key, keyboard.KEY_UP)
+        for key in ("ctrl", "shift", "space"):
+            dispatch(key, keyboard.KEY_DOWN)
+        assert requests[0].cancelled.is_set()
+        release.set()
+        assert finished.wait(2)
+    finally:
+        release.set()
+    assert outcomes == [False]
