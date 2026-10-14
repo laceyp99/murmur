@@ -164,60 +164,52 @@ registration failure stops startup.
 ## Record a transcript
 
 1. Wait for the murmur icon in the Windows system tray.
-2. Press `Ctrl+Shift+Space` (or the configured hotkey) to prepare a recording.
-   Murmur checks and pauses media first when that setting is enabled. Press
-   again during preparation to cancel the pending recording without dictation
-   output. With the recording overlay enabled, wait for the pill's three pulsing
-   bars above the taskbar before speaking. It appears after the microphone
-   starts successfully; a failed start shows a short error instead.
-3. Speak normally. murmur captures 100 ms recorder blocks and processes sealed
-   speech segments in background workers.
-4. Once recording has started, press the hotkey again to stop, or let the
-   configured maximum duration stop capture. The pill switches to a loading
-   spinner.
-5. Wait for the final VAD flush, queued live transcription, cleanup, and
-   clipboard copy. The pill shows `Copied to clipboard` for about 2 seconds, or
-   a short error such as `No speech detected` for about 4 seconds.
+2. Press `Ctrl+Shift+Space` (or the configured hotkey) to start a recording.
+3. Wait for the pill's three pulsing bars above the taskbar, then speak normally.
+   If the overlay is disabled, wait for `Recording...` in the tray menu.
+4. Press the hotkey again to stop. The pill switches to a loading spinner.
+   The configured maximum duration also stops recording automatically.
+5. Wait for processing to finish and the text to be copied. With the overlay
+   enabled, the pill shows `Copied to clipboard`.
 6. Paste with `Ctrl+V` in the target application.
 
-To discard a recording or pending result, click the pill's **X** or choose
-**Cancel dictation** from the tray menu. This stops capture, skips remaining
-transcription and cleanup, and leaves your clipboard untouched if delivery has
-not begun. Cancelled sessions are not saved to training data. The pill shows
-`Cancelled` immediately; an active model call may finish before another
-recording can start.
+Pauses in your speech do not stop the recording; use the hotkey when you are done.
 
-Choosing **Exit** from the tray discards unfinished dictation and quits,
-restoring playback Murmur successfully paused. Cancelled dictation leaves your
-clipboard unchanged and is not saved to training data. A result whose delivery
-has already begun may still be copied and saved as you quit. Quitting can take a
-moment while an active model call finishes. See
-[Cancellation](pipeline.md#cancellation) for the detailed shutdown behavior.
+### Cancel or exit
 
-The overlay never takes focus. Its visible pill absorbs clicks, with only X
-performing an action; clicks outside the pill pass through. Turn it off with
-**Settings > General > Show recording overlay**. Windows toast notifications are
-off by default and can be enabled separately with **Enable notifications**.
-With the overlay disabled, the tray status changes from `Preparing...` to
-`Recording...` after capture starts.
+If you change your mind before recording starts, press the hotkey again to
+cancel the pending recording. Preparation can take a moment while murmur checks
+and pauses media, if that setting is enabled.
 
-Windows reads the toast icon from a per-user registry entry that murmur does
-not create on its own. To show the murmur icon on toasts, run this once, and
-again after changing `app/toast-icon.png`:
+During recording or processing, click the pill's **X** or choose **Cancel
+dictation** from the tray menu to discard the dictation. Choosing **Exit** also
+discards unfinished dictation, restores playback murmur paused, and quits.
+
+Cancelled dictation leaves your clipboard unchanged and is not saved to training
+data. If result delivery has already begun, it may still finish copying and
+saving. An active model call can delay the next recording or quitting. See
+[Cancellation](pipeline.md#cancellation) for the detailed behavior.
+
+### Recording feedback
+
+The recording pill appears after the microphone starts successfully. A failed
+start shows a short error instead. Other errors, such as `No speech detected`,
+also appear in the pill.
+
+The overlay does not take focus. Turn it off with **Settings > General > Show
+recording overlay**. With it disabled, the tray status changes from
+`Preparing...` to `Recording...` when capture starts. Windows toast notifications
+are off by default and can be enabled separately with **Enable notifications**.
+
+If you enable notifications, run this once to show the murmur icon on Windows
+toasts:
 
 ```powershell
 venv\Scripts\python.exe tools\register_toast_icon.py
 ```
 
-It copies the icon into `%APPDATA%\murmur` and registers it under
-`HKCU\Software\Classes\AppUserModelId\murmur`. Add `--remove` to delete both.
-Toasts use this transparent waveform rather than `app/icon.png` because Windows
-inverts mostly dark toast icons in dark mode. Keep it small, currently 64 px,
-with a thicker stroke; Windows drops thin lines when it shrinks a large icon.
-
-Silence closes VAD segments; it does not stop the overall recording. The stop
-path uses the accumulated live text when healthy. If live processing is empty
-or degraded, murmur recomputes from the complete recorded audio.
+Run it again after changing `app/toast-icon.png`. Add `--remove` to remove the
+registered icon.
 
 ## Development checks
 

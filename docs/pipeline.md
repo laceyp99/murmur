@@ -6,7 +6,7 @@ live path and a fallback path.
 
 The live path starts VAD segmentation and Whisper transcription while recording
 is still active. This lowers stop-time latency because many sealed speech
-segments have already been transcribed before the user releases the hotkey.
+segments have already been transcribed before the user presses the hotkey to stop recording.
 
 The fallback path keeps the system reliable. murmur still records the full audio
 clip, so if live VAD or live transcription degrades—or produces no usable text—
@@ -77,18 +77,11 @@ flowchart LR
 
 ## Main Concepts
 
-### Capture
+### Hotkey
 
-#### Hotkey
-
-A second hotkey press during preparation cancels the pending recording. The
-request survives even if the startup callback has not run yet. After a pending
-media check or pause returns, Murmur restores playback it successfully paused
-and returns to Ready without opening the microphone or showing a recording
-pill. If stream opening was already underway, the call may have to return;
-Murmur closes any resulting stream and discards its audio without recording
-feedback. Once successful capture startup commits, the second press stops
-capture and finalizes the dictation normally.
+Press the configured hotkey once to start recording. Once capture starts, press
+it again to stop and finalize the dictation for clipboard output. The default
+hotkey is `Ctrl+Shift+Space`.
 
 For a single-chord hotkey such as `Ctrl+Shift+Space`, Murmur consumes repeat
 presses and the release of the activation key, including when modifiers are
@@ -100,15 +93,12 @@ or leave the focused application treating Space as held. Unmatched key presses
 pass through normally. Sequence hotkeys retain the keyboard library's event
 handling.
 
-#### Audio
+If the second press arrives during preparation, it cancels the pending recording
+instead. The request preserves cancellation even if the startup callback has not
+run yet. A cancelled start produces no dictation output or recording pill. See
+[Cancellation](#cancellation) for startup cleanup and playback restoration.
 
-When media pause is enabled, Murmur resumes playback after capture stops,
-startup fails, preparation is cancelled, or the app exits only if its pause
-request succeeded. Ownership is consumed once, so overlapping teardown does
-not resume twice. A failed pause request does not schedule a resume, and a
-resume failure does not prevent capture and worker cleanup. Media control still
-targets the current Windows media session; timed-out provider calls may finish
-later without reporting success to Murmur.
+### Audio capture
 
 `AudioRecorder` opens a `sounddevice.InputStream` at the configured sample rate,
 mono channel, and `float32` sample format. The stream callback stores each block
@@ -135,6 +125,18 @@ blocksize = int(self.sample_rate * 0.1)
 
 That block size is large enough to keep capture overhead low, while the VAD
 worker later reframes the audio into smaller WebRTC-compatible frames.
+
+### Media pause and resume
+
+When media pause is enabled, Murmur checks and pauses playback before opening
+the microphone. It resumes playback after capture stops, startup fails,
+preparation is cancelled, or the app exits only if its pause request succeeded.
+
+Playback ownership is consumed once, so overlapping teardown does not resume
+twice. A failed pause request does not schedule a resume, and a resume failure
+does not prevent capture and worker cleanup. Media control still targets the
+current Windows media session; timed-out provider calls may finish later without
+reporting success to Murmur.
 
 ### Live Segmentation
 
@@ -217,33 +219,46 @@ warnings stay in the tray status and console rather than the overlay.
 
 ### Cancellation
 
-The pill's X and the tray's **Cancel dictation** action discard the current
-session during capture or processing, including optional Ollama cleanup.
-Pressing the hotkey again during preparation discards the pending start.
-Choosing **Exit** blocks new recordings, including startup callbacks that have
-not begun yet, and requests cancellation of the current session. The existing
-delivery claim decides whether cancellation can still discard its output.
-Cancellation stops capture, drops queued live work, skips remaining processing
-and fallback stages, and suppresses clipboard output and opt-in training-data
-saving. Partial text is not delivered. Media successfully paused by the session
-resumes before teardown waits for active model calls.
+Pressing the hotkey again during preparation discards the pending start. After
+capture starts, that hotkey stops and finalizes the recording normally. To
+discard dictation during recording or processing, including optional Ollama
+cleanup, use the pill's **X** or the tray's **Cancel dictation** action. The tray
+action also works with the overlay disabled or unavailable.
+
+Choosing **Exit** blocks new recordings, requests cancellation of the current
+session, and closes the overlay before waiting for shutdown. Media successfully
+paused by the session resumes before teardown waits for active model calls.
+
+#### Output delivery boundary
+
+Cancellation and delivery atomically claim the session. If cancellation claims
+it first, the existing clipboard is left untouched and no training-data entry
+is saved. If delivery has already claimed it, the claimed clipboard and optional
+logging operation can finish, including during Exit.
+
+#### Pending startup cleanup
+
+A cancelled request survives even if the startup callback has not run yet.
+After a pending media check or pause returns, Murmur restores playback it
+successfully paused and returns to Ready without opening the microphone or
+showing a recording pill. If stream opening was already underway, the call may
+have to return; Murmur closes any resulting stream and discards its audio
+without recording feedback. Exit also blocks startup callbacks that have not
+begun yet and completes shutdown instead of returning to Ready.
+
+#### Recording and processing cleanup
+
+When cancellation wins the delivery claim, it stops capture, drops queued live
+work, skips remaining processing and fallback stages, and suppresses clipboard
+output and opt-in training-data saving. Partial text is not delivered.
 
 Whisper and Ollama calls already running may finish safely, but their results
-are ignored. The pill immediately shows only `Cancelled`; new recordings remain
+are ignored. The pill immediately shows `Cancelled`; new recordings remain
 blocked until workers and any active call finish. Audio and accumulated text
 are then released, and the app returns to Ready. Feedback remains visible for
-at least one second, unless a new recording replaces it. Preparation cancellation
-does not create a pill. Exit requests overlay closure before waiting for active
-calls and completes shutdown rather than returning to Ready. Already executing
-calls are not forcibly terminated, so they can delay process exit while their
-results are ignored.
-
-Cancellation and delivery atomically claim the session. If delivery has already
-claimed it, the claimed clipboard and optional logging operation can finish. If
-cancellation claims it first, the existing clipboard is left untouched and no
-training-data entry is saved. The tray action also works with the overlay
-disabled or unavailable. After capture startup commits, the recording hotkey
-retains its normal stop-and-finalize behavior.
+at least one second, unless a new recording replaces it. Exit keeps the overlay
+closed and completes shutdown instead. Active calls are not forcibly terminated,
+so they can delay process exit.
 
 ## Implementation Map
 

@@ -5,22 +5,32 @@ pipeline, and privacy boundaries in more detail than the root README. The
 diagrams are written as Mermaid blocks inside Markdown so they are easy to edit,
 review, and keep in sync with code changes.
 
-## Reading Order
+## Find what you need
 
-1. [Getting Started](getting-started.md) covers supported setup, launch modes,
-   first-run behavior, and the user recording flow.
-2. [Settings And Privacy](settings-and-privacy.md) documents config persistence,
-   settings validation, autostart, logging, and the network boundary.
-3. [Pipeline Overview](pipeline.md) explains the full path from hotkey capture
-   to clipboard output.
-4. [Live Pipeline](live-pipeline.md) focuses on the low-latency path that runs
-   while recording is still active.
-5. [VAD Segmentation](vad-segmentation.md) explains how recorder blocks become
-   WebRTC VAD frames and speech segments.
-6. [Transcription And Cleanup](transcription-and-cleanup.md) covers Whisper,
-   transcript accumulation, local cleanup, and optional Ollama cleanup.
-7. [Fallbacks And Failure Modes](failure-and-fallbacks.md) shows how murmur
-   recovers when live processing degrades.
+### Set up and use murmur
+
+- [Getting Started](getting-started.md) covers installation, launch, recording,
+  cancellation, and recording feedback.
+- [Settings And Privacy](settings-and-privacy.md) explains configuration,
+  microphone selection, autostart, training-data logging, and network access.
+
+### Fix a problem
+
+- [Troubleshooting](troubleshooting.md) helps with microphone, transcription,
+  Ollama, and packaged model-loading problems.
+- [Fallbacks And Failure Modes](failure-and-fallbacks.md) explains recovery when
+  live processing degrades and what happens if clipboard copy fails.
+
+### Understand the implementation
+
+- [Pipeline Overview](pipeline.md) follows hotkey input through audio capture,
+  transcription, output delivery, and cancellation.
+- [Live Pipeline](live-pipeline.md) covers the processing path that runs while
+  recording is active.
+- [VAD Segmentation](vad-segmentation.md) explains how recorder blocks become
+  speech segments.
+- [Transcription And Cleanup](transcription-and-cleanup.md) covers Whisper,
+  transcript accumulation, local cleanup, and optional Ollama cleanup.
 
 ## Diagram Editing
 
