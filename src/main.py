@@ -974,6 +974,7 @@ class MurmurApp:
 def main():
     """Main entry point for the application."""
     print("Starting murmur...")
+    app = None
 
     try:
         app = MurmurApp(preload_model=True)
@@ -982,14 +983,14 @@ def main():
         # Run the tray icon (this is the main loop)
         app.tray.run()
 
-        # When tray exits, stop the app
-        app.stop()
-
     except KeyboardInterrupt:
         print("\nInterrupted by user.")
     except Exception as e:
         print(f"Fatal error: {e}")
         sys.exit(1)
+    finally:
+        if app is not None:
+            app.stop()
 
 
 if __name__ == "__main__":

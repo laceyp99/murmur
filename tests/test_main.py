@@ -1418,6 +1418,71 @@ def make_stop_app(audio_data):
 
 
 @pytest.mark.parametrize(
+    ("failure_stage", "error", "exit_code"),
+    [
+        (None, None, None),
+        ("tray", KeyboardInterrupt(), None),
+        ("tray", RuntimeError("tray failed"), 1),
+        ("start", RuntimeError("startup failed"), 1),
+        ("start", SystemExit(7), 7),
+        ("construct", RuntimeError("construction failed"), 1),
+    ],
+    ids=[
+        "normal-return",
+        "tray-interrupt",
+        "tray-error",
+        "startup-error",
+        "startup-exit",
+        "construction-error",
+    ],
+)
+def test_main_stops_constructed_app_on_exit(
+    monkeypatch, failure_stage, error, exit_code
+):
+    calls = []
+
+    def start():
+        calls.append("start")
+        if failure_stage == "start":
+            raise error
+
+    def run_tray():
+        calls.append("tray")
+        if failure_stage == "tray":
+            raise error
+
+    app = SimpleNamespace(
+        start=start,
+        tray=SimpleNamespace(run=run_tray),
+        stop=lambda: calls.append("stop"),
+    )
+
+    def construct_app(*, preload_model):
+        assert preload_model is True
+        calls.append("construct")
+        if failure_stage == "construct":
+            raise error
+        return app
+
+    monkeypatch.setattr(main_module, "MurmurApp", construct_app)
+
+    if exit_code is None:
+        main_module.main()
+    else:
+        with pytest.raises(SystemExit) as exc_info:
+            main_module.main()
+        assert exc_info.value.code == exit_code
+
+    expected = ["construct"]
+    if failure_stage != "construct":
+        expected.append("start")
+        if failure_stage != "start":
+            expected.append("tray")
+        expected.append("stop")
+    assert calls == expected
+
+
+@pytest.mark.parametrize(
     ("entrypoint", "encoding"),
     [
         ("script", "cp1252"),

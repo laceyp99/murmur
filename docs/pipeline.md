@@ -32,7 +32,7 @@ flowchart LR
     PendingCancel -.-> StartAllowed
     PendingCancel -.-> CaptureCommit
     PendingDiscard --> Cancelled
-    Exit["Exit at any stage"] --> DeliveryClaimed{"Delivery already claimed?"}
+    Exit["Exit, Ctrl+C, or application error"] --> DeliveryClaimed{"Delivery already claimed?"}
     OverlayRecording --> Cancel["Pill X or tray Cancel dictation"]
     OverlayProcessing --> Cancel
     Cancel --> DeliveryClaimed
@@ -228,6 +228,10 @@ action also works with the overlay disabled or unavailable.
 Choosing **Exit** blocks new recordings, requests cancellation of the current
 session, and closes the overlay before waiting for shutdown. Media successfully
 paused by the session resumes before teardown waits for active model calls.
+
+The foreground entrypoint also runs shutdown when the tray loop returns, Ctrl+C
+interrupts it, or startup or the tray loop raises an error after app construction
+completes. Failed construction does not attempt shutdown on a partial instance.
 
 #### Output delivery boundary
 
