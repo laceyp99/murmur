@@ -40,7 +40,10 @@ def test_existing_output_streams_are_preserved(monkeypatch, missing_stream):
                     replacement.close()
 
 
-def test_windowless_launch_downloads_model_without_saving_output(tmp_path, monkeypatch):
+@pytest.mark.parametrize("entrypoint", ["script", "module"])
+def test_windowless_launch_downloads_model_without_saving_output(
+    tmp_path, monkeypatch, entrypoint
+):
     import whisper
 
     payload = b"model download fixture"
@@ -71,7 +74,10 @@ def test_windowless_launch_downloads_model_without_saving_output(tmp_path, monke
         windowless.setattr(sys, "argv", ["run.py"])
         windowless.setitem(sys.modules, "src.main", SimpleNamespace(main=app_main))
         try:
-            runpy.run_path(run.__file__, run_name="__main__")
+            if entrypoint == "script":
+                runpy.run_path(run.__file__, run_name="__main__")
+            else:
+                runpy.run_module("src", run_name="__main__")
         finally:
             for stream in (sys.stdout, sys.stderr):
                 if stream is not None:

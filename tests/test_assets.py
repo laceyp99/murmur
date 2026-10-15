@@ -1,11 +1,11 @@
 from src import assets
 
 
-def test_logo_path_uses_project_root_in_source_mode(tmp_path, monkeypatch):
-    logo_path = tmp_path / "app" / "icon.png"
+def test_logo_path_uses_package_resources(tmp_path, monkeypatch):
+    logo_path = tmp_path / "resources" / "icon.png"
     logo_path.parent.mkdir()
     logo_path.write_bytes(b"logo")
-    monkeypatch.setattr(assets, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(assets, "files", lambda package: tmp_path)
     monkeypatch.delattr(assets.sys, "_MEIPASS", raising=False)
 
     assert assets.get_logo_path() == logo_path
@@ -19,7 +19,7 @@ def test_logo_path_uses_bundle_root_when_frozen(tmp_path, monkeypatch):
     logo_path = bundle_root / "app" / "icon.png"
     logo_path.parent.mkdir()
     logo_path.write_bytes(b"logo")
-    monkeypatch.setattr(assets, "PROJECT_ROOT", source_root)
+    monkeypatch.setattr(assets, "files", lambda package: source_root)
     monkeypatch.setattr(assets.sys, "_MEIPASS", str(bundle_root), raising=False)
 
     assert assets.get_logo_path() == logo_path

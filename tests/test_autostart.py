@@ -6,16 +6,13 @@ import pytest
 from src import autostart as autostart_module
 
 
-def test_launch_command_uses_pythonw_for_source_mode(tmp_path, monkeypatch):
-    source_root = tmp_path / "murmur project"
-    module_path = source_root / "src" / "autostart.py"
+def test_launch_command_uses_pythonw_module(tmp_path, monkeypatch):
     python_path = tmp_path / "venv" / "Scripts" / "python.exe"
     monkeypatch.setattr(autostart_module.sys, "executable", str(python_path))
     monkeypatch.setattr(autostart_module.sys, "frozen", False, raising=False)
-    monkeypatch.setattr(autostart_module, "__file__", str(module_path))
 
     assert autostart_module._get_launch_command() == (
-        f'"{python_path.with_name("pythonw.exe")}" "{source_root / "run.py"}"'
+        f'"{python_path.with_name("pythonw.exe")}" -m src'
     )
 
 
