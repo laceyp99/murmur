@@ -233,6 +233,13 @@ The foreground entrypoint also runs shutdown when the tray loop returns, Ctrl+C
 interrupts it, or startup or the tray loop raises an error after app construction
 completes. Failed construction does not attempt shutdown on a partial instance.
 
+On Windows, the tray message loop runs in a managed worker thread. The main
+thread checks for tray completion every 100 ms so console Ctrl+C can initiate
+shutdown without waiting for a tray interaction. Shutdown restores owned
+playback, stops the tray, and joins its worker. A stop requested before the tray
+is ready is retained and applied when startup completes. Other platforms keep
+the tray loop on the main thread to respect their backend requirements.
+
 #### Output delivery boundary
 
 Cancellation and delivery atomically claim the session. If cancellation claims

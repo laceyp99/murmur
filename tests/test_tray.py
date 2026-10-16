@@ -41,6 +41,60 @@ def test_tray_run_noops_when_pystray_import_fails(monkeypatch):
     assert tray.icon is None
 
 
+def test_tray_stop_before_run_prevents_icon_creation(monkeypatch):
+    def unexpected_import(*args, **kwargs):
+        raise AssertionError("Stopped tray must not load its backend")
+
+    tray = TrayManager()
+    tray.stop()
+    monkeypatch.setattr(builtins, "__import__", unexpected_import)
+
+    tray.run()
+
+    assert tray.icon is None
+
+
+def test_tray_stop_during_startup_is_honored_when_backend_ready(monkeypatch):
+    tray = TrayManager()
+    stops = []
+
+    class Icon:
+        visible = False
+        running = False
+
+        def __init__(self, *args):
+            pass
+
+        def run(self, setup):
+            tray.stop()
+            assert stops == [False]
+            self.running = True
+            setup(self)
+            assert not self.running
+
+        def stop(self):
+            stops.append(self.running)
+            self.running = False
+
+    class Menu:
+        SEPARATOR = object()
+
+        def __init__(self, *args):
+            pass
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pystray",
+        SimpleNamespace(Icon=Icon, Menu=Menu, MenuItem=lambda *a, **kw: None),
+    )
+    monkeypatch.setattr(tray, "_create_image", lambda: None)
+
+    tray.run()
+
+    assert stops == [False, True]
+    assert tray.icon.visible is True
+
+
 def test_on_settings_delegates_to_settings_gui(monkeypatch):
     show_calls = []
     monkeypatch.setitem(

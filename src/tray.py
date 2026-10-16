@@ -29,6 +29,7 @@ class TrayManager:
         self.icon = None
         self._status_text = "Ready"
         self._settings_lock = threading.Lock()
+        self._stop_requested = threading.Event()
 
     def _create_image(self):
         """Load and prepare the tray icon image."""
@@ -97,6 +98,8 @@ class TrayManager:
 
     def run(self):
         """Start the system tray icon loop."""
+        if self._stop_requested.is_set():
+            return
         try:
             import pystray
             from pystray import MenuItem
@@ -119,12 +122,19 @@ class TrayManager:
             )
 
             self.icon = pystray.Icon("murmur", self._create_image(), "murmur", menu)
-            self.icon.run()
+            self.icon.run(setup=self._on_ready)
         except Exception as exc:
             print(f"Tray unavailable: {exc}")
             self.icon = None
 
+    def _on_ready(self, icon):
+        """Show the icon and honor shutdown requested before backend readiness."""
+        icon.visible = True
+        if self._stop_requested.is_set():
+            icon.stop()
+
     def stop(self):
         """Stop the tray icon."""
+        self._stop_requested.set()
         if self.icon:
             self.icon.stop()

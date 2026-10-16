@@ -1,3 +1,4 @@
+import _thread
 import importlib.metadata
 import io
 import runpy
@@ -1436,10 +1437,13 @@ def make_stop_app(audio_data):
         "construction-error",
     ],
 )
+@pytest.mark.parametrize("platform", ["win32", "linux"])
 def test_main_stops_constructed_app_on_exit(
-    monkeypatch, failure_stage, error, exit_code
+    monkeypatch, failure_stage, error, exit_code, platform
 ):
     calls = []
+    tray_threads = []
+    monkeypatch.setattr(main_module.sys, "platform", platform)
 
     def start():
         calls.append("start")
@@ -1448,6 +1452,7 @@ def test_main_stops_constructed_app_on_exit(
 
     def run_tray():
         calls.append("tray")
+        tray_threads.append(threading.current_thread())
         if failure_stage == "tray":
             raise error
 
@@ -1480,6 +1485,42 @@ def test_main_stops_constructed_app_on_exit(
             expected.append("tray")
         expected.append("stop")
     assert calls == expected
+    if tray_threads:
+        assert (tray_threads[0] is threading.main_thread()) == (platform != "win32")
+        if platform == "win32":
+            assert not tray_threads[0].is_alive()
+
+
+def test_windows_main_interrupt_stops_and_joins_blocked_tray(monkeypatch, capsys):
+    monkeypatch.setattr(main_module.sys, "platform", "win32")
+    released = threading.Event()
+    tray_threads = []
+    calls = []
+
+    def run_tray():
+        tray_threads.append(threading.current_thread())
+        assert threading.current_thread() is not threading.main_thread()
+        # Simulate a console interrupt while the tray cannot return by itself.
+        _thread.interrupt_main()
+        assert released.wait(5), "shutdown did not release the tray worker"
+        calls.append("tray-finished")
+
+    def stop():
+        calls.append("stop")
+        released.set()
+
+    app = SimpleNamespace(
+        start=lambda: None,
+        tray=SimpleNamespace(run=run_tray),
+        stop=stop,
+    )
+    monkeypatch.setattr(main_module, "MurmurApp", lambda **kwargs: app)
+
+    main_module.main()
+
+    assert calls == ["stop", "tray-finished"]
+    assert not tray_threads[0].is_alive()
+    assert "Interrupted by user." in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
