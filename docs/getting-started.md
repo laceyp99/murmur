@@ -235,7 +235,8 @@ venv\Scripts\python.exe tools\check_wheel_install.py
 ```
 
 This builds a wheel, checks its runtime files, and installs it into a temporary
-virtual environment outside the checkout. It verifies module and console launch
+virtual environment outside the checkout. It runs `tools/check_installed_wheel.py`
+with that environment's isolated interpreter to verify module and console launch
 dispatch, the autostart command, logo loading, and ICO generation. Only Pillow
 is installed alongside the wheel; the desktop runtime is replaced for this
 check, so it does not start recording, register hotkeys, or write the registry.
