@@ -84,6 +84,8 @@ class FakeConfig:
         self.start_with_windows = False
         self.show_recording_overlay = True
         self.set_calls = []
+        self.startup_notice = None
+        self.consume_calls = 0
 
     def set(self, key, value):
         self.set_calls.append((key, value))
@@ -95,6 +97,106 @@ class FakeConfig:
 
     def get(self, key, default=None):
         return getattr(self, key, DEFAULT_CONFIG.get(key, default))
+
+    def get_startup_notice(self):
+        return self.startup_notice
+
+    def consume_startup_notice(self):
+        self.consume_calls += 1
+        notice = self.startup_notice
+        self.startup_notice = None
+        return notice
+
+
+def test_startup_notice_banner_shows_body_and_dismisses_without_saving(monkeypatch):
+    created = {"frames": [], "labels": [], "textboxes": [], "buttons": []}
+
+    class FakeWidget:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.grid_args = None
+
+        def grid(self, **kwargs):
+            self.grid_args = kwargs
+
+        def grid_columnconfigure(self, *_args, **_kwargs):
+            pass
+
+        def destroy(self):
+            self.destroyed = True
+
+    class FakeFrame(FakeWidget):
+        def __init__(self, *_args, **kwargs):
+            super().__init__(**kwargs)
+            created["frames"].append(self)
+
+    class FakeLabel(FakeWidget):
+        def __init__(self, *_args, **kwargs):
+            super().__init__(**kwargs)
+            created["labels"].append(self)
+
+    class FakeTextbox(FakeWidget):
+        def __init__(self, *_args, **kwargs):
+            super().__init__(**kwargs)
+            created["textboxes"].append(self)
+            self.inserted = None
+            self.configured = {}
+
+        def insert(self, index, text):
+            self.inserted = (index, text)
+
+        def configure(self, **kwargs):
+            self.configured.update(kwargs)
+
+    class FakeButton(FakeWidget):
+        def __init__(self, *_args, **kwargs):
+            super().__init__(**kwargs)
+            created["buttons"].append(self)
+
+    monkeypatch.setattr(
+        settings_module,
+        "ctk",
+        SimpleNamespace(
+            CTkFrame=FakeFrame,
+            CTkLabel=FakeLabel,
+            CTkTextbox=FakeTextbox,
+            CTkButton=FakeButton,
+            CTkFont=lambda **kwargs: kwargs,
+        ),
+    )
+    config = FakeConfig()
+    config.enable_notifications = False
+    config.startup_notice = "model: 'invalid' repaired to 'base'"
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.root = object()
+    window.config = config
+    window._startup_notice = config.get_startup_notice()
+
+    window._add_startup_notice(row=1)
+
+    assert created["labels"][0].kwargs["text"] == "Some saved settings were repaired"
+    textbox = created["textboxes"][0]
+    assert textbox.kwargs == {
+        "height": 96,
+        "wrap": "word",
+        "fg_color": "transparent",
+        "border_width": 0,
+    }
+    assert textbox.inserted == ("1.0", config.startup_notice)
+    assert textbox.configured == {"state": "disabled"}
+    assert [button.kwargs["text"] for button in created["buttons"]] == ["Dismiss"]
+    assert created["buttons"][0].grid_args["row"] == 2
+    assert config.set_calls == []
+    assert config.consume_calls == 0
+    banner = window._startup_notice_banner
+
+    created["buttons"][0].kwargs["command"]()
+
+    assert config.startup_notice is None
+    assert config.consume_calls == 1
+    assert config.set_calls == []
+    assert banner.destroyed
+    assert window._startup_notice is None
 
 
 def make_numeric_vars(**overrides):

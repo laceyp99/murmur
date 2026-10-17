@@ -574,6 +574,7 @@ class SettingsWindow:
 
     def __init__(self, master=None, on_close=None):
         self.config = get_config()
+        self._startup_notice = self.config.get_startup_notice()
         self.logger = get_logger()
         self._on_close = on_close
         self._closed = False
@@ -598,7 +599,9 @@ class SettingsWindow:
 
     def _setup_ui(self):
         self.root.grid_columnconfigure(0, weight=1)
-        self.root.grid_rowconfigure(1, weight=1)
+        tabs_row = 2 if self._startup_notice else 1
+        button_row = tabs_row + 1
+        self.root.grid_rowconfigure(tabs_row, weight=1)
 
         header = ctk.CTkFrame(self.root, fg_color="transparent")
         header.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 8))
@@ -624,8 +627,11 @@ class SettingsWindow:
             font=ctk.CTkFont(size=24, weight="bold"),
         ).grid(row=0, column=1, sticky="w")
 
+        if self._startup_notice:
+            self._add_startup_notice(row=1)
+
         self.tabs = ctk.CTkTabview(self.root)
-        self.tabs.grid(row=1, column=0, sticky="nsew", padx=24, pady=8)
+        self.tabs.grid(row=tabs_row, column=0, sticky="nsew", padx=24, pady=8)
         tab_contents = {}
         for tab_name in TAB_ORDER:
             tab = self.tabs.add(tab_name)
@@ -806,12 +812,48 @@ class SettingsWindow:
             self._add_tab_reset_button(tab_contents[tab_name], tab_name)
 
         button_bar = ctk.CTkFrame(self.root, fg_color="transparent")
-        button_bar.grid(row=2, column=0, sticky="ew", padx=24, pady=(8, 20))
+        button_bar.grid(row=button_row, column=0, sticky="ew", padx=24, pady=(8, 20))
         button_bar.grid_columnconfigure(0, weight=1)
         ctk.CTkButton(button_bar, text="Cancel", command=self._close).grid(
             row=0, column=1, padx=(0, 8)
         )
         ctk.CTkButton(button_bar, text="Save", command=self._save).grid(row=0, column=2)
+
+    def _add_startup_notice(self, row):
+        banner = ctk.CTkFrame(self.root)
+        banner.grid(row=row, column=0, sticky="ew", padx=24, pady=(4, 4))
+        banner.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            banner,
+            text="Some saved settings were repaired",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            anchor="w",
+        ).grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 2))
+        notice_text = ctk.CTkTextbox(
+            banner,
+            height=96,
+            wrap="word",
+            fg_color="transparent",
+            border_width=0,
+        )
+        notice_text.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 4))
+        notice_text.insert("1.0", self._startup_notice)
+        notice_text.configure(state="disabled")
+        ctk.CTkButton(
+            banner,
+            text="Dismiss",
+            command=self._dismiss_startup_notice,
+            width=90,
+        ).grid(row=2, column=0, sticky="e", padx=16, pady=(4, 12))
+        self._startup_notice_banner = banner
+
+    def _dismiss_startup_notice(self):
+        self.config.consume_startup_notice()
+        banner = getattr(self, "_startup_notice_banner", None)
+        if banner is not None:
+            banner.destroy()
+            self._startup_notice_banner = None
+        self._startup_notice = None
 
     def _add_tab_reset_button(self, parent, tab_name):
         ctk.CTkButton(

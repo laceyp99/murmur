@@ -151,7 +151,7 @@ flowchart TB
     BackupConfig --> CreateDefaults
     ConfigState -->|yes| ValidateFields["Validate saved field types and ranges"]
     ValidateFields -->|valid| UseConfig["Merge saved values with defaults"]
-    ValidateFields -->|invalid fields| RepairFields["Back up original; reset invalid fields and show notice"]
+    ValidateFields -->|invalid fields| RepairFields["Back up original; reset invalid fields and retain Settings banner"]
     RepairFields --> UseConfig
     CreateDefaults --> Resources["Initialize recorder, workers, and transcriber"]
     UseConfig --> Resources

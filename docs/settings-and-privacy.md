@@ -15,7 +15,10 @@ flowchart LR
     UI --> Existing{"Settings window already open?"}
     Existing -->|yes| Focus["Focus existing window"]
     Existing -->|no| Open["Create tabbed settings window"]
-    Open --> Edit["Edit unsaved values"]
+    Open --> Recovery{"Settings repaired at startup?"}
+    Recovery -->|yes| Banner["Show repair banner with Dismiss"]
+    Recovery -->|no| Edit["Edit unsaved values"]
+    Banner --> Edit
     Focus --> Edit
     Edit --> Action{"User action"}
     Action -->|Cancel or close| Discard["Discard UI changes"]
@@ -52,8 +55,11 @@ non-finite input blocks Save, restores that field's persisted value in the UI,
 and leaves `config.json` unchanged. Reset controls change only the current UI
 state until Save is pressed.
 
-The sample rate is not exposed in the settings window. It defaults to 16,000 Hz
-and can be changed only by editing `config.json`; restart after doing so.
+Use Settings for normal configuration changes. It checks entries before saving
+and tells you when a restart is required. The sample rate is an advanced setting
+that defaults to 16,000 Hz and is not exposed in the window. See
+[Advanced manual configuration](#advanced-manual-configuration) if you need to
+change it.
 
 **Microphone** offers System default and the available input devices. Refresh
 reinitializes the audio backend and updates the list after plugging in a device.
@@ -73,14 +79,19 @@ The configuration file is `%APPDATA%\murmur\config.json`. murmur creates the
 directory and file on first launch. Missing keys receive values from
 `DEFAULT_CONFIG`. If the file is malformed, invalid UTF-8, or not a JSON object,
 murmur copies it to a timestamped `config.corrupt-*.json` backup, writes defaults,
-and shows a startup notice.
+and keeps a repair notice for the next time you open Settings during that run.
 
 Before runtime components start, murmur also checks the types and numeric ranges
 of saved settings. Invalid fields return to their defaults while valid settings
 and unknown keys are preserved. The original file is backed up using the same
-`config.corrupt-*.json` naming pattern, and a startup notice names the repaired
-fields. Review those fields in Settings or the configuration file before
-restarting. Training data logging requires the JSON boolean `true`; strings such
+`config.corrupt-*.json` naming pattern. A banner above the Settings tabs names the
+repaired settings and their replacement values, even when notifications are off.
+It has only a **Dismiss** action. Closing Settings without dismissing the banner
+keeps it for the next Settings visit during the same app run. Dismiss clears the
+notice without saving or changing settings. The banner does not open Settings
+automatically and does not offer configuration or backup folder links.
+
+Training data logging requires the JSON boolean `true`; strings such
 as `"false"` and numeric values do not enable it.
 An invalid saved `ollama_enabled` value disables Ollama cleanup rather than
 restoring its enabled default, so recovery cannot enable transcript delivery to
@@ -94,6 +105,15 @@ Saved sample rates must be integers from 8,000 to 192,000 Hz. Recording limits
 must be finite numbers from 30 to 1,800 seconds; fractional seconds are supported.
 VAD values and Ollama timeouts use the bounds shown in Settings. Out-of-range
 saved values reset to defaults rather than being clamped.
+
+### Advanced manual configuration
+
+Prefer Settings for supported controls. If you need to edit `config.json`
+directly, exit murmur first, edit the file, then relaunch. Closing only the
+Settings window is not enough: murmur keeps configuration in memory and does
+not reload external edits while running. A later Settings save can overwrite
+manual edits made during that run. Invalid saved fields are repaired on launch
+and the original file is backed up; review any repair banner in Settings.
 
 The current default values are:
 

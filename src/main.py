@@ -168,10 +168,9 @@ class MurmurApp:
             print("Failed to register hotkey. Exiting.")
             sys.exit(1)
 
-        config_notice = self.config.consume_startup_notice()
+        config_notice = self.config.get_startup_notice()
         if config_notice:
             print(f"Warning: {config_notice}")
-            self.notifications.notify("murmur", config_notice)
 
         print(f"\n{'=' * 50}")
         print("murmur - Local Speech-to-Text")

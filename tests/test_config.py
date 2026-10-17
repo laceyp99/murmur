@@ -14,6 +14,7 @@ from src.config import (
     Config,
 )
 from src.logger import DataLogger
+from src.settings_schema import SETTINGS_BY_KEY
 
 
 def test_config_defaults(tmp_path, monkeypatch):
@@ -83,7 +84,7 @@ def test_config_recovers_from_malformed_json_without_overwriting_backup(
     assert backup_files[0].read_text(encoding="utf-8") == '{"hotkey": '
     assert json.loads(config_file.read_text(encoding="utf-8")) == DEFAULT_CONFIG
     notice = cfg.consume_startup_notice()
-    assert backup_files[0].name in notice
+    assert "settings were restored to their defaults" in notice
     assert cfg.consume_startup_notice() is None
 
 
@@ -101,7 +102,7 @@ def test_config_recovers_from_wrong_shaped_json_payload(tmp_path, monkeypatch):
     assert len(backup_files) == 1
     assert json.loads(backup_files[0].read_text(encoding="utf-8")) == ["ctrl+alt+space"]
     assert json.loads(config_file.read_text(encoding="utf-8")) == DEFAULT_CONFIG
-    assert backup_files[0].name in cfg.consume_startup_notice()
+    assert "Your original file was backed up" in cfg.consume_startup_notice()
 
 
 def test_config_recovers_from_invalid_utf8_bytes(tmp_path, monkeypatch):
@@ -119,7 +120,7 @@ def test_config_recovers_from_invalid_utf8_bytes(tmp_path, monkeypatch):
     assert len(backup_files) == 1
     assert backup_files[0].read_bytes() == invalid_bytes
     assert json.loads(config_file.read_text(encoding="utf-8")) == DEFAULT_CONFIG
-    assert backup_files[0].name in cfg.consume_startup_notice()
+    assert "Your original file was backed up" in cfg.consume_startup_notice()
 
 
 @pytest.mark.parametrize(
@@ -168,8 +169,10 @@ def test_invalid_known_values_are_backed_up_and_repaired(
         assert cfg.hotkey == "ctrl+alt+space"
     assert cfg.get("custom_option") == {"kept": True}
     notice = cfg.consume_startup_notice()
-    assert invalid_key in notice
-    assert "Settings or your config file" in notice
+    setting = SETTINGS_BY_KEY.get(invalid_key)
+    label = setting.label if setting else invalid_key.replace("_", " ").capitalize()
+    assert label in notice
+    assert "Your other valid settings were kept" in notice
     backups = list(config_dir.glob("config.corrupt*.json"))
     assert len(backups) == 1
     assert backups[0].read_text(encoding="utf-8") == json.dumps(original)
@@ -328,7 +331,7 @@ def test_invalid_ollama_enablement_disables_cleanup(
 
     assert repaired.ollama_enabled is False
     assert repaired.ollama_endpoint == saved["ollama_endpoint"]
-    assert "ollama_enabled" in repaired.consume_startup_notice()
+    assert "Enable Ollama cleanup: off" in repaired.consume_startup_notice()
     assert (
         json.loads(cfg.config_file.read_text(encoding="utf-8"))["ollama_enabled"]
         is False
@@ -340,6 +343,26 @@ def test_invalid_ollama_enablement_disables_cleanup(
         == invalid_enabled
     )
     assert Config().ollama_enabled is False
+
+
+def test_recovery_notice_stays_available_until_dismissed_without_saving(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    cfg = Config()
+    cfg.update({"sample_rate": None, "ollama_enabled": "false"})
+    repaired = Config()
+    saved = repaired.config_file.read_bytes()
+    settings = repaired.get_all()
+
+    notice = repaired.get_startup_notice()
+    assert "Sample rate: 16000" in notice
+    assert "Enable Ollama cleanup: off" in notice
+    assert repaired.get_startup_notice() == notice
+    assert repaired.consume_startup_notice() == notice
+    assert repaired.get_startup_notice() is None
+    assert repaired.config_file.read_bytes() == saved
+    assert repaired.get_all() == settings
 
 
 def test_config_set_raises_when_atomic_save_fails(tmp_path, monkeypatch):

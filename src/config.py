@@ -153,8 +153,8 @@ class Config:
         self._config = DEFAULT_CONFIG.copy()
         self._save_config(self._config)
         self._startup_notice = (
-            "Config file was unreadable and has been reset to defaults. "
-            f"The original file was backed up to '{backup_file.name}'."
+            "The saved configuration could not be read, so settings were restored "
+            "to their defaults. Your original file was backed up."
         )
 
     def _save_config(self, config_data: dict[str, Any]) -> None:
@@ -222,14 +222,33 @@ class Config:
             if "ollama_enabled" in invalid_keys:
                 self._config["ollama_enabled"] = False
             self._save_config(self._config)
-            key_list = ", ".join(sorted(invalid_keys))
-            self._startup_notice = (
-                f"Invalid config values for {key_list} were reset to safe values. "
-                f"Review these fields in Settings or your config file. "
-                f"The original file was backed up to '{backup_file.name}'."
-            )
+            self._startup_notice = self._describe_repaired_settings(invalid_keys)
             return
         self._config.update(persisted)
+
+    def _describe_repaired_settings(self, invalid_keys: list[str]) -> str:
+        """Describe safe replacement values using the labels shown in Settings."""
+        from .settings_schema import SETTINGS_BY_KEY
+
+        changes = []
+        for key in sorted(invalid_keys):
+            setting = SETTINGS_BY_KEY.get(key)
+            label = setting.label if setting else key.replace("_", " ").capitalize()
+            value = self._config[key]
+            if type(value) is bool:
+                value = "on" if value else "off"
+            elif value is None:
+                value = "not set"
+            elif key == "sample_rate":
+                value = f"{value} Hz"
+            elif key.endswith("_ms"):
+                value = f"{value} ms"
+            elif key in {"max_recording_duration", "ollama_timeout_seconds"}:
+                value = f"{value} seconds"
+            changes.append(f"{label}: {value}.")
+        return "\n".join(changes) + (
+            "\nYour other valid settings were kept. Your original file was backed up."
+        )
 
     def _save(self):
         """Save configuration to file."""
@@ -264,6 +283,11 @@ class Config:
             notice = self._startup_notice
             self._startup_notice = None
             return notice
+
+    def get_startup_notice(self) -> str | None:
+        """Keep a recovery notice available for Settings until it is dismissed."""
+        with self._lock:
+            return self._startup_notice
 
     @property
     def hotkey(self) -> str:
