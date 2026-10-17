@@ -4,7 +4,7 @@ Windows labels murmur's toasts by its AppUserModelID and reads the display
 name and icon from the current user's registry. Run this after changing
 app/toast-icon.png; murmur itself never writes this registry key.
 
-The toast icon is separate from app/icon.png because Windows inverts mostly
+The toast icon is separate from src/resources/icon.png because Windows inverts mostly
 dark toast icons in dark mode, turning the black app tile white. It is also a
 small, thicker-stroked waveform because Windows downscales large icons to about
 20px with a filter that drops thin lines.

@@ -91,6 +91,12 @@ prefers `venv\Scripts\pythonw.exe` for source development, then uses
 `dist\murmur\murmur.exe` when a packaged build exists, and finally falls back
 to `pythonw.exe` from `PATH`.
 
+A non-editable installation (`python -m pip install .` or a built wheel) can
+launch with `murmur` or `python -m src` from outside the repository. The runtime
+logo is included at `src/resources/icon.png`. Python-mode **Start with Windows**
+uses the installed environment's `pythonw.exe -m src`; the frozen release uses
+its executable. Source development autostart requires the editable install above.
+
 ## Build a packaged release
 
 The packaged release keeps the Python source workflow above unchanged while
@@ -221,6 +227,21 @@ venv\Scripts\ruff.exe format --check .
 venv\Scripts\ruff.exe check .
 venv\Scripts\pytest.exe
 ```
+
+After changing Python packaging or launch paths, also run:
+
+```powershell
+venv\Scripts\python.exe tools\check_wheel_install.py
+```
+
+This builds a wheel, checks its runtime files, and installs it into a temporary
+virtual environment outside the checkout. It runs `tools/check_installed_wheel.py`
+with that environment's isolated interpreter to verify module and console launch
+dispatch, the autostart command, logo loading, and ICO generation. Only Pillow
+is installed alongside the wheel; the desktop runtime is replaced for this
+check, so it does not start recording, register hotkeys, or write the registry.
+Building and installing may require package-index access. The separate Windows
+release build checks the frozen runtime dependencies.
 
 To preview or build this documentation site, install the MkDocs dependencies
 listed in [`mkdocs.yml`](https://github.com/laceyp99/murmur/blob/main/mkdocs.yml):

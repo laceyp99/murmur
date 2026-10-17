@@ -12,14 +12,7 @@ from pathlib import Path
 # Add the project root to the path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-
-def _ensure_output_streams() -> None:
-    """Discard windowless progress output without writing user data to a log."""
-    # Like normal stdio, these streams stay open for the process lifetime.
-    if sys.stdout is None:
-        sys.stdout = Path(os.devnull).open("w", encoding="utf-8")  # noqa: SIM115
-    if sys.stderr is None:
-        sys.stderr = Path(os.devnull).open("w", encoding="utf-8")  # noqa: SIM115
+from src.launch import ensure_output_streams as _ensure_output_streams
 
 
 def _run_app() -> None:

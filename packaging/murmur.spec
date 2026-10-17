@@ -48,7 +48,7 @@ version_path = generated_root / "version_info.txt"
 
 datas = collect_data_files("customtkinter")
 datas += collect_data_files("whisper")
-datas += [(str(repo_root / "app" / "icon.png"), "app")]
+datas += [(str(repo_root / "src" / "resources" / "icon.png"), "app")]
 
 hidden_imports = [
     "pystray._win32",

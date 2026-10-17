@@ -21,15 +21,14 @@ def _get_launch_command() -> str:
     if executable.name.lower() == "python.exe":
         executable = executable.with_name("pythonw.exe")
 
-    script_path = Path(__file__).resolve().parent.parent / "run.py"
-    return f'"{executable}" "{script_path}"'
+    return f'"{executable}" -m src'
 
 
 def set_autostart(enabled: bool):
     """
     Enable or disable auto-start with Windows.
     Uses the packaged executable when frozen, otherwise the current Python
-    environment's windowless interpreter and ``run.py``.
+    environment's windowless interpreter and installed ``src`` module.
     """
     if winreg is None:
         return
