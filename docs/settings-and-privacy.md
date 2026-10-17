@@ -82,6 +82,9 @@ and unknown keys are preserved. The original file is backed up using the same
 fields. Review those fields in Settings or the configuration file before
 restarting. Training data logging requires the JSON boolean `true`; strings such
 as `"false"` and numeric values do not enable it.
+An invalid saved `ollama_enabled` value disables Ollama cleanup rather than
+restoring its enabled default, so recovery cannot enable transcript delivery to
+a configured endpoint. Missing values still use the normal default.
 
 The active file stays in place until the replacement is written successfully,
 so a failed repair can be retried on the next launch. Blank Ollama endpoint and

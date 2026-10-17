@@ -129,7 +129,6 @@ def test_config_recovers_from_invalid_utf8_bytes(tmp_path, monkeypatch):
         ({"enable_logging": 0}, "enable_logging"),
         ({"enable_logging": 1}, "enable_logging"),
         ({"enable_logging": None}, "enable_logging"),
-        ({"ollama_enabled": 1}, "ollama_enabled"),
         ({"sample_rate": None}, "sample_rate"),
         ({"sample_rate": 0}, "sample_rate"),
         ({"sample_rate": -16000}, "sample_rate"),
@@ -299,15 +298,48 @@ def test_saved_blank_ollama_fields_require_disabled_cleanup(
 
     reloaded = Config()
 
-    if enabled is False:
+    if enabled is not True:
         assert reloaded.ollama_endpoint == ""
         assert reloaded.ollama_model_name == ""
-        assert reloaded.consume_startup_notice() is None
-        assert not list(cfg.config_dir.glob("config.corrupt-*.json"))
+        assert reloaded.ollama_enabled is False
     else:
         assert reloaded.ollama_endpoint == DEFAULT_CONFIG["ollama_endpoint"]
         assert reloaded.ollama_model_name == DEFAULT_CONFIG["ollama_model_name"]
+    if enabled is False:
+        assert reloaded.consume_startup_notice() is None
+        assert not list(cfg.config_dir.glob("config.corrupt-*.json"))
+    else:
         assert reloaded.consume_startup_notice() is not None
+
+
+@pytest.mark.parametrize("invalid_enabled", [0, 1, None, "false", "true", [], {}])
+def test_invalid_ollama_enablement_disables_cleanup(
+    tmp_path, monkeypatch, invalid_enabled
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    cfg = Config()
+    saved = {
+        "ollama_enabled": invalid_enabled,
+        "ollama_endpoint": "http://remote:11434",
+    }
+    cfg.update(saved)
+
+    repaired = Config()
+
+    assert repaired.ollama_enabled is False
+    assert repaired.ollama_endpoint == saved["ollama_endpoint"]
+    assert "ollama_enabled" in repaired.consume_startup_notice()
+    assert (
+        json.loads(cfg.config_file.read_text(encoding="utf-8"))["ollama_enabled"]
+        is False
+    )
+    backups = list(cfg.config_dir.glob("config.corrupt-*.json"))
+    assert len(backups) == 1
+    assert (
+        json.loads(backups[0].read_text(encoding="utf-8"))["ollama_enabled"]
+        == invalid_enabled
+    )
+    assert Config().ollama_enabled is False
 
 
 def test_config_set_raises_when_atomic_save_fails(tmp_path, monkeypatch):

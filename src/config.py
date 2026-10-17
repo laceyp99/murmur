@@ -203,7 +203,7 @@ class Config:
 
         self._config = DEFAULT_CONFIG.copy()
         persisted = dict(loaded_config)
-        ollama_enabled = persisted.get("ollama_enabled", True) is not False
+        ollama_enabled = persisted.get("ollama_enabled", True) is True
         invalid_keys = [
             key
             for key, value in persisted.items()
@@ -219,10 +219,12 @@ class Config:
             for key, value in persisted.items():
                 if key not in invalid_keys:
                     self._config[key] = value
+            if "ollama_enabled" in invalid_keys:
+                self._config["ollama_enabled"] = False
             self._save_config(self._config)
             key_list = ", ".join(sorted(invalid_keys))
             self._startup_notice = (
-                f"Invalid config values for {key_list} were reset to defaults. "
+                f"Invalid config values for {key_list} were reset to safe values. "
                 f"Review these fields in Settings or your config file. "
                 f"The original file was backed up to '{backup_file.name}'."
             )
