@@ -974,22 +974,49 @@ class MurmurApp:
 def main():
     """Main entry point for the application."""
     print("Starting murmur...")
+    app = None
+    tray_thread = None
+    tray_error = None
+    tray_done = threading.Event()
+
+    def run_tray():
+        nonlocal tray_error
+        try:
+            app.tray.run()
+        except BaseException as exc:
+            # Forward worker failures to the entrypoint's normal exit handling.
+            tray_error = exc
+        finally:
+            tray_done.set()
 
     try:
         app = MurmurApp(preload_model=True)
         app.start()
 
-        # Run the tray icon (this is the main loop)
-        app.tray.run()
-
-        # When tray exits, stop the app
-        app.stop()
+        if sys.platform == "win32":
+            # Keep native GetMessage off the thread that handles console signals.
+            tray_thread = threading.Thread(target=run_tray, name="murmur-tray")
+            tray_thread.start()
+            while not tray_done.wait(timeout=0.1):
+                pass
+            if tray_error is not None:
+                raise tray_error
+        else:
+            # Other tray backends may require the main thread.
+            app.tray.run()
 
     except KeyboardInterrupt:
         print("\nInterrupted by user.")
     except Exception as e:
         print(f"Fatal error: {e}")
         sys.exit(1)
+    finally:
+        try:
+            if app is not None:
+                app.stop()
+        finally:
+            if tray_thread is not None and tray_thread.ident is not None:
+                tray_thread.join()
 
 
 if __name__ == "__main__":
