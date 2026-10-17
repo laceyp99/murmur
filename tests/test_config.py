@@ -252,6 +252,64 @@ def test_valid_literal_logging_true_is_preserved(tmp_path, monkeypatch):
     assert Config().enable_logging is True
 
 
+@pytest.mark.parametrize(
+    "original",
+    [
+        '{"hotkey":',
+        '["wrong shape"]',
+        '{"sample_rate": null, "hotkey": "ctrl+alt+space"}',
+    ],
+)
+def test_failed_repair_keeps_active_config_for_retry(tmp_path, monkeypatch, original):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    config_dir = tmp_path / "murmur"
+    config_dir.mkdir()
+    config_file = config_dir / "config.json"
+    config_file.write_text(original, encoding="utf-8")
+
+    def fail_replace(source, destination):
+        raise OSError("disk full")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(config_module.os, "replace", fail_replace)
+        with pytest.raises(config_module.ConfigError, match="Failed to write config"):
+            Config()
+
+    assert config_file.read_text(encoding="utf-8") == original
+    backups = list(config_dir.glob("config.corrupt-*.json"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == original
+    assert not list(config_dir.glob("*.tmp"))
+
+    repaired = Config()
+    assert repaired.consume_startup_notice() is not None
+    if "ctrl+alt+space" in original:
+        assert repaired.hotkey == "ctrl+alt+space"
+
+
+@pytest.mark.parametrize("enabled", [False, True, "false"])
+def test_saved_blank_ollama_fields_require_disabled_cleanup(
+    tmp_path, monkeypatch, enabled
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    cfg = Config()
+    cfg.update(
+        {"ollama_enabled": enabled, "ollama_endpoint": "", "ollama_model_name": ""}
+    )
+
+    reloaded = Config()
+
+    if enabled is False:
+        assert reloaded.ollama_endpoint == ""
+        assert reloaded.ollama_model_name == ""
+        assert reloaded.consume_startup_notice() is None
+        assert not list(cfg.config_dir.glob("config.corrupt-*.json"))
+    else:
+        assert reloaded.ollama_endpoint == DEFAULT_CONFIG["ollama_endpoint"]
+        assert reloaded.ollama_model_name == DEFAULT_CONFIG["ollama_model_name"]
+        assert reloaded.consume_startup_notice() is not None
+
+
 def test_config_set_raises_when_atomic_save_fails(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     cfg = Config()

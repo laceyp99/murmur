@@ -6,6 +6,7 @@ import contextlib
 import json
 import math
 import os
+import shutil
 import threading
 from collections.abc import Mapping
 from datetime import datetime
@@ -71,12 +72,16 @@ _INTEGER_RANGES = {
 _NUMBER_RANGES = {"max_recording_duration": (30, 1800)}
 
 
-def _valid_config_value(key: str, value: Any) -> bool:
+def _valid_config_value(key: str, value: Any, *, ollama_enabled: bool) -> bool:
     """Check persisted values without coercing strings, booleans, or numbers."""
     if key in _BOOLEAN_KEYS:
         return type(value) is bool
     if key in _STRING_KEYS:
-        return isinstance(value, str) and bool(value.strip())
+        allow_blank = not ollama_enabled and key in {
+            "ollama_endpoint",
+            "ollama_model_name",
+        }
+        return isinstance(value, str) and (allow_blank or bool(value.strip()))
     if key in _OPTIONAL_STRING_KEYS:
         return value is None or isinstance(value, str)
     if key == "microphone":
@@ -141,7 +146,7 @@ class Config:
         backup_file = self._make_corrupt_backup_path()
 
         try:
-            self.config_file.replace(backup_file)
+            shutil.copyfile(self.config_file, backup_file)
         except OSError as exc:
             raise ConfigError("Failed to preserve corrupt config file") from exc
 
@@ -198,15 +203,17 @@ class Config:
 
         self._config = DEFAULT_CONFIG.copy()
         persisted = dict(loaded_config)
+        ollama_enabled = persisted.get("ollama_enabled", True) is not False
         invalid_keys = [
             key
             for key, value in persisted.items()
-            if key in DEFAULT_CONFIG and not _valid_config_value(key, value)
+            if key in DEFAULT_CONFIG
+            and not _valid_config_value(key, value, ollama_enabled=ollama_enabled)
         ]
         if invalid_keys:
             backup_file = self._make_corrupt_backup_path()
             try:
-                self.config_file.replace(backup_file)
+                shutil.copyfile(self.config_file, backup_file)
             except OSError as exc:
                 raise ConfigError("Failed to preserve invalid config file") from exc
             for key, value in persisted.items():

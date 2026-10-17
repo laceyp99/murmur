@@ -72,7 +72,7 @@ for another attempt after the input problem is fixed.
 The configuration file is `%APPDATA%\murmur\config.json`. murmur creates the
 directory and file on first launch. Missing keys receive values from
 `DEFAULT_CONFIG`. If the file is malformed, invalid UTF-8, or not a JSON object,
-murmur moves it to a timestamped `config.corrupt-*.json` backup, writes defaults,
+murmur copies it to a timestamped `config.corrupt-*.json` backup, writes defaults,
 and shows a startup notice.
 
 Before runtime components start, murmur also checks the types and numeric ranges
@@ -82,6 +82,10 @@ and unknown keys are preserved. The original file is backed up using the same
 fields. Review those fields in Settings or the configuration file before
 restarting. Training data logging requires the JSON boolean `true`; strings such
 as `"false"` and numeric values do not enable it.
+
+The active file stays in place until the replacement is written successfully,
+so a failed repair can be retried on the next launch. Blank Ollama endpoint and
+model fields are allowed while Ollama cleanup is disabled.
 
 Saved sample rates must be integers from 8,000 to 192,000 Hz. Recording limits
 must be finite numbers from 30 to 1,800 seconds; fractional seconds are supported.
