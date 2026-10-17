@@ -256,6 +256,75 @@ def test_start_recording_can_retry_after_failed_start(monkeypatch):
     assert retry_stream.closed is True
 
 
+def test_late_callback_replays_buffered_blocks_before_fresh_audio(monkeypatch):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    recorder.start_recording()
+    callback = fake_sd.streams[0].kwargs["callback"]
+    blocks = [np.array([[value]], dtype=np.float32) for value in (0.1, 0.2, 0.3)]
+    for block in blocks[:2]:
+        callback(block, frames=1, time_info=None, status=None)
+    delivered = []
+    recorder.set_block_callback(delivered.append, replay_buffered=True)
+    callback(blocks[2], frames=1, time_info=None, status=None)
+    assert len(delivered) == 3
+    for actual, expected in zip(delivered, blocks, strict=True):
+        np.testing.assert_array_equal(actual, expected)
+    audio = recorder.stop_recording()
+    np.testing.assert_allclose(audio.audio, [0.1, 0.2, 0.3])
+
+
+def test_failed_buffered_replay_preserves_full_recording(monkeypatch):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    recorder.start_recording()
+    callback = fake_sd.streams[0].kwargs["callback"]
+    block = np.array([[0.1]], dtype=np.float32)
+    callback(block, frames=1, time_info=None, status=None)
+    errors, attempts = [], []
+    recorder.set_block_callback_error_handler(errors.append)
+
+    def fail(block):
+        attempts.append(block)
+        raise RuntimeError("live setup failed")
+
+    recorder.set_block_callback(fail, replay_buffered=True)
+    callback(block, frames=1, time_info=None, status=None)
+    assert len(attempts) == 1
+    assert len(errors) == 1
+    np.testing.assert_allclose(recorder.stop_recording().audio, [0.1, 0.1])
+
+
+def test_buffered_replay_holds_lock_until_early_blocks_are_delivered(monkeypatch):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    recorder.start_recording()
+    callback = fake_sd.streams[0].kwargs["callback"]
+    early = np.array([[0.1]], dtype=np.float32)
+    fresh = np.array([[0.2]], dtype=np.float32)
+    callback(early, frames=1, time_info=None, status=None)
+    entered, release = threading.Event(), threading.Event()
+    delivered = []
+
+    def receive(block):
+        delivered.append(block.copy())
+        if len(delivered) == 1:
+            entered.set()
+            assert release.wait(2)
+
+    attach = threading.Thread(
+        target=lambda: recorder.set_block_callback(receive, replay_buffered=True)
+    )
+    attach.start()
+    try:
+        assert entered.wait(2)
+        assert not recorder._lock.acquire(blocking=False)
+    finally:
+        release.set()
+        attach.join(2)
+    assert not attach.is_alive()
+    callback(fresh, frames=1, time_info=None, status=None)
+    np.testing.assert_allclose(np.concatenate(delivered).flatten(), [0.1, 0.2])
+    recorder.stop_recording()
+
+
 def test_preferred_open_failure_uses_default_and_keeps_preference(monkeypatch):
     fake_sd = FakeSoundDevice()
     fake_sd.devices.append({"name": "Focusrite", "hostapi": 0, "max_input_channels": 2})
