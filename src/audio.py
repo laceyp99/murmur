@@ -71,10 +71,17 @@ class AudioRecorder:
     def set_block_callback(
         self,
         callback: Callable[[np.ndarray], None] | None,
+        *,
+        replay_buffered: bool = False,
     ) -> None:
-        """Register a lightweight per-block callback used during recording."""
+        """Attach live VAD, optionally replaying early audio before fresh blocks."""
         with self._lock:
             self._block_callback = callback
+            if callback is not None and replay_buffered:
+                # Keep attachment and replay atomic with appending new audio.
+                for block in self._audio_data:
+                    if not self._deliver_block(block, callback):
+                        break
 
     def set_block_callback_error_handler(
         self,
@@ -267,14 +274,29 @@ class AudioRecorder:
         with self._lock:
             return self._recording
 
+    def _deliver_block(
+        self, block: np.ndarray, callback: Callable[[np.ndarray], None]
+    ) -> bool:
+        """Disable a failed live callback while preserving the full recording."""
+        try:
+            callback(block)
+            return True
+        except Exception as exc:
+            with self._lock:
+                should_report = not self._block_callback_failed
+                self._block_callback_failed = True
+                self._block_callback = None
+                error_handler = self._on_block_callback_error
+            if should_report:
+                print("Audio block callback failed; disabling live callback.")
+                if error_handler is not None:
+                    error_handler(exc)
+            return False
+
     def _audio_callback(self, indata: np.ndarray, frames: int, time_info, status):
         """Callback for audio stream."""
-        if status:
-            pass  # Ignore status messages
-
         audio_block: np.ndarray | None = None
         block_callback: Callable[[np.ndarray], None] | None = None
-        error_handler: Callable[[Exception], None] | None = None
         recording_limit_callback: Callable[[float], None] | None = None
         recording_limit_duration: float | None = None
         with self._lock:
@@ -311,22 +333,9 @@ class AudioRecorder:
                 recording_limit_duration = self.max_recording_duration
 
             block_callback = self._block_callback
-            error_handler = self._on_block_callback_error
 
         if block_callback is not None and audio_block is not None:
-            try:
-                block_callback(audio_block)
-            except Exception as exc:
-                should_report = False
-                with self._lock:
-                    if not self._block_callback_failed:
-                        self._block_callback_failed = True
-                        should_report = True
-                    self._block_callback = None
-
-                print("Audio block callback failed; disabling live callback.")
-                if should_report and error_handler is not None:
-                    error_handler(exc)
+            self._deliver_block(audio_block, block_callback)
 
         if (
             recording_limit_callback is not None

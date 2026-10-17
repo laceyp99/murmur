@@ -16,10 +16,7 @@ finalization can recompute the transcript from the full recording.
 flowchart LR
     HotkeyStart["Start hotkey"] --> HotkeyFilter["Suppress chord repeats and release"]
     HotkeyFilter --> AppStart["MurmurApp._on_recording_start"]
-    AppStart --> MediaPause["Optional media check and pause"]
-    MediaPause --> LiveWorker["Start live transcription worker"]
-    LiveWorker --> LiveVad["Start live VAD worker"]
-    LiveVad --> StartAllowed{"Startup still allowed?"}
+    AppStart --> StartAllowed{"Startup still allowed?"}
     StartAllowed -->|yes| InputResolver["Resolve preferred or default microphone"]
     StartAllowed -->|no| PendingDiscard["Close any opened stream,<br/>cancel workers and restore playback"]
     InputResolver --> Recorder["AudioRecorder starts capture"]
@@ -27,6 +24,9 @@ flowchart LR
     DeferredRefresh --> InputResolver
     Recorder --> CaptureCommit{"Commit capture before cancellation?"}
     CaptureCommit -->|yes| OverlayRecording["Optional overlay: recording bars"]
+    OverlayRecording --> LiveWorker["Start live transcription worker"]
+    LiveWorker --> LiveVad["Start live VAD worker;<br/>replay buffered opening audio in order"]
+    LiveVad --> MediaPause["Optional media check and pause<br/>on a separate thread"]
     CaptureCommit -->|no| PendingDiscard
     SecondPress["Second press during preparation"] --> PendingCancel["Mark pending start cancelled"]
     PendingCancel -.-> StartAllowed
@@ -105,6 +105,11 @@ mono channel, and `float32` sample format. The stream callback stores each block
 in the full recording buffer and forwards a copy to the live VAD worker when the
 live callback is active.
 
+Capture starts before live worker setup and optional media handling. Live VAD
+receives buffered opening blocks before fresh audio. Worker setup failures use
+the full recording for offline finalization. The microphone closes between
+sessions.
+
 At stream start, the shared input resolver tries the saved microphone, then the
 current Windows default if the preferred input is missing or cannot open. It
 keeps the saved preference during fallback. A device choice made during a
@@ -128,9 +133,12 @@ worker later reframes the audio into smaller WebRTC-compatible frames.
 
 ### Media pause and resume
 
-When media pause is enabled, Murmur checks and pauses playback before opening
-the microphone. It resumes playback after capture stops, startup fails,
-preparation is cancelled, or the app exits only if its pause request succeeded.
+When media pause is enabled, Murmur checks and pauses playback on a separate
+thread after capture and live worker setup. The beginning of the recording can
+therefore include background playback. A stop or cancellation skips a pause
+that has not begun. Teardown closes the microphone before waiting for an
+in-flight media operation, then resumes playback only if its pause request
+succeeded. This also restores a successful pause that finishes after Stop.
 
 Playback ownership is consumed once, so overlapping teardown does not resume
 twice. A failed pause request does not schedule a resume, and a resume failure
@@ -255,11 +263,10 @@ logging operation can finish, including during Exit.
 #### Pending startup cleanup
 
 A cancelled request survives even if the startup callback has not run yet.
-After a pending media check or pause returns, Murmur restores playback it
-successfully paused and returns to Ready without opening the microphone or
-showing a recording pill. If stream opening was already underway, the call may
-have to return; Murmur closes any resulting stream and discards its audio
-without recording feedback. Exit also blocks startup callbacks that have not
+Cancellation before stream opening returns to Ready without opening the
+microphone or showing a recording pill. If stream opening was already underway,
+the call may have to return; Murmur closes any resulting stream and discards
+its audio without recording feedback. Exit also blocks startup callbacks that have not
 begun yet and completes shutdown instead of returning to Ready.
 
 #### Recording and processing cleanup
