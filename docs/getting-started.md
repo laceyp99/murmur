@@ -149,7 +149,10 @@ flowchart TB
     ConfigState -->|no file| CreateDefaults["Create default config"]
     ConfigState -->|invalid JSON or shape| BackupConfig["Back up as config.corrupt-*.json"]
     BackupConfig --> CreateDefaults
-    ConfigState -->|yes| UseConfig["Merge saved values with defaults"]
+    ConfigState -->|yes| ValidateFields["Validate saved field types and ranges"]
+    ValidateFields -->|valid| UseConfig["Merge saved values with defaults"]
+    ValidateFields -->|invalid fields| RepairFields["Back up original; reset invalid fields and show notice"]
+    RepairFields --> UseConfig
     CreateDefaults --> Resources["Initialize recorder, workers, and transcriber"]
     UseConfig --> Resources
     Resources --> Whisper["Preload Whisper model"]
