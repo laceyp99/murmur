@@ -4,6 +4,7 @@ Configuration management for murmur.
 
 import contextlib
 import json
+import math
 import os
 import threading
 from collections.abc import Mapping
@@ -42,6 +43,61 @@ DEFAULT_CONFIG = {
     "ollama_timeout_seconds": DEFAULT_OLLAMA_TIMEOUT_SECONDS,
     "ollama_preload_model": True,
 }
+
+_BOOLEAN_KEYS = {
+    "enable_logging",
+    "enable_notifications",
+    "show_recording_overlay",
+    "start_with_windows",
+    "pause_media_while_recording",
+    "ollama_enabled",
+    "ollama_preload_model",
+}
+_STRING_KEYS = {"hotkey", "model", "device", "ollama_endpoint", "ollama_model_name"}
+_OPTIONAL_STRING_KEYS = {
+    "language",
+    "logging_consent_updated_at",
+    "logging_consent_source",
+}
+_INTEGER_RANGES = {
+    # Sounddevice rates span legacy telephony through high-resolution audio.
+    "sample_rate": (8000, 192000),
+    "vad_aggressiveness": (0, 3),
+    "vad_padding_ms": (50, 800),
+    "vad_silence_duration_ms": (100, 1500),
+    "ollama_timeout_seconds": (60, 300),
+}
+# Match the settings UI's hard recording limit to keep retained audio bounded.
+_NUMBER_RANGES = {"max_recording_duration": (30, 1800)}
+
+
+def _valid_config_value(key: str, value: Any) -> bool:
+    """Check persisted values without coercing strings, booleans, or numbers."""
+    if key in _BOOLEAN_KEYS:
+        return type(value) is bool
+    if key in _STRING_KEYS:
+        return isinstance(value, str) and bool(value.strip())
+    if key in _OPTIONAL_STRING_KEYS:
+        return value is None or isinstance(value, str)
+    if key == "microphone":
+        return value is None or (
+            isinstance(value, dict)
+            and set(value) == {"name", "hostapi"}
+            and all(
+                isinstance(value[field], str) and value[field].strip()
+                for field in value
+            )
+        )
+    if key in _INTEGER_RANGES:
+        low, high = _INTEGER_RANGES[key]
+        return type(value) is int and low <= value <= high
+    if key in _NUMBER_RANGES:
+        low, high = _NUMBER_RANGES[key]
+        if type(value) not in (int, float) or not low <= value <= high:
+            return False
+        return type(value) is int or math.isfinite(value)
+    return True
+
 
 # Global config instance
 _config_instance = None
@@ -141,7 +197,30 @@ class Config:
             return
 
         self._config = DEFAULT_CONFIG.copy()
-        self._config.update(dict(loaded_config))
+        persisted = dict(loaded_config)
+        invalid_keys = [
+            key
+            for key, value in persisted.items()
+            if key in DEFAULT_CONFIG and not _valid_config_value(key, value)
+        ]
+        if invalid_keys:
+            backup_file = self._make_corrupt_backup_path()
+            try:
+                self.config_file.replace(backup_file)
+            except OSError as exc:
+                raise ConfigError("Failed to preserve invalid config file") from exc
+            for key, value in persisted.items():
+                if key not in invalid_keys:
+                    self._config[key] = value
+            self._save_config(self._config)
+            key_list = ", ".join(sorted(invalid_keys))
+            self._startup_notice = (
+                f"Invalid config values for {key_list} were reset to defaults. "
+                f"Review these fields in Settings or your config file. "
+                f"The original file was backed up to '{backup_file.name}'."
+            )
+            return
+        self._config.update(persisted)
 
     def _save(self):
         """Save configuration to file."""
@@ -245,7 +324,7 @@ class Config:
     @property
     def enable_logging(self) -> bool:
         """Get the training-data logging setting."""
-        return self.get("enable_logging", False)
+        return self.get("enable_logging", False) is True
 
     @property
     def ollama_enabled(self) -> bool:

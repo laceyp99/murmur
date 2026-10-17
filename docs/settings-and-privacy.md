@@ -75,6 +75,19 @@ directory and file on first launch. Missing keys receive values from
 murmur moves it to a timestamped `config.corrupt-*.json` backup, writes defaults,
 and shows a startup notice.
 
+Before runtime components start, murmur also checks the types and numeric ranges
+of saved settings. Invalid fields return to their defaults while valid settings
+and unknown keys are preserved. The original file is backed up using the same
+`config.corrupt-*.json` naming pattern, and a startup notice names the repaired
+fields. Review those fields in Settings or the configuration file before
+restarting. Training data logging requires the JSON boolean `true`; strings such
+as `"false"` and numeric values do not enable it.
+
+Saved sample rates must be integers from 8,000 to 192,000 Hz. Recording limits
+must be finite numbers from 30 to 1,800 seconds; fractional seconds are supported.
+VAD values and Ollama timeouts use the bounds shown in Settings. Out-of-range
+saved values reset to defaults rather than being clamped.
+
 The current default values are:
 
 ```json
