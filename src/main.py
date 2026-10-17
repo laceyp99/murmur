@@ -92,6 +92,7 @@ class MurmurApp:
             get_cancel_session_callback=self._get_cancel_session,
         )
         self.media_controller = get_media_controller()
+        self._media_pause_thread: threading.Thread | None = None
 
         self._running = False
         self._was_media_playing = False
@@ -312,31 +313,12 @@ class MurmurApp:
         )
         self.tray.set_status("Preparing...")
 
-        # Check and pause media if playing (when enabled)
         self._was_media_playing = False
         try:
-            media_playing = (
-                self.config.pause_media_while_recording
-                and self.media_controller.is_media_playing()
-            )
-            if media_playing and not self._startup_abandoned(request):
-                self._was_media_playing = self.media_controller.pause()
-                if not self._was_media_playing:
-                    print("Warning: Failed to pause media playback")
-                    self.notifications.notify(
-                        "murmur", "Could not pause media playback"
-                    )
-        except Exception:
-            print("Warning: Failed to pause media playback")
-            self.notifications.notify("murmur", "Could not pause media playback")
-
-        try:
-            self._start_live_transcription()
-            self._start_live_segmentation()
-            # Last cheap exit before the microphone opens.
             if self._startup_abandoned(request):
                 self._abort_startup()
                 return
+            # Capture first. Optional preparation must not delay the microphone.
             self.recorder.start_recording()
             # The atomic commit is the boundary; a stop that won it gets no capture.
             if self._shutdown_event.is_set() or not request.commit_capture():
@@ -361,13 +343,65 @@ class MurmurApp:
                     self.hotkey_manager.set_idle()
             return
 
-        # Only an input stream that actually started earns the recording cue.
-        if self._shutdown_event.is_set():
-            return
-        print("Recording started...")
-        self.notifications.notify_recording_started()
-        self.tray.set_status("Recording...")
-        self._show_overlay(RECORDING)
+        # Show capture before worker setup or media calls. A concurrent cancel
+        # must not be replaced by a late recording cue.
+        with self._recording_stop_lock:
+            if self._startup_abandoned(request) or self._recording_stop_started:
+                return
+            print("Recording started...")
+            self.notifications.notify_recording_started()
+            self.tray.set_status("Recording...")
+            self._show_overlay(RECORDING)
+
+        try:
+            self._start_live_transcription()
+            self._start_live_segmentation()
+        except Exception:
+            # The full recording is already safe. Worker setup is optional.
+            self._on_live_pipeline_degraded("Live worker startup failed")
+            self._cancel_live_workers()
+            self.recorder.set_block_callback(None)
+            self.recorder.set_block_callback_error_handler(None)
+
+        if self.config.pause_media_while_recording and self._media_pause_allowed(
+            request
+        ):
+            thread = threading.Thread(
+                target=self._pause_media_for_session, args=(request,), daemon=True
+            )
+            try:
+                thread.start()
+            except RuntimeError:
+                print("Warning: Could not start media pause worker")
+            else:
+                self._media_pause_thread = thread
+
+    def _media_pause_allowed(self, request: RecordingRequest) -> bool:
+        """Do not start a media pause after this recording has begun stopping."""
+        with self._recording_stop_lock:
+            return (
+                self._current_request is request
+                and self._session_active
+                and not self._recording_stop_started
+                and not self._startup_abandoned(request)
+            )
+
+    def _pause_media_for_session(self, request: RecordingRequest) -> None:
+        """Pause in the background; teardown joins before restoring playback."""
+        try:
+            if not self._media_pause_allowed(request):
+                return
+            playing = self.media_controller.is_media_playing()
+            if playing and self._media_pause_allowed(request):
+                self._was_media_playing = self.media_controller.pause()
+                if not self._was_media_playing:
+                    print("Warning: Failed to pause media playback")
+                    self.notifications.notify(
+                        "murmur", "Could not pause media playback"
+                    )
+        except Exception:
+            print("Warning: Failed to pause media playback")
+            self.notifications.notify("murmur", "Could not pause media playback")
 
     def _abort_startup(self) -> None:
         """Undo a cancelled startup; the cancel owner releases the hotkey."""
@@ -379,6 +413,12 @@ class MurmurApp:
 
     def _resume_owned_media(self) -> None:
         """Resume playback once when this attempt successfully paused it."""
+        thread = self._media_pause_thread
+        self._media_pause_thread = None
+        if thread is not None:
+            # Capture is closed before joining. Wait for a late successful pause
+            # so it cannot affect the next session or leave playback paused.
+            thread.join()
         if not self._was_media_playing:
             return
         self._was_media_playing = False
@@ -847,7 +887,9 @@ class MurmurApp:
         self.recorder.set_block_callback_error_handler(
             self._on_live_block_callback_error
         )
-        self.recorder.set_block_callback(worker.submit_audio_block)
+        self.recorder.set_block_callback(
+            worker.submit_audio_block, replay_buffered=True
+        )
 
     def _stop_live_segmentation(self) -> None:
         """Detach and stop the live segmentation worker."""
