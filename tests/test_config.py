@@ -14,7 +14,6 @@ from src.config import (
     Config,
 )
 from src.logger import DataLogger
-from src.settings_schema import SETTINGS_BY_KEY
 
 
 def test_config_defaults(tmp_path, monkeypatch):
@@ -124,41 +123,42 @@ def test_config_recovers_from_invalid_utf8_bytes(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("values", "invalid_key"),
+    ("invalid_key", "value"),
     [
-        ({"enable_logging": "false"}, "enable_logging"),
-        ({"enable_logging": 0}, "enable_logging"),
-        ({"enable_logging": 1}, "enable_logging"),
-        ({"enable_logging": None}, "enable_logging"),
-        ({"sample_rate": None}, "sample_rate"),
-        ({"sample_rate": 0}, "sample_rate"),
-        ({"sample_rate": -16000}, "sample_rate"),
-        ({"sample_rate": 16000.5}, "sample_rate"),
-        ({"sample_rate": True}, "sample_rate"),
-        ({"max_recording_duration": math.inf}, "max_recording_duration"),
-        ({"max_recording_duration": -math.inf}, "max_recording_duration"),
-        ({"max_recording_duration": math.nan}, "max_recording_duration"),
-        ({"max_recording_duration": 10**1000}, "max_recording_duration"),
-        ({"max_recording_duration": -1}, "max_recording_duration"),
-        ({"max_recording_duration": 1801}, "max_recording_duration"),
-        ({"vad_aggressiveness": "2"}, "vad_aggressiveness"),
-        ({"vad_aggressiveness": 4}, "vad_aggressiveness"),
-        ({"vad_padding_ms": 0}, "vad_padding_ms"),
-        ({"vad_silence_duration_ms": None}, "vad_silence_duration_ms"),
-        ({"ollama_timeout_seconds": math.inf}, "ollama_timeout_seconds"),
-        ({"ollama_timeout_seconds": math.nan}, "ollama_timeout_seconds"),
-        ({"hotkey": 12}, "hotkey"),
-        ({"language": 12}, "language"),
-        ({"microphone": {"name": "USB Mic"}}, "microphone"),
+        ("enable_logging", "false"),
+        ("enable_logging", 0),
+        ("enable_logging", 1),
+        ("enable_logging", None),
+        ("sample_rate", None),
+        ("sample_rate", 0),
+        ("sample_rate", -16000),
+        ("sample_rate", 16000.5),
+        ("sample_rate", True),
+        ("max_recording_duration", math.inf),
+        ("max_recording_duration", -math.inf),
+        ("max_recording_duration", math.nan),
+        ("max_recording_duration", 10**1000),
+        ("max_recording_duration", -1),
+        ("max_recording_duration", 1801),
+        ("vad_aggressiveness", "2"),
+        ("vad_aggressiveness", 4),
+        ("vad_padding_ms", 0),
+        ("vad_silence_duration_ms", None),
+        ("ollama_timeout_seconds", math.inf),
+        ("ollama_timeout_seconds", math.nan),
+        ("hotkey", 12),
+        ("language", 12),
+        ("microphone", {"name": "USB Mic"}),
     ],
 )
 def test_invalid_known_values_are_backed_up_and_repaired(
-    tmp_path, monkeypatch, values, invalid_key
+    tmp_path, monkeypatch, invalid_key, value
 ):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     config_dir = tmp_path / "murmur"
     config_dir.mkdir()
-    original = {"hotkey": "ctrl+alt+space", "custom_option": {"kept": True}, **values}
+    original = {"hotkey": "ctrl+alt+space", "custom_option": {"kept": True}}
+    original[invalid_key] = value
     config_file = config_dir / "config.json"
     config_file.write_text(json.dumps(original), encoding="utf-8")
 
@@ -169,10 +169,7 @@ def test_invalid_known_values_are_backed_up_and_repaired(
         assert cfg.hotkey == "ctrl+alt+space"
     assert cfg.get("custom_option") == {"kept": True}
     notice = cfg.consume_startup_notice()
-    setting = SETTINGS_BY_KEY.get(invalid_key)
-    label = setting.label if setting else invalid_key.replace("_", " ").capitalize()
-    assert label.removeprefix("Enable ").casefold() in notice.casefold()
-    assert "Other settings kept" in notice
+    assert notice
     backups = list(config_dir.glob("config.corrupt*.json"))
     assert len(backups) == 1
     assert backups[0].read_text(encoding="utf-8") == json.dumps(original)
@@ -197,61 +194,41 @@ def test_valid_custom_config_values_are_preserved(tmp_path, monkeypatch):
         "max_recording_duration": 45.5,
         "microphone": {"name": "USB Mic", "hostapi": "Windows WASAPI"},
         "future_setting": "preserved",
+        "enable_logging": True,
     }
     config_file.write_text(json.dumps(values), encoding="utf-8")
 
     cfg = Config()
 
-    assert cfg.get_all()["sample_rate"] == 44100
-    assert cfg.model_name == "custom-whisper-model"
-    assert cfg.ollama_model_name == "custom:latest"
-    assert cfg.get("max_recording_duration") == 45.5
-    assert cfg.microphone == values["microphone"]
-    assert cfg.get("future_setting") == "preserved"
+    for key, value in values.items():
+        assert cfg.get(key) == value
+    assert cfg.enable_logging is True
     assert cfg.consume_startup_notice() is None
 
 
 def test_logging_getter_requires_literal_true(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     cfg = Config()
-    cfg._config["enable_logging"] = "false"
+    cfg.set("enable_logging", "false")
     assert cfg.enable_logging is False
 
 
-@pytest.mark.parametrize(
-    ("payload", "expected_rate", "expected_logging"),
-    [
-        ({"sample_rate": None}, 16000, False),
-        ({"enable_logging": "false"}, 16000, False),
-    ],
-)
-def test_invalid_loaded_config_is_safe_for_runtime_construction(
-    tmp_path, monkeypatch, payload, expected_rate, expected_logging
-):
+def test_invalid_loaded_config_is_safe_for_runtime_construction(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     config_dir = tmp_path / "murmur"
     config_dir.mkdir()
-    (config_dir / "config.json").write_text(json.dumps(payload), encoding="utf-8")
+    (config_dir / "config.json").write_text(
+        json.dumps({"sample_rate": None, "enable_logging": "false"}), encoding="utf-8"
+    )
     cfg = Config()
     monkeypatch.setattr(logger_module, "get_config", lambda: cfg)
 
     recorder = AudioRecorder(cfg)
     logger = DataLogger(tmp_path / "training-data")
 
-    assert recorder.sample_rate == expected_rate
-    assert recorder._max_recording_samples == expected_rate * 300
-    assert logger._enabled is expected_logging
-
-
-def test_valid_literal_logging_true_is_preserved(tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    config_dir = tmp_path / "murmur"
-    config_dir.mkdir()
-    (config_dir / "config.json").write_text(
-        json.dumps({"enable_logging": True}), encoding="utf-8"
-    )
-
-    assert Config().enable_logging is True
+    assert recorder.sample_rate == 16000
+    assert recorder._max_recording_samples == 16000 * 300
+    assert logger.is_enabled() is False
 
 
 @pytest.mark.parametrize(

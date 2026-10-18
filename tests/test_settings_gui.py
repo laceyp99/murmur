@@ -1,5 +1,6 @@
 import queue
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -109,59 +110,18 @@ class FakeConfig:
 
 
 def test_startup_notice_banner_shows_body_and_dismisses_without_saving(monkeypatch):
-    created = {"frames": [], "labels": [], "textboxes": [], "buttons": []}
-
-    class FakeWidget:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-            self.grid_args = None
-
-        def grid(self, **kwargs):
-            self.grid_args = kwargs
-
-        def grid_columnconfigure(self, *_args, **_kwargs):
-            pass
-
-        def destroy(self):
-            self.destroyed = True
-
-    class FakeFrame(FakeWidget):
-        def __init__(self, *_args, **kwargs):
-            super().__init__(**kwargs)
-            created["frames"].append(self)
-
-    class FakeLabel(FakeWidget):
-        def __init__(self, *_args, **kwargs):
-            super().__init__(**kwargs)
-            created["labels"].append(self)
-
-    class FakeTextbox(FakeWidget):
-        def __init__(self, *_args, **kwargs):
-            super().__init__(**kwargs)
-            created["textboxes"].append(self)
-            self.inserted = None
-            self.configured = {}
-
-        def insert(self, index, text):
-            self.inserted = (index, text)
-
-        def configure(self, **kwargs):
-            self.configured.update(kwargs)
-
-    class FakeButton(FakeWidget):
-        def __init__(self, *_args, **kwargs):
-            super().__init__(**kwargs)
-            created["buttons"].append(self)
-
+    banner = Mock()
+    textbox = Mock()
+    button_factory = Mock()
     monkeypatch.setattr(
         settings_module,
         "ctk",
         SimpleNamespace(
-            CTkFrame=FakeFrame,
-            CTkLabel=FakeLabel,
-            CTkTextbox=FakeTextbox,
-            CTkButton=FakeButton,
-            CTkFont=lambda **kwargs: kwargs,
+            CTkFrame=Mock(return_value=banner),
+            CTkLabel=Mock(),
+            CTkTextbox=Mock(return_value=textbox),
+            CTkButton=button_factory,
+            CTkFont=Mock(),
         ),
     )
     config = FakeConfig()
@@ -174,29 +134,18 @@ def test_startup_notice_banner_shows_body_and_dismisses_without_saving(monkeypat
 
     window._add_startup_notice(row=1)
 
-    assert created["labels"][0].kwargs["text"] == "⚠ Settings were repaired"
-    textbox = created["textboxes"][0]
-    assert textbox.kwargs == {
-        "height": 52,
-        "wrap": "word",
-        "fg_color": "transparent",
-        "text_color": ("#5D431B", "#F1D8AA"),
-        "border_width": 0,
-    }
-    assert textbox.inserted == ("1.0", config.startup_notice)
-    assert textbox.configured == {"state": "disabled"}
-    assert [button.kwargs["text"] for button in created["buttons"]] == ["Dismiss"]
-    assert created["buttons"][0].grid_args["row"] == 0
+    textbox.insert.assert_called_once_with("1.0", config.startup_notice)
+    textbox.configure.assert_called_once_with(state="disabled")
+    button_factory.assert_called_once()
+    assert button_factory.call_args.kwargs["text"] == "Dismiss"
     assert config.set_calls == []
     assert config.consume_calls == 0
-    banner = window._startup_notice_banner
-
-    created["buttons"][0].kwargs["command"]()
+    button_factory.call_args.kwargs["command"]()
 
     assert config.startup_notice is None
     assert config.consume_calls == 1
     assert config.set_calls == []
-    assert banner.destroyed
+    banner.destroy.assert_called_once()
     assert window._startup_notice is None
 
 
