@@ -1,5 +1,6 @@
 import queue
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -84,6 +85,8 @@ class FakeConfig:
         self.start_with_windows = False
         self.show_recording_overlay = True
         self.set_calls = []
+        self.startup_notice = None
+        self.consume_calls = 0
 
     def set(self, key, value):
         self.set_calls.append((key, value))
@@ -95,6 +98,55 @@ class FakeConfig:
 
     def get(self, key, default=None):
         return getattr(self, key, DEFAULT_CONFIG.get(key, default))
+
+    def get_startup_notice(self):
+        return self.startup_notice
+
+    def consume_startup_notice(self):
+        self.consume_calls += 1
+        notice = self.startup_notice
+        self.startup_notice = None
+        return notice
+
+
+def test_startup_notice_banner_shows_body_and_dismisses_without_saving(monkeypatch):
+    banner = Mock()
+    textbox = Mock()
+    button_factory = Mock()
+    monkeypatch.setattr(
+        settings_module,
+        "ctk",
+        SimpleNamespace(
+            CTkFrame=Mock(return_value=banner),
+            CTkLabel=Mock(),
+            CTkTextbox=Mock(return_value=textbox),
+            CTkButton=button_factory,
+            CTkFont=Mock(),
+        ),
+    )
+    config = FakeConfig()
+    config.enable_notifications = False
+    config.startup_notice = "model: 'invalid' repaired to 'base'"
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.root = object()
+    window.config = config
+    window._startup_notice = config.get_startup_notice()
+
+    window._add_startup_notice(row=1)
+
+    textbox.insert.assert_called_once_with("1.0", config.startup_notice)
+    textbox.configure.assert_called_once_with(state="disabled")
+    button_factory.assert_called_once()
+    assert button_factory.call_args.kwargs["text"] == "Dismiss"
+    assert config.set_calls == []
+    assert config.consume_calls == 0
+    button_factory.call_args.kwargs["command"]()
+
+    assert config.startup_notice is None
+    assert config.consume_calls == 1
+    assert config.set_calls == []
+    banner.destroy.assert_called_once()
+    assert window._startup_notice is None
 
 
 def make_numeric_vars(**overrides):

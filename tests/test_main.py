@@ -251,10 +251,8 @@ class FakeStartupConfig:
         self.set_calls.append((key, value))
         setattr(self, key, value)
 
-    def consume_startup_notice(self):
-        notice = self._startup_notice
-        self._startup_notice = None
-        return notice
+    def get_startup_notice(self):
+        return self._startup_notice
 
 
 class FakeStartupHotkeyManager:
@@ -592,7 +590,7 @@ def test_start_exits_when_valid_hotkey_registration_still_fails(monkeypatch):
     ]
 
 
-def test_start_notifies_when_config_recovery_happened():
+def test_start_preserves_config_recovery_notice_for_settings():
     config = FakeStartupConfig(
         DEFAULT_CONFIG["hotkey"],
         startup_notice=(
@@ -607,12 +605,9 @@ def test_start_notifies_when_config_recovery_happened():
 
     assert hotkey_manager.register_calls == [DEFAULT_CONFIG["hotkey"]]
     assert app.notifications.messages == [
-        (
-            "murmur",
-            "Config file was unreadable and has been reset to defaults. The original file was backed up to 'config.corrupt-20260601010101000000.json'.",
-        ),
         ("murmur", "Ready! Press hotkey to start recording."),
     ]
+    assert config.get_startup_notice() is not None
 
 
 def test_hotkey_pre_dispatch_cancel_does_not_poison_next_attempt(

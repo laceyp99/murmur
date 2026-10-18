@@ -4,7 +4,9 @@ Configuration management for murmur.
 
 import contextlib
 import json
+import math
 import os
+import shutil
 import threading
 from collections.abc import Mapping
 from datetime import datetime
@@ -42,6 +44,65 @@ DEFAULT_CONFIG = {
     "ollama_timeout_seconds": DEFAULT_OLLAMA_TIMEOUT_SECONDS,
     "ollama_preload_model": True,
 }
+
+_BOOLEAN_KEYS = {
+    "enable_logging",
+    "enable_notifications",
+    "show_recording_overlay",
+    "start_with_windows",
+    "pause_media_while_recording",
+    "ollama_enabled",
+    "ollama_preload_model",
+}
+_STRING_KEYS = {"hotkey", "model", "device", "ollama_endpoint", "ollama_model_name"}
+_OPTIONAL_STRING_KEYS = {
+    "language",
+    "logging_consent_updated_at",
+    "logging_consent_source",
+}
+_INTEGER_RANGES = {
+    # Sounddevice rates span legacy telephony through high-resolution audio.
+    "sample_rate": (8000, 192000),
+    "vad_aggressiveness": (0, 3),
+    "vad_padding_ms": (50, 800),
+    "vad_silence_duration_ms": (100, 1500),
+    "ollama_timeout_seconds": (60, 300),
+}
+# Match the settings UI's hard recording limit to keep retained audio bounded.
+_NUMBER_RANGES = {"max_recording_duration": (30, 1800)}
+
+
+def _valid_config_value(key: str, value: Any, *, ollama_enabled: bool) -> bool:
+    """Check persisted values without coercing strings, booleans, or numbers."""
+    if key in _BOOLEAN_KEYS:
+        return type(value) is bool
+    if key in _STRING_KEYS:
+        allow_blank = not ollama_enabled and key in {
+            "ollama_endpoint",
+            "ollama_model_name",
+        }
+        return isinstance(value, str) and (allow_blank or bool(value.strip()))
+    if key in _OPTIONAL_STRING_KEYS:
+        return value is None or isinstance(value, str)
+    if key == "microphone":
+        return value is None or (
+            isinstance(value, dict)
+            and set(value) == {"name", "hostapi"}
+            and all(
+                isinstance(value[field], str) and value[field].strip()
+                for field in value
+            )
+        )
+    if key in _INTEGER_RANGES:
+        low, high = _INTEGER_RANGES[key]
+        return type(value) is int and low <= value <= high
+    if key in _NUMBER_RANGES:
+        low, high = _NUMBER_RANGES[key]
+        if type(value) not in (int, float) or not low <= value <= high:
+            return False
+        return type(value) is int or math.isfinite(value)
+    return True
+
 
 # Global config instance
 _config_instance = None
@@ -85,15 +146,15 @@ class Config:
         backup_file = self._make_corrupt_backup_path()
 
         try:
-            self.config_file.replace(backup_file)
+            shutil.copyfile(self.config_file, backup_file)
         except OSError as exc:
             raise ConfigError("Failed to preserve corrupt config file") from exc
 
         self._config = DEFAULT_CONFIG.copy()
         self._save_config(self._config)
         self._startup_notice = (
-            "Config file was unreadable and has been reset to defaults. "
-            f"The original file was backed up to '{backup_file.name}'."
+            "The saved configuration could not be read, so settings were restored "
+            "to their defaults. Your original file was backed up."
         )
 
     def _save_config(self, config_data: dict[str, Any]) -> None:
@@ -141,7 +202,53 @@ class Config:
             return
 
         self._config = DEFAULT_CONFIG.copy()
-        self._config.update(dict(loaded_config))
+        persisted = dict(loaded_config)
+        ollama_enabled = persisted.get("ollama_enabled", True) is True
+        invalid_keys = [
+            key
+            for key, value in persisted.items()
+            if key in DEFAULT_CONFIG
+            and not _valid_config_value(key, value, ollama_enabled=ollama_enabled)
+        ]
+        if invalid_keys:
+            backup_file = self._make_corrupt_backup_path()
+            try:
+                shutil.copyfile(self.config_file, backup_file)
+            except OSError as exc:
+                raise ConfigError("Failed to preserve invalid config file") from exc
+            for key, value in persisted.items():
+                if key not in invalid_keys:
+                    self._config[key] = value
+            if "ollama_enabled" in invalid_keys:
+                self._config["ollama_enabled"] = False
+            self._save_config(self._config)
+            self._startup_notice = self._describe_repaired_settings(invalid_keys)
+            return
+        self._config.update(persisted)
+
+    def _describe_repaired_settings(self, invalid_keys: list[str]) -> str:
+        """Describe safe replacement values using the labels shown in Settings."""
+        from .settings_schema import SETTINGS_BY_KEY
+
+        changes = []
+        for key in sorted(invalid_keys):
+            setting = SETTINGS_BY_KEY.get(key)
+            label = setting.label if setting else key.replace("_", " ").capitalize()
+            label = label.removeprefix("Enable ")
+            label = label[0].upper() + label[1:]
+            value = self._config[key]
+            if type(value) is bool:
+                value = "on" if value else "off"
+            elif value is None:
+                value = "not set"
+            elif key == "sample_rate":
+                value = f"{value:,} Hz"
+            elif key.endswith("_ms"):
+                value = f"{value} ms"
+            elif key in {"max_recording_duration", "ollama_timeout_seconds"}:
+                value = f"{value} seconds"
+            changes.append(f"{label}: {value}")
+        return "; ".join(changes) + (".\nOther settings kept. Original file backed up.")
 
     def _save(self):
         """Save configuration to file."""
@@ -176,6 +283,11 @@ class Config:
             notice = self._startup_notice
             self._startup_notice = None
             return notice
+
+    def get_startup_notice(self) -> str | None:
+        """Keep a recovery notice available for Settings until it is dismissed."""
+        with self._lock:
+            return self._startup_notice
 
     @property
     def hotkey(self) -> str:
@@ -245,7 +357,7 @@ class Config:
     @property
     def enable_logging(self) -> bool:
         """Get the training-data logging setting."""
-        return self.get("enable_logging", False)
+        return self.get("enable_logging", False) is True
 
     @property
     def ollama_enabled(self) -> bool:
