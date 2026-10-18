@@ -1,7 +1,8 @@
 # Live Pipeline
 
-The live pipeline is the low-latency path. It begins before the first audio
-sample is captured and continues until the stop hotkey drains the pending work.
+The live pipeline is the low-latency path. Capture starts first, then the live
+workers receive the buffered opening audio and continue until the stop hotkey
+drains the pending work.
 
 The important design choice is that live VAD and live Whisper work are
 background workers. The audio callback stays lightweight: it appends to the full
@@ -23,9 +24,14 @@ sequenceDiagram
 
     User->>Hotkey: Press start hotkey
     Hotkey->>App: _on_recording_start()
+    App->>Recorder: start_recording()
+    Recorder->>Recorder: retain opening blocks in full buffer
+    App->>App: commit capture and show recording cue
     App->>LiveWhisper: start()
     App->>LiveVAD: start()
-    App->>Recorder: start_recording()
+    App->>Recorder: set_block_callback(replay_buffered=True)
+    Recorder->>LiveVAD: replay opening blocks in order
+    App->>App: launch optional media pause thread
 
     loop Every recorder callback
         Recorder->>Recorder: append block to full buffer
@@ -49,6 +55,7 @@ sequenceDiagram
     Hotkey->>App: _on_recording_stop()
     App->>Recorder: stop_recording()
     Recorder-->>App: AudioData
+    App->>App: join media pause and restore playback
     App->>LiveVAD: stop() and flush pending speech
     App->>LiveWhisper: stop() and drain queued segments
     App->>Accumulator: ordered_chunks()
@@ -68,6 +75,7 @@ sequenceDiagram
 
 The recorder callback is intentionally narrow:
 
+- Discard idle audio when an optional ready stream is open.
 - Append the current block to the full recording buffer.
 - Enforce the configured maximum recording duration.
 - Forward the block to live VAD if a callback is registered.

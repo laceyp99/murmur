@@ -43,7 +43,7 @@ flowchart LR
 
 | Tab | Controls | Runtime effect |
 | --- | --- | --- |
-| General | Hotkey, microphone, recording overlay, notifications, Windows startup, media pause | Microphone preference applies at the next stream start without restart. Hotkey registration and other cached recorder/transcriber state are refreshed on restart; the overlay, notifications, media pause, and startup settings apply without a restart. |
+| General | Hotkey, microphone, keep microphone ready, recording overlay, notifications, Windows startup, media pause | Microphone preference applies at the next recording without restart. Hotkey registration and keeping the microphone ready require restart; the overlay, notifications, media pause, and startup settings apply without a restart. |
 | VAD | Aggressiveness, speech padding, silence-to-stop duration | Applied to the VAD workers created for recordings; the UI requests a restart after changes. |
 | Transcription | Whisper model, device, language, maximum recording duration | Used by startup-created recorder/transcriber components; restart after changes. |
 | LLM Cleanup | Enablement, endpoint, model, timeout, preload, connection test | The final pass is optional; endpoint/model/preload changes require restart according to the UI notice. |
@@ -72,6 +72,15 @@ click Refresh after reconnecting, then try it at the next stream start. An
 unexpected stream stop also queues a backend refresh after capture closes.
 If neither input can open, Murmur reports an error and the hotkey remains usable
 for another attempt after the input problem is fixed.
+
+**Keep microphone ready** is off by default. Turn it on if the opening words get
+cut off when you speak right after the hotkey. Murmur then keeps the microphone
+open while it runs, so the Windows microphone indicator stays on. Idle audio is
+discarded and never reaches VAD, transcription, or training-data logging. If
+the microphone does not start within three seconds at launch, Murmur falls back
+to opening it on each hotkey press. Refresh or an unplugged microphone closes
+the idle stream, and the next recording reopens it. A new microphone choice
+takes effect at the next hotkey press.
 
 ## Persistent configuration
 
@@ -124,6 +133,7 @@ The current default values are:
   "model": "small",
   "device": "cuda",
   "microphone": null,
+  "keep_microphone_ready": false,
   "language": null,
   "sample_rate": 16000,
   "vad_aggressiveness": 1,

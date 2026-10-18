@@ -27,6 +27,7 @@ def test_config_defaults(tmp_path, monkeypatch):
     assert cfg.ollama_preload_model is True
     assert cfg.show_recording_overlay is True
     assert cfg.enable_notifications is False
+    assert cfg.keep_microphone_ready is False
 
 
 def test_overlay_and_toast_settings_are_independent(tmp_path, monkeypatch):
@@ -59,11 +60,13 @@ def test_config_persistence(tmp_path, monkeypatch):
     cfg = Config()
     cfg.set("ollama_enabled", False)
     cfg.set("ollama_endpoint", "http://127.0.0.1:11434")
+    cfg.set("keep_microphone_ready", True)
 
     # Reload config from disk
     cfg2 = Config()
     assert cfg2.ollama_enabled is False
     assert cfg2.ollama_endpoint == "http://127.0.0.1:11434"
+    assert cfg2.keep_microphone_ready is True
 
 
 def test_config_recovers_from_malformed_json_without_overwriting_backup(
@@ -129,6 +132,7 @@ def test_config_recovers_from_invalid_utf8_bytes(tmp_path, monkeypatch):
         ("enable_logging", 0),
         ("enable_logging", 1),
         ("enable_logging", None),
+        ("keep_microphone_ready", "false"),
         ("sample_rate", None),
         ("sample_rate", 0),
         ("sample_rate", -16000),

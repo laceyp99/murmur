@@ -187,8 +187,8 @@ Pauses in your speech do not stop the recording; use the hotkey when you are don
 ### Cancel or exit
 
 If you change your mind before recording starts, press the hotkey again to
-cancel the pending recording. Preparation can take a moment while murmur checks
-and pauses media, if that setting is enabled.
+cancel the pending recording. Opening the microphone can take a moment;
+live worker setup and optional media pausing happen after capture starts.
 
 During recording or processing, click the pill's **X** or choose **Cancel
 dictation** from the tray menu to discard the dictation. Choosing **Exit** also
@@ -204,6 +204,11 @@ saving. An active model call can delay the next recording or quitting. See
 The recording pill appears after the microphone starts successfully. A failed
 start shows a short error instead. Other errors, such as `No speech detected`,
 also appear in the pill.
+
+By default, the microphone opens on the hotkey and closes between recordings.
+If your first words get cut off, turn on **Settings > General > Keep microphone
+ready** and restart. Optional media pausing runs after capture starts, so a
+little background playback may enter the opening audio.
 
 The overlay does not take focus. Turn it off with **Settings > General > Show
 recording overlay**. With it disabled, the tray status changes from

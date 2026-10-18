@@ -35,6 +35,7 @@ DEFAULT_CONFIG = {
     "show_recording_overlay": True,
     "start_with_windows": True,
     "pause_media_while_recording": True,
+    "keep_microphone_ready": False,
     "logging_consent_updated_at": None,
     "logging_consent_source": None,
     # Ollama LLM post-processor configuration
@@ -51,6 +52,7 @@ _BOOLEAN_KEYS = {
     "show_recording_overlay",
     "start_with_windows",
     "pause_media_while_recording",
+    "keep_microphone_ready",
     "ollama_enabled",
     "ollama_preload_model",
 }
@@ -353,6 +355,11 @@ class Config:
     def pause_media_while_recording(self) -> bool:
         """Get the pause media while recording setting."""
         return self.get("pause_media_while_recording", True)
+
+    @property
+    def keep_microphone_ready(self) -> bool:
+        """Get whether microphone access stays open between recordings."""
+        return self.get("keep_microphone_ready", False)
 
     @property
     def enable_logging(self) -> bool:

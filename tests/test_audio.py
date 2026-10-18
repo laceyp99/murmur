@@ -88,6 +88,221 @@ def make_fake_recorder(monkeypatch, *, sample_rate=10):
     return recorder, fake_sd
 
 
+def make_ready_recorder(monkeypatch):
+    recorder, backend = make_fake_recorder(monkeypatch)
+    recorder._keep_microphone_ready = True
+    backend.on_start = lambda stream: stream.kwargs["callback"](
+        np.ones((2, 1), dtype=np.float32), 2, None, None
+    )
+    return recorder, backend
+
+
+def test_prepare_discards_idle_audio_and_reuses_stream_across_sessions(monkeypatch):
+    recorder, backend = make_ready_recorder(monkeypatch)
+    blocks = []
+    recorder.set_block_callback(blocks.append)
+    assert recorder.prepare()
+    stream = recorder._stream
+    callback = stream.kwargs["callback"]
+    callback(np.ones((2, 1)), 2, None, None)
+    assert recorder._audio_data == []
+    assert blocks == []
+    for _ in range(2):
+        recorder.start_recording()
+        callback(np.ones((2, 1)), 2, None, None)
+        assert len(recorder.stop_recording().audio) == 2
+        assert recorder._stream is stream
+        assert not stream.closed
+        assert recorder._audio_data == []
+    assert len(backend.streams) == 1
+    recorder.close()
+    assert stream.closed
+    assert not recorder.prepare()
+    with pytest.raises(RuntimeError, match="closed"):
+        recorder.start_recording()
+
+
+def test_warm_start_crops_only_pre_activation_samples(monkeypatch):
+    recorder, _ = make_ready_recorder(monkeypatch)
+    assert recorder.prepare()
+    recorder._stream.time = 10.2
+    recorder.start_recording()
+    info = type("TimeInfo", (), {"inputBufferAdcTime": 10.0})()
+    recorder._stream.kwargs["callback"](np.arange(5).reshape(-1, 1), 5, info, None)
+    np.testing.assert_array_equal(recorder.stop_recording().audio, [2, 3, 4])
+    recorder.close()
+
+
+def test_prepare_timeout_releases_stream_and_allows_cold_retry(monkeypatch):
+    recorder, backend = make_ready_recorder(monkeypatch)
+    backend.on_start = None
+    recorder._prepare_timeout = 0.001
+    assert not recorder.prepare()
+    assert backend.streams[0].closed
+    recorder.start_recording()
+    assert recorder.is_recording()
+    recorder.stop_recording()
+    recorder.close()
+
+
+def test_prepare_failure_cleans_up(monkeypatch):
+    recorder, backend = make_ready_recorder(monkeypatch)
+    backend.start_errors = [RuntimeError("unplugged")]
+    assert not recorder.prepare()
+    assert backend.streams[0].closed
+    assert recorder._stream is None
+    recorder.close()
+
+
+@pytest.mark.parametrize("change", ["preference", "default", "refresh"])
+def test_ready_stream_invalidated_before_next_session(monkeypatch, change):
+    recorder, backend = make_ready_recorder(monkeypatch)
+    assert recorder.prepare()
+    old = recorder._stream
+    backend.devices.append({"name": "Other", "hostapi": 0, "max_input_channels": 1})
+    if change == "preference":
+        recorder.config._values["microphone"] = {
+            "name": "Other",
+            "hostapi": "Windows WASAPI",
+        }
+    elif change == "default":
+        backend.default.device = (1, -1)
+    else:
+        from src.audio import input_backend
+
+        input_backend.request_refresh()
+    recorder.start_recording()
+    assert old.closed
+    assert recorder._stream is not old
+    assert recorder._stream.kwargs["device"] == (0 if change == "refresh" else 1)
+    recorder.stop_recording()
+    recorder.close()
+
+
+def test_idle_device_failure_releases_without_prior_session_error(monkeypatch):
+    recorder, _ = make_ready_recorder(monkeypatch)
+    errors = []
+    recorder.set_capture_error_callback(errors.append)
+    assert recorder.prepare()
+    stream = recorder._stream
+    stream.active = False
+    recorder._watch_stream(stream)
+    assert stream.closed
+    assert recorder._stream is None
+    assert errors == []
+    recorder.close()
+
+
+def test_close_interrupts_prepare_wait(monkeypatch):
+    recorder, backend = make_ready_recorder(monkeypatch)
+    backend.on_start = None
+    opened = threading.Event()
+    backend.on_start = lambda stream: opened.set()
+    result = []
+    worker = threading.Thread(target=lambda: result.append(recorder.prepare()))
+    worker.start()
+    assert opened.wait(1)
+    recorder.close()
+    worker.join(1)
+    assert not worker.is_alive()
+    assert result == [False]
+    assert backend.streams[0].closed
+
+
+def test_idle_callback_does_not_copy_input(monkeypatch):
+    class Uncopyable(np.ndarray):
+        def copy(self, *args, **kwargs):
+            raise AssertionError("Idle microphone audio must not be copied")
+
+    recorder, backend = make_ready_recorder(monkeypatch)
+    block = np.ones((2, 1)).view(Uncopyable)
+    backend.on_start = lambda stream: stream.kwargs["callback"](block, 2, None, None)
+    assert recorder.prepare()
+    recorder._stream.kwargs["callback"](block, 2, None, None)
+    assert recorder._audio_data == []
+    recorder.close()
+
+
+def test_idle_watchdog_releases_pending_refresh(monkeypatch, isolated_input_backend):
+    recorder, _ = make_ready_recorder(monkeypatch)
+    assert recorder.prepare()
+    stream = recorder._stream
+    assert not isolated_input_backend.request_refresh()
+    recorder._watch_stream(stream)
+    assert stream.closed
+    assert isolated_input_backend.generation == 1
+    assert not isolated_input_backend.refresh_pending
+    recorder.close()
+
+
+def test_warm_duration_limit_and_close_preserve_final_audio(monkeypatch):
+    recorder, _ = make_ready_recorder(monkeypatch)
+    recorder._max_recording_samples = 3
+    assert recorder.prepare()
+    recorder.start_recording()
+    recorder._stream.kwargs["callback"](np.arange(5).reshape(-1, 1), 5, None, None)
+    assert not recorder.is_recording()
+    recorder.close()
+    np.testing.assert_array_equal(recorder.stop_recording().audio, [0, 1, 2])
+    assert recorder.stop_recording() is None
+
+
+def test_ready_input_status_tracks_open_stream_through_stop_and_close(monkeypatch):
+    recorder, _ = make_ready_recorder(monkeypatch)
+    assert recorder.prepare()
+    selection = input_status.get_status().active
+    assert selection is not None
+    recorder.start_recording()
+    recorder._stream.kwargs["callback"](np.ones((2, 1)), 2, None, None)
+    recorder.stop_recording()
+    assert input_status.get_status().active == selection
+    recorder.close()
+    assert input_status.get_status().active is None
+    assert input_status.get_status().error is None
+
+
+def test_close_preserves_capture_failure_status(monkeypatch):
+    recorder, _ = make_ready_recorder(monkeypatch)
+    assert recorder.prepare()
+    recorder.start_recording()
+    recorder._report_capture_error("Microphone disconnected or stopped")
+    recorder.close()
+    assert input_status.get_status().error == "Microphone disconnected or stopped"
+
+
+@pytest.mark.parametrize("failure", ["timeout", "inactive", "open", "unavailable"])
+def test_prepare_failure_reports_fixed_on_demand_fallback(monkeypatch, capsys, failure):
+    recorder, backend = make_ready_recorder(monkeypatch)
+    if failure == "timeout":
+        backend.on_start = None
+        recorder._prepare_timeout = 0.001
+    elif failure == "inactive":
+
+        def become_inactive(timeout):
+            recorder._stream.active = False
+            return True
+
+        recorder._first_callback.wait = become_inactive
+    elif failure == "open":
+        backend.start_errors = [RuntimeError("private device detail")]
+    else:
+        monkeypatch.setattr("src.audio.sd", None)
+    assert not recorder.prepare()
+    expected = "Microphone readiness failed; microphone will open on demand."
+    assert input_status.get_status().error == expected
+    assert capsys.readouterr().out.strip() == expected
+    assert input_status.get_status().active is None
+    recorder.close()
+
+
+def test_disabled_and_shutdown_prepare_are_silent(monkeypatch, capsys):
+    recorder, _ = make_fake_recorder(monkeypatch)
+    assert not recorder.prepare()
+    recorder.close()
+    assert not recorder.prepare()
+    assert capsys.readouterr().out == ""
+
+
 def start_fake_recorder(monkeypatch, *, sample_rate=10, max_recording_duration=0.5):
     fake_sd = FakeSoundDevice()
     monkeypatch.setattr("src.audio.sd", fake_sd)
@@ -254,6 +469,75 @@ def test_start_recording_can_retry_after_failed_start(monkeypatch):
     np.testing.assert_allclose(audio_data.audio, block.flatten())
     assert retry_stream.stopped is True
     assert retry_stream.closed is True
+
+
+def test_late_callback_replays_buffered_blocks_before_fresh_audio(monkeypatch):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    recorder.start_recording()
+    callback = fake_sd.streams[0].kwargs["callback"]
+    blocks = [np.array([[value]], dtype=np.float32) for value in (0.1, 0.2, 0.3)]
+    for block in blocks[:2]:
+        callback(block, frames=1, time_info=None, status=None)
+    delivered = []
+    recorder.set_block_callback(delivered.append, replay_buffered=True)
+    callback(blocks[2], frames=1, time_info=None, status=None)
+    assert len(delivered) == 3
+    for actual, expected in zip(delivered, blocks, strict=True):
+        np.testing.assert_array_equal(actual, expected)
+    audio = recorder.stop_recording()
+    np.testing.assert_allclose(audio.audio, [0.1, 0.2, 0.3])
+
+
+def test_failed_buffered_replay_preserves_full_recording(monkeypatch):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    recorder.start_recording()
+    callback = fake_sd.streams[0].kwargs["callback"]
+    block = np.array([[0.1]], dtype=np.float32)
+    callback(block, frames=1, time_info=None, status=None)
+    errors, attempts = [], []
+    recorder.set_block_callback_error_handler(errors.append)
+
+    def fail(block):
+        attempts.append(block)
+        raise RuntimeError("live setup failed")
+
+    recorder.set_block_callback(fail, replay_buffered=True)
+    callback(block, frames=1, time_info=None, status=None)
+    assert len(attempts) == 1
+    assert len(errors) == 1
+    np.testing.assert_allclose(recorder.stop_recording().audio, [0.1, 0.1])
+
+
+def test_buffered_replay_holds_lock_until_early_blocks_are_delivered(monkeypatch):
+    recorder, fake_sd = make_fake_recorder(monkeypatch)
+    recorder.start_recording()
+    callback = fake_sd.streams[0].kwargs["callback"]
+    early = np.array([[0.1]], dtype=np.float32)
+    fresh = np.array([[0.2]], dtype=np.float32)
+    callback(early, frames=1, time_info=None, status=None)
+    entered, release = threading.Event(), threading.Event()
+    delivered = []
+
+    def receive(block):
+        delivered.append(block.copy())
+        if len(delivered) == 1:
+            entered.set()
+            assert release.wait(2)
+
+    attach = threading.Thread(
+        target=lambda: recorder.set_block_callback(receive, replay_buffered=True)
+    )
+    attach.start()
+    try:
+        assert entered.wait(2)
+        assert not recorder._lock.acquire(blocking=False)
+    finally:
+        release.set()
+        attach.join(2)
+    assert not attach.is_alive()
+    callback(fresh, frames=1, time_info=None, status=None)
+    np.testing.assert_allclose(np.concatenate(delivered).flatten(), [0.1, 0.2])
+    recorder.stop_recording()
 
 
 def test_preferred_open_failure_uses_default_and_keeps_preference(monkeypatch):

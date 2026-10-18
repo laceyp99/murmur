@@ -95,6 +95,15 @@ SETTINGS: tuple[SettingMetadata, ...] = (
         default=DEFAULT_CONFIG["pause_media_while_recording"],
     ),
     SettingMetadata(
+        key="keep_microphone_ready",
+        label="Keep microphone ready",
+        tab="General",
+        control="bool",
+        value_type="bool",
+        default=DEFAULT_CONFIG["keep_microphone_ready"],
+        restart_required=True,
+    ),
+    SettingMetadata(
         key="vad_aggressiveness",
         label="VAD aggressiveness",
         tab="VAD",

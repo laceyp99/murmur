@@ -117,6 +117,7 @@ def make_app(segmenter, transcriber, config=None):
     app._session_active = True
     app._delivery_started = False
     app._shutdown_event = threading.Event()
+    app._media_pause_thread = None
     app._current_request = committed_request()
     return app
 
@@ -141,12 +142,19 @@ class FakeRecorder:
         self.block_callback = None
         self.block_callback_error_handler = None
         self.recording_limit_callback = None
+        self.close_calls = 0
+
+    def prepare(self):
+        return False
+
+    def close(self):
+        self.close_calls += 1
 
     def stop_recording(self):
         self.stop_calls += 1
         return self.audio_data
 
-    def set_block_callback(self, callback):
+    def set_block_callback(self, callback, *, replay_buffered=False):
         self.block_callback = callback
 
     def set_block_callback_error_handler(self, handler):
@@ -171,6 +179,9 @@ class FakeNotifications:
         self.messages = []
         self.errors = []
         self.recording_limits = []
+
+    def notify_recording_started(self):
+        pass
 
     def notify_transcription_complete(self, text):
         self.completed.append(text)
@@ -303,6 +314,7 @@ def make_start_app(config, hotkey_manager):
     app.logger = FakeLogger()
     app.notifications = FakeNotifications()
     app._running = False
+    app.recorder = FakeRecorder(None)
     app._shutdown_event = threading.Event()
     app._on_recording_start = lambda: None
     app._on_recording_stop = lambda: None
@@ -529,6 +541,31 @@ def test_live_transcription_callback_stdout_omits_transcript_text(capsys):
     assert "Live segment failed: id=7 attempts=2" in stdout
     assert "private live chunk" not in stdout
     assert "leaked in exception" not in stdout
+
+
+@pytest.mark.parametrize("warmup_fails", [False, True])
+def test_optional_microphone_warmup_precedes_hotkey_registration(warmup_fails):
+    config = FakeStartupConfig(DEFAULT_CONFIG["hotkey"])
+    manager = FakeStartupHotkeyManager(config, lambda hotkey: True)
+    app = make_start_app(config, manager)
+    prepared = []
+
+    def prepare():
+        assert manager.register_calls == []
+        prepared.append(True)
+        if warmup_fails:
+            raise OSError("device not ready")
+        return True
+
+    app.recorder.prepare = prepare
+    app.start()
+
+    assert prepared == [True]
+    assert manager.register_calls == [DEFAULT_CONFIG["hotkey"]]
+    assert app.notifications.messages[-1] == (
+        "murmur",
+        "Ready! Press hotkey to start recording.",
+    )
 
 
 def test_start_recovers_from_invalid_configured_hotkey(monkeypatch):
@@ -1159,7 +1196,7 @@ def test_late_capture_error_does_not_strand_hotkey_after_manual_stop():
         (True, True, False, False, 0),
         (True, False, True, False, 0),
         (False, True, True, False, 0),
-        (True, True, True, True, 1),
+        (True, True, True, True, 0),
         (True, True, False, True, 0),
     ],
 )
@@ -1197,8 +1234,11 @@ def test_media_resumes_only_after_successful_pause(
         monkeypatch.setattr(app, name, lambda: None)
     app._on_recording_start(RecordingRequest())
     if not recording_failed:
+        if app._media_pause_thread is not None:
+            app._media_pause_thread.join(2)
+            assert not app._media_pause_thread.is_alive()
         stop_current(app)
-    assert len(pauses) == int(enabled and playing)
+    assert len(pauses) == int(enabled and playing and not recording_failed)
     assert len(plays) == expected_plays
     assert app._was_media_playing is False
 
@@ -1551,12 +1591,19 @@ def test_entrypoints_record_with_restricted_output(
             raise RuntimeError("microphone unavailable")
 
     app.recorder.start_recording = start_recording
-    # Trigger warning output before capture; stop also exercises the VAD fallback.
+    # Exercise background media warning output and the offline VAD fallback.
     app.media_controller.is_media_playing = lambda: True
     app.media_controller.pause = lambda: False
     app._start_live_transcription = lambda: None
     app._start_live_segmentation = lambda: None
-    app.start = lambda: app._on_recording_start(RecordingRequest())
+
+    def start_app():
+        app._on_recording_start(RecordingRequest())
+        if app._media_pause_thread is not None:
+            app._media_pause_thread.join(2)
+            assert not app._media_pause_thread.is_alive()
+
+    app.start = start_app
     app.tray.run = (
         (lambda: stop_current(app)) if outcome != "start_failure" else lambda: None
     )
@@ -1596,7 +1643,9 @@ def test_entrypoints_record_with_restricted_output(
                 assert ("Recording started..." in messages) == (
                     outcome != "start_failure"
                 )
-                assert "Warning: Failed to pause media playback" in messages
+                assert ("Warning: Failed to pause media playback" in messages) == (
+                    outcome != "start_failure"
+                )
                 if outcome != "start_failure":
                     assert "Recording stopped." in messages
                 if outcome == "copied":
@@ -2117,7 +2166,7 @@ def test_cancel_or_exit_during_stream_open_closes_without_commit(
 
     def wait_for_inference():
         # Playback must recover before an already-running call can delay teardown.
-        assert app.media_controller.play_calls == 1
+        assert app.media_controller.play_calls == 0
         joining.set()
         assert finish_join.wait(2)
 
@@ -2158,7 +2207,7 @@ def test_cancel_or_exit_during_stream_open_closes_without_commit(
         assert app.recorder.stop_calls == 0
         release.set()
         assert joining.wait(2)
-        assert app.media_controller.play_calls == 1
+        assert app.media_controller.play_calls == 0
         assert app.recorder.stop_calls == 1
     finally:
         release.set()
@@ -2222,15 +2271,15 @@ def test_retired_hotkey_stop_does_not_cancel_or_finalize_next_attempt(
     assert app.media_controller.play_calls == 0
 
 
-@pytest.mark.parametrize("exit_app", [False, True])
+@pytest.mark.parametrize("exit_app", [False, True, "hotkey"])
 @pytest.mark.parametrize("cancel_during_pause", [False, True])
-def test_media_wait_cancel_or_exit_restores_late_pause_without_capture(
+def test_media_wait_cancel_or_exit_closes_capture_and_restores_late_pause(
     monkeypatch, overlay_calls, exit_app, cancel_during_pause
 ):
     app = make_stop_app(None)
     app.config.pause_media_while_recording = True
     request = RecordingRequest()
-    entered, release = threading.Event(), threading.Event()
+    entered, release, closed = (threading.Event(), threading.Event(), threading.Event())
     errors = []
     pauses, plays, opens = [], [], []
 
@@ -2251,6 +2300,14 @@ def test_media_wait_cancel_or_exit_restores_late_pause_without_capture(
     app.media_controller.pause = pause
     app.media_controller.play = lambda: plays.append(True) or True
     app.recorder.start_recording = lambda: opens.append(True)
+    original_stop = app.recorder.stop_recording
+
+    def close_capture():
+        result = original_stop()
+        closed.set()
+        return result
+
+    app.recorder.stop_recording = close_capture
     app.hotkey_manager.request = request
     app.recorder.set_capture_error_callback = lambda callback: None
     app.recorder.set_recording_limit_callback = lambda callback: None
@@ -2269,9 +2326,17 @@ def test_media_wait_cancel_or_exit_restores_late_pause_without_capture(
             errors.append(exc)
 
     starter = threading.Thread(target=start)
-    action = threading.Thread(
-        target=app.stop if exit_app else lambda: app._on_recording_stop(request, False)
-    )
+
+    def stop_session():
+        if exit_app == "hotkey":
+            assert request.request_stop()
+            app._on_recording_stop(request, True)
+        elif exit_app:
+            app.stop()
+        else:
+            app._on_recording_cancel(app._overlay_session)
+
+    action = threading.Thread(target=stop_session)
     starter.start()
     try:
         entered_startup = entered.wait(2)
@@ -2281,7 +2346,10 @@ def test_media_wait_cancel_or_exit_restores_late_pause_without_capture(
             assert errors == []
             pytest.fail("startup did not enter media detection")
         action.start()
-        assert request.cancelled.wait(2)
+        if exit_app != "hotkey":
+            assert request.cancelled.wait(2)
+        assert closed.wait(2)
+        assert action.is_alive()
     finally:
         release.set()
         starter.join(2)
@@ -2291,29 +2359,29 @@ def test_media_wait_cancel_or_exit_restores_late_pause_without_capture(
     assert not starter.is_alive()
     assert not action.is_alive()
     assert errors == []
-    assert opens == []
+    assert opens == [True]
     assert pauses == ([True] if cancel_during_pause else [])
     assert plays == ([True] if cancel_during_pause else [])
-    assert main_module.RECORDING not in [
+    assert main_module.RECORDING in [
         call[0] for call in overlay_calls if isinstance(call, tuple)
     ]
-    assert main_module.CANCELLED not in [
-        call[0] for call in overlay_calls if isinstance(call, tuple)
-    ]
-    assert app.hotkey_manager.idle_calls == (0 if exit_app else 1)
+    if not exit_app:
+        assert main_module.CANCELLED in [
+            call[0] for call in overlay_calls if isinstance(call, tuple)
+        ]
+    assert app.hotkey_manager.idle_calls == (0 if exit_app is True else 1)
 
 
-def test_pending_cancel_resets_tray_when_startup_returns_before_stop_callback(
-    overlay_calls,
-):
+def test_capture_and_cue_precede_workers_and_blocked_media(overlay_calls):
     app = make_stop_app(None)
     app.config.pause_media_while_recording = True
     request = RecordingRequest()
     app.hotkey_manager.request = request
     entered, release = threading.Event(), threading.Event()
-    errors, opens = [], []
+    errors, events = [], []
 
     def detect_playing():
+        events.append("media")
         entered.set()
         assert release.wait(2)
         return False
@@ -2326,26 +2394,83 @@ def test_pending_cancel_resets_tray_when_startup_returns_before_stop_callback(
 
     app.media_controller.is_media_playing = detect_playing
     app.recorder.set_capture_error_callback = lambda callback: None
-    app.recorder.start_recording = lambda: opens.append(True)
+
+    def open_capture():
+        assert not request.capture_committed
+        events.append("capture")
+
+    def cue():
+        assert request.capture_committed
+        events.append("cue")
+
+    app.recorder.start_recording = open_capture
+    app.notifications.notify_recording_started = cue
+    app._start_live_transcription = lambda: events.append("transcription")
+    app._start_live_segmentation = lambda: events.append("vad")
     starter = threading.Thread(target=start)
     starter.start()
     try:
         assert entered.wait(2)
-        assert not request.request_stop()
+        starter.join(2)
+        assert not starter.is_alive()
+        assert events == ["capture", "cue", "transcription", "vad", "media"]
+        assert app.tray.statuses[-1] == "Recording..."
+        assert request.request_stop()
     finally:
         release.set()
         starter.join(2)
 
     assert not starter.is_alive()
     assert not errors
-    assert not app._session_active
-    assert app.tray.statuses[-1] == "Preparing..."
-    app._on_recording_stop(request, False)
+    assert app._session_active
+    app._on_recording_stop(request, True)
 
     assert app.tray.statuses[-1] == "Ready"
     assert app.hotkey_manager.idle_calls == 1
-    assert opens == []
-    assert overlay_calls == []
+    assert app.recorder.stop_calls == 1
+    assert main_module.RECORDING in [
+        call[0] for call in overlay_calls if isinstance(call, tuple)
+    ]
+
+
+@pytest.mark.parametrize("failed_worker", ["transcription", "vad"])
+def test_worker_setup_failure_keeps_capture_for_offline_processing(
+    monkeypatch, failed_worker
+):
+    audio = make_audio_data()
+    app = make_stop_app(audio)
+    app.config.pause_media_while_recording = False
+    app.recorder.set_capture_error_callback = lambda callback: None
+    app.recorder.start_recording = lambda: None
+    app._start_live_transcription = lambda: None
+    app._start_live_segmentation = lambda: None
+
+    def fail_worker():
+        raise RuntimeError("worker unavailable")
+
+    name = (
+        "_start_live_transcription"
+        if failed_worker == "transcription"
+        else "_start_live_segmentation"
+    )
+    monkeypatch.setattr(app, name, fail_worker)
+    copies = []
+    monkeypatch.setattr(
+        main_module, "copy_to_clipboard", lambda text: copies.append(text) or True
+    )
+    request = RecordingRequest()
+    app._on_recording_start(request)
+
+    assert request.capture_committed
+    assert app._session_active
+    assert app.recorder.stop_calls == 0
+    assert app._live_pipeline_degraded
+    assert app.notifications.errors == []
+    stop_current(app)
+
+    assert app.recorder.stop_calls == 1
+    assert app.transcriber.audio_calls == [audio]
+    assert copies == ["Fallback text."]
 
 
 def test_failed_start_does_not_release_session_claimed_by_cancellation(monkeypatch):
@@ -2425,6 +2550,30 @@ def test_failed_start_does_not_release_session_claimed_by_cancellation(monkeypat
     assert app.recorder.stop_calls == 1
 
 
+def test_exit_closes_microphone_before_waiting_for_session_teardown(monkeypatch):
+    app = make_stop_app(None)
+    app.hotkey_manager.unregister = lambda: None
+    app.tray.stop = lambda: None
+    waiting, release = threading.Event(), threading.Event()
+
+    def wait_for_teardown():
+        assert app.recorder.close_calls == 1
+        waiting.set()
+        assert release.wait(2)
+
+    monkeypatch.setattr(app, "_finish_recording_stop", wait_for_teardown)
+    shutdown = threading.Thread(target=app.stop)
+    shutdown.start()
+    try:
+        assert waiting.wait(2)
+        assert shutdown.is_alive()
+        assert app.recorder.close_calls == 1
+    finally:
+        release.set()
+        shutdown.join(2)
+    assert not shutdown.is_alive()
+
+
 def test_stop_app_closes_overlay(overlay_calls):
     app = make_stop_app(None)
     app._running = True
@@ -2435,3 +2584,4 @@ def test_stop_app_closes_overlay(overlay_calls):
     app.stop()
 
     assert overlay_calls == ["close"]
+    assert app.recorder.close_calls == 1

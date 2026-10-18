@@ -41,6 +41,7 @@ def test_tabs_have_expected_order_and_settings():
         "show_recording_overlay",
         "start_with_windows",
         "pause_media_while_recording",
+        "keep_microphone_ready",
     ]
 
 
@@ -71,6 +72,7 @@ def test_bounded_numeric_metadata_has_defaults_within_range():
 
 
 def test_runtime_cached_settings_are_marked_restart_required():
+    assert SETTINGS_BY_KEY["keep_microphone_ready"].restart_required is True
     assert SETTINGS_BY_KEY["hotkey"].restart_required is True
     assert SETTINGS_BY_KEY["ollama_timeout_seconds"].restart_required is True
 
