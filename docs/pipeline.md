@@ -162,32 +162,13 @@ Recording defaults to 16 kHz, but other configured rates remain supported when
 the input device accepts them. Live VAD supports 8, 16, 32, and 48 kHz; other
 rates use the offline fallback. Higher recording rates use larger buffers and
 require conversion before inference. Before downsampling, the shared resampler
-applies a centered Blackman-windowed sinc low-pass filter using NumPy, then
-interpolates at the target sample times. The filter length scales with the rate
-ratio, and endpoint padding handles short clips without shifting segment timing.
-The output remains float32 with the rounded sample count for the original
-duration. Same-rate input is copied without filtering; upsampling retains linear
-interpolation.
+applies a centered NumPy low-pass filter to reduce high-frequency noise folding
+into Whisper's speech band, without shifting segment timing. Short clips use
+endpoint padding; upsampling retains linear interpolation.
 
-For 16 kHz output, the initial quality targets are amplitude within 1 dB through
-6 kHz and at least 40 dB rejection from 9 kHz upward within the source frequency
-range. The transition region near the 8 kHz output limit is not a brick-wall
-cutoff. Frequency tests measure the steady-state response away from padded clip
-edges, where transients can remain. These signal checks do not establish equal
-recognition accuracy across recording rates.
-
-An initial local measurement with Python 3.12 and NumPy 2.5.4 swept one-second
-tones in 100 Hz steps through the passband and stopband at 32, 44.1, and 48 kHz.
-Excluding 10 ms at each clip edge, the largest passband loss was 0.54 dB and the
-weakest stopband rejection was 75 dB. Median conversion times over three runs,
-including filtering and interpolation but excluding input generation, were
-0.9-1.4 ms for one-second clips, 26-45 ms for 30-second clips, and 267-426 ms for
-300-second clips. These are machine-specific measurements, not latency guarantees.
-
-Peak normalization after resampling remains unchanged. It preserves the relative
-noise reduction in mixed speech and noise, but can amplify the remaining signal
-in noise-only clips. Normalization, noise suppression, and recognition accuracy
-evaluation are tracked separately in [issue #85](https://github.com/laceyp99/murmur/issues/85).
+Peak normalization remains unchanged and can amplify residual noise in noise-only
+clips. Normalization, noise suppression, and recognition accuracy evaluation are
+tracked separately in [issue #85](https://github.com/laceyp99/murmur/issues/85).
 
 ### Finalization
 
