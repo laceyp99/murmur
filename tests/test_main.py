@@ -142,6 +142,13 @@ class FakeRecorder:
         self.block_callback = None
         self.block_callback_error_handler = None
         self.recording_limit_callback = None
+        self.close_calls = 0
+
+    def prepare(self):
+        return False
+
+    def close(self):
+        self.close_calls += 1
 
     def stop_recording(self):
         self.stop_calls += 1
@@ -307,6 +314,7 @@ def make_start_app(config, hotkey_manager):
     app.logger = FakeLogger()
     app.notifications = FakeNotifications()
     app._running = False
+    app.recorder = FakeRecorder(None)
     app._shutdown_event = threading.Event()
     app._on_recording_start = lambda: None
     app._on_recording_stop = lambda: None
@@ -533,6 +541,31 @@ def test_live_transcription_callback_stdout_omits_transcript_text(capsys):
     assert "Live segment failed: id=7 attempts=2" in stdout
     assert "private live chunk" not in stdout
     assert "leaked in exception" not in stdout
+
+
+@pytest.mark.parametrize("warmup_fails", [False, True])
+def test_optional_microphone_warmup_precedes_hotkey_registration(warmup_fails):
+    config = FakeStartupConfig(DEFAULT_CONFIG["hotkey"])
+    manager = FakeStartupHotkeyManager(config, lambda hotkey: True)
+    app = make_start_app(config, manager)
+    prepared = []
+
+    def prepare():
+        assert manager.register_calls == []
+        prepared.append(True)
+        if warmup_fails:
+            raise OSError("device not ready")
+        return True
+
+    app.recorder.prepare = prepare
+    app.start()
+
+    assert prepared == [True]
+    assert manager.register_calls == [DEFAULT_CONFIG["hotkey"]]
+    assert app.notifications.messages[-1] == (
+        "murmur",
+        "Ready! Press hotkey to start recording.",
+    )
 
 
 def test_start_recovers_from_invalid_configured_hotkey(monkeypatch):
@@ -2517,6 +2550,30 @@ def test_failed_start_does_not_release_session_claimed_by_cancellation(monkeypat
     assert app.recorder.stop_calls == 1
 
 
+def test_exit_closes_microphone_before_waiting_for_session_teardown(monkeypatch):
+    app = make_stop_app(None)
+    app.hotkey_manager.unregister = lambda: None
+    app.tray.stop = lambda: None
+    waiting, release = threading.Event(), threading.Event()
+
+    def wait_for_teardown():
+        assert app.recorder.close_calls == 1
+        waiting.set()
+        assert release.wait(2)
+
+    monkeypatch.setattr(app, "_finish_recording_stop", wait_for_teardown)
+    shutdown = threading.Thread(target=app.stop)
+    shutdown.start()
+    try:
+        assert waiting.wait(2)
+        assert shutdown.is_alive()
+        assert app.recorder.close_calls == 1
+    finally:
+        release.set()
+        shutdown.join(2)
+    assert not shutdown.is_alive()
+
+
 def test_stop_app_closes_overlay(overlay_calls):
     app = make_stop_app(None)
     app._running = True
@@ -2527,3 +2584,4 @@ def test_stop_app_closes_overlay(overlay_calls):
     app.stop()
 
     assert overlay_calls == ["close"]
+    assert app.recorder.close_calls == 1

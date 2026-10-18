@@ -107,8 +107,14 @@ live callback is active.
 
 Capture starts before live worker setup and optional media handling. Live VAD
 receives buffered opening blocks before fresh audio. Worker setup failures use
-the full recording for offline finalization. The microphone closes between
-sessions.
+the full recording for offline finalization.
+
+By default the microphone opens on the hotkey and closes after each session.
+With **Keep microphone ready**, the stream opens at startup, before hotkey
+registration, and idle callbacks are dropped without copying. The hotkey then
+records from the running stream, trimming the first block to the activation
+time when the driver reports timestamps. Stop keeps a healthy stream open; Exit
+closes it before model teardown.
 
 At stream start, the shared input resolver tries the saved microphone, then the
 current Windows default if the preferred input is missing or cannot open. It
@@ -116,7 +122,8 @@ keeps the saved preference during fallback. A device choice made during a
 recording applies to the next recording. If the stream stops unexpectedly,
 Murmur ends capture and attempts to finalize audio already in the full buffer.
 It then refreshes PortAudio's device list. Settings Refresh also refreshes the
-backend, but waits for an active stream to close before doing so.
+backend, but waits for an active stream to close before doing so. An idle
+ready stream closes on Refresh and reopens at the next recording.
 Stream status queries share the backend lock with stream closure and refresh.
 A failed status query ends capture through the same audio-preserving error path
 as an unexpected stream stop. Capture-error callbacks carry the originating

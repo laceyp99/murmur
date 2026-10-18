@@ -142,6 +142,13 @@ class MurmurApp:
         recovery_message = None
         should_retry_registration = False
 
+        # Optional warmup finishes before hotkeys can begin a session. Failure
+        # leaves ordinary on-demand recording available.
+        try:
+            self.recorder.prepare()
+        except Exception:
+            print("Warning: Could not keep microphone ready; using on-demand capture")
+
         # Register hotkey
         success = self.hotkey_manager.register(
             on_start=self._on_recording_start,
@@ -265,6 +272,12 @@ class MurmurApp:
             self.hotkey_manager.unregister()
         with contextlib.suppress(Exception):
             self.tray.stop()
+        # Release even an idle persistent stream before model work can delay
+        # shutdown. close() also prevents an in-flight warmup from reopening it.
+        try:
+            self.recorder.close()
+        except Exception:
+            print("Warning: Failed to close microphone during shutdown")
         if should_stop:
             self._finish_recording_stop()
         else:

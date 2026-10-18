@@ -75,6 +75,7 @@ sequenceDiagram
 
 The recorder callback is intentionally narrow:
 
+- Discard idle audio when an optional ready stream is open.
 - Append the current block to the full recording buffer.
 - Enforce the configured maximum recording duration.
 - Forward the block to live VAD if a callback is registered.

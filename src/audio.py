@@ -16,7 +16,12 @@ except (ImportError, OSError):
     sd = None
 
 from .config import Config, get_config
-from .input_devices import input_backend, input_status, open_input_stream
+from .input_devices import (
+    input_backend,
+    input_status,
+    open_input_stream,
+    resolve_input_device,
+)
 
 DEFAULT_MAX_RECORDING_DURATION = 300
 
@@ -35,6 +40,9 @@ class AudioRecorder:
 
     def __init__(self, config: Config | None = None):
         self.config = config or get_config()
+        self._keep_microphone_ready = bool(
+            self.config.get("keep_microphone_ready", False)
+        )
         self.sample_rate = self.config.get("sample_rate", 16000)
         self.max_recording_duration = self._parse_max_recording_duration(
             self.config.get("max_recording_duration", DEFAULT_MAX_RECORDING_DURATION)
@@ -55,6 +63,83 @@ class AudioRecorder:
         self._recording_limit_reached = False
         self._on_capture_error: Callable[[str], None] | None = None
         self._capture_error_reported = False
+        self._lifecycle_lock = threading.RLock()
+        self._closed = False
+        self._first_callback = threading.Event()
+        self._selection = None
+        self._activation_time = None
+        self._prepare_timeout = 3.0
+
+    def _keep_ready(self) -> bool:
+        return self._keep_microphone_ready
+
+    def prepare(self) -> bool:
+        """Warm the optional idle input, waiting for actual microphone callbacks."""
+        with self._lifecycle_lock:
+            if self._closed or not self._keep_ready():
+                return False
+            try:
+                self._start_recording(preparing=True)
+                ready = self._first_callback.wait(self._prepare_timeout)
+                if not ready or self._closed or not self._stream.active:
+                    self._release_stream()
+                    self._report_readiness_failure()
+                    return False
+                return True
+            except Exception:
+                with contextlib.suppress(Exception):
+                    self._release_stream()
+                self._report_readiness_failure()
+                return False
+
+    def _report_readiness_failure(self) -> None:
+        if not self._closed:
+            message = "Microphone readiness failed; microphone will open on demand."
+            input_status.set_error(message)
+            print(message)
+
+    def close(self) -> None:
+        """Permanently release this recorder, including its idle microphone."""
+        self._closed = True
+        self._first_callback.set()
+        with self._lifecycle_lock:
+            with self._lock:
+                self._recording = False
+            self._release_stream()
+
+    def _release_stream(self) -> None:
+        with input_backend.lock:
+            stream, self._stream = self._stream, None
+            self._selection = None
+            self._first_callback.clear()
+            if input_status.get_status().error is None:
+                input_status.clear_active()
+            if stream is not None:
+                with contextlib.suppress(Exception):
+                    stream.stop()
+                with contextlib.suppress(Exception):
+                    stream.close()
+                input_backend.stream_closed()
+
+    def _reuse_ready_stream(self) -> bool:
+        with input_backend.lock:
+            if self._stream is None:
+                return False
+            try:
+                valid = (
+                    self._keep_ready()
+                    and not input_backend.refresh_pending
+                    and self._stream.active
+                    and self._selection
+                    == resolve_input_device(
+                        self.config.get("microphone", None), backend=sd
+                    )
+                )
+            except Exception:
+                valid = False
+            if not valid:
+                self._release_stream()
+            return valid
 
     def _parse_max_recording_duration(self, raw_duration) -> float:
         """Return a positive recording limit, falling back to the default."""
@@ -108,21 +193,39 @@ class AudioRecorder:
 
     def start_recording(self):
         """Start recording audio."""
+        with self._lifecycle_lock:
+            self._start_recording()
+
+    def _start_recording(self, *, preparing=False):
+        if self._closed:
+            raise RuntimeError("Audio recorder is closed")
+        with self._lock:
+            if self._recording:
+                return
         if sd is None:
             raise RuntimeError(
                 "sounddevice/PortAudio is unavailable; install PortAudio before recording"
             )
 
+        reusable = self._reuse_ready_stream()
         with self._lock:
             if self._recording:
                 return
 
-            self._recording = True
+            self._activation_time = None
+            if reusable and not preparing:
+                with contextlib.suppress(Exception):
+                    self._activation_time = float(self._stream.time)
+            self._recording = not preparing
             self._audio_data = []
             self._recording_start = time.time()
             self._block_callback_failed = False
             self._recording_limit_reached = False
             self._capture_error_reported = False
+
+        if reusable:
+            return
+        self._first_callback.clear()
 
         input_status.clear_active()
 
@@ -134,15 +237,20 @@ class AudioRecorder:
 
             def make_stream(**kwargs):
                 nonlocal callback_state
+                self._first_callback.clear()
                 callback_lock = threading.RLock()
                 buffered = []
                 state = {"lock": callback_lock, "buffered": buffered, "ready": False}
                 callback_state = state
 
                 def candidate_callback(indata, frames, time_info, status):
+                    self._first_callback.set()
                     with callback_lock:
                         if not state["ready"]:
-                            buffered.append((indata.copy(), frames, time_info, status))
+                            if not preparing:
+                                buffered.append(
+                                    (indata.copy(), frames, time_info, status)
+                                )
                         else:
                             self._audio_callback(indata, frames, time_info, status)
 
@@ -163,6 +271,7 @@ class AudioRecorder:
                 )
                 input_backend.stream_opened()
                 self._stream = stream
+                self._selection = selection
                 input_status.set_active(selection)
                 with callback_state["lock"]:
                     for block, frames, time_info, status in callback_state["buffered"]:
@@ -184,12 +293,25 @@ class AudioRecorder:
             # PortAudio status queries must not overlap close or reinitialize.
             with input_backend.lock:
                 with self._lock:
-                    if not self._recording or self._stream is not stream:
+                    if self._stream is not stream:
                         return
+                    recording = self._recording
                 try:
                     active = stream.active
                 except Exception:
                     active = False
+                refresh_idle = not recording and input_backend.refresh_pending
+            if not recording and (not active or refresh_idle):
+                with self._lifecycle_lock, input_backend.lock:
+                    with self._lock:
+                        if self._stream is not stream or self._recording:
+                            continue
+                    if not active:
+                        input_backend.mark_stale()
+                    with contextlib.suppress(Exception):
+                        self._release_stream()
+                    input_status.clear_active()
+                return
             if not active:
                 self._report_capture_error(
                     "Microphone disconnected or stopped", stream=stream
@@ -231,6 +353,10 @@ class AudioRecorder:
                     input_backend.stream_closed()
 
     def stop_recording(self) -> AudioData | None:
+        with self._lifecycle_lock:
+            return self._stop_recording()
+
+    def _stop_recording(self) -> AudioData | None:
         """
         Stop recording and return the audio data.
 
@@ -244,7 +370,14 @@ class AudioRecorder:
 
         refresh_failed = False
         with input_backend.lock:
-            stream, self._stream = self._stream, None
+            keep = False
+            if self._keep_ready() and not self._capture_error_reported:
+                with contextlib.suppress(Exception):
+                    keep = self._stream is not None and self._stream.active
+                keep = keep and not input_backend.refresh_pending and not self._closed
+            stream = None if keep else self._stream
+            if not keep:
+                self._stream = None
             if stream:
                 with contextlib.suppress(Exception):
                     stream.stop()
@@ -255,7 +388,7 @@ class AudioRecorder:
                 except Exception as exc:
                     refresh_failed = True
                     input_status.set_error(f"Microphone refresh failed: {exc}")
-        if not self._capture_error_reported and not refresh_failed:
+        if not keep and not self._capture_error_reported and not refresh_failed:
             input_status.clear_active()
 
         with self._lock:
@@ -302,6 +435,20 @@ class AudioRecorder:
         with self._lock:
             if not self._recording:
                 return
+
+            activation = getattr(self, "_activation_time", None)
+            if activation is not None:
+                try:
+                    adc_time = float(time_info.inputBufferAdcTime)
+                    if np.isfinite(adc_time) and adc_time > 0:
+                        trim = max(
+                            0, int(np.ceil((activation - adc_time) * self.sample_rate))
+                        )
+                        indata = indata[min(trim, len(indata)) :]
+                except (AttributeError, TypeError, ValueError):
+                    pass
+                if not len(indata):
+                    return
 
             samples_recorded = sum(block.shape[0] for block in self._audio_data)
             max_samples = getattr(self, "_max_recording_samples", None)

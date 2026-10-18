@@ -676,6 +676,9 @@ class SettingsWindow:
         self.pause_media_var = tk.BooleanVar(
             master=self.root, value=self.config.pause_media_while_recording
         )
+        self.keep_microphone_ready_var = tk.BooleanVar(
+            master=self.root, value=self.config.keep_microphone_ready
+        )
         self.ollama_enabled_var = tk.BooleanVar(
             master=self.root, value=self.config.ollama_enabled
         )
@@ -699,6 +702,7 @@ class SettingsWindow:
                 "enable_logging": self.logging_var,
                 "start_with_windows": self.autostart_var,
                 "pause_media_while_recording": self.pause_media_var,
+                "keep_microphone_ready": self.keep_microphone_ready_var,
                 "ollama_enabled": self.ollama_enabled_var,
                 "ollama_endpoint": self.ollama_endpoint_var,
                 "ollama_model_name": self.ollama_model_name_var,
@@ -717,6 +721,12 @@ class SettingsWindow:
             5,
             "Pause media while recording",
             self.pause_media_var,
+        )
+        self._add_switch(
+            general,
+            6,
+            "Keep microphone ready",
+            self.keep_microphone_ready_var,
         )
 
         vad = tab_contents["VAD"]
@@ -1377,6 +1387,7 @@ class SettingsWindow:
             "enable_logging": new_logging,
             "start_with_windows": new_autostart,
             "pause_media_while_recording": self.pause_media_var.get(),
+            "keep_microphone_ready": self.keep_microphone_ready_var.get(),
             "ollama_enabled": new_ollama_enabled,
             "ollama_endpoint": new_ollama_endpoint,
             "ollama_model_name": new_ollama_model_name,

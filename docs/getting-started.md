@@ -205,8 +205,10 @@ The recording pill appears after the microphone starts successfully. A failed
 start shows a short error instead. Other errors, such as `No speech detected`,
 also appear in the pill.
 
-The microphone closes between recordings. Optional media pausing runs after
-capture starts, so a little background playback may enter the opening audio.
+By default, the microphone opens on the hotkey and closes between recordings.
+If your first words get cut off, turn on **Settings > General > Keep microphone
+ready** and restart. Optional media pausing runs after capture starts, so a
+little background playback may enter the opening audio.
 
 The overlay does not take focus. Turn it off with **Settings > General > Show
 recording overlay**. With it disabled, the tray status changes from

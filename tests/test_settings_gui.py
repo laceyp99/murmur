@@ -775,6 +775,7 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     window.overlay_var = FakeValue(False)
     window.logging_var = FakeValue(True)
     window.pause_media_var = FakeValue(False)
+    window.keep_microphone_ready_var = FakeValue(True)
     window.autostart_var = FakeValue(True)
     window.ollama_enabled_var = FakeValue(True)
     window.ollama_endpoint_var = FakeValue(" http://localhost:11434 ")
@@ -799,6 +800,7 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
         ("enable_logging", True),
         ("start_with_windows", True),
         ("pause_media_while_recording", False),
+        ("keep_microphone_ready", True),
         ("ollama_enabled", True),
         ("ollama_endpoint", "http://localhost:11434"),
         ("ollama_model_name", "granite4.1:3b"),
@@ -816,6 +818,7 @@ def test_save_stamps_logging_consent_and_enables_logger(monkeypatch):
     assert set_autostart_calls == [True]
     assert len(info_calls) == 1
     assert "Device" in info_calls[0][0][1]
+    assert "Keep microphone ready" in info_calls[0][0][1]
     assert info_calls[0][1] == {"parent": window.root}
 
 
@@ -856,6 +859,7 @@ def test_save_rejects_invalid_hotkey_without_persisting_changes(monkeypatch):
     window.overlay_var = FakeValue(True)
     window.logging_var = FakeValue(False)
     window.pause_media_var = FakeValue(True)
+    window.keep_microphone_ready_var = FakeValue(False)
     window.autostart_var = FakeValue(False)
     window.ollama_enabled_var = FakeValue(True)
     window.ollama_endpoint_var = FakeValue("http://localhost:11434")
@@ -904,6 +908,7 @@ def test_save_rejects_non_numeric_setting_and_restores_persisted_value(monkeypat
     window.overlay_var = FakeValue(True)
     window.logging_var = FakeValue(False)
     window.pause_media_var = FakeValue(True)
+    window.keep_microphone_ready_var = FakeValue(False)
     window.autostart_var = FakeValue(False)
     window.ollama_enabled_var = FakeValue(True)
     window.ollama_endpoint_var = FakeValue("http://localhost:11434")
@@ -951,6 +956,7 @@ def test_save_rejects_non_finite_numeric_setting(monkeypatch):
     window.overlay_var = FakeValue(True)
     window.logging_var = FakeValue(False)
     window.pause_media_var = FakeValue(True)
+    window.keep_microphone_ready_var = FakeValue(False)
     window.autostart_var = FakeValue(False)
     window.ollama_enabled_var = FakeValue(True)
     window.ollama_endpoint_var = FakeValue("http://localhost:11434")
@@ -1006,6 +1012,7 @@ def test_save_rejects_blank_ollama_settings_when_cleanup_enabled(
     window.overlay_var = FakeValue(True)
     window.logging_var = FakeValue(False)
     window.pause_media_var = FakeValue(True)
+    window.keep_microphone_ready_var = FakeValue(False)
     window.autostart_var = FakeValue(False)
     window.ollama_enabled_var = FakeValue(True)
     window.ollama_endpoint_var = FakeValue(endpoint)
@@ -1122,6 +1129,7 @@ def test_save_accepts_supported_or_auto_detect_language(monkeypatch, language):
     window.overlay_var = FakeValue(True)
     window.logging_var = FakeValue(False)
     window.pause_media_var = FakeValue(True)
+    window.keep_microphone_ready_var = FakeValue(False)
     window.autostart_var = FakeValue(False)
     window.ollama_enabled_var = FakeValue(False)
     window.ollama_endpoint_var = FakeValue("")
@@ -1157,6 +1165,15 @@ def test_reset_tab_to_defaults_preserves_other_tab_edits():
     window._reset_tab_to_defaults("VAD")
 
     assert hotkey_var.get() == "ctrl+alt+p"
+    assert vad_var.get() == "220"
+    assert model_var.get() == "large"
+
+    window.keep_microphone_ready_var = FakeValue(True)
+    window.setting_vars["keep_microphone_ready"] = window.keep_microphone_ready_var
+    window._refresh_microphones = lambda preference: None
+    window._reset_tab_to_defaults("General")
+
+    assert window.keep_microphone_ready_var.get() is False
     assert vad_var.get() == "220"
     assert model_var.get() == "large"
 

@@ -94,6 +94,11 @@ class InputBackendState:
         with self.lock:
             self._refresh_pending = True
 
+    @property
+    def refresh_pending(self) -> bool:
+        with self.lock:
+            return self._refresh_pending
+
     def request_refresh(self) -> bool:
         """Refresh now, or defer until the current stream closes."""
         with self.lock:
