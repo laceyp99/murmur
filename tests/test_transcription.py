@@ -67,7 +67,9 @@ class FakeLLMPostProcessor:
         return True
 
 
-@pytest.mark.parametrize("sample_rate", [8000, 16000, 32000, 44100, 48000])
+@pytest.mark.parametrize(
+    "sample_rate", [8000, 16000, 22050, 24000, 32000, 44100, 48000, 96000]
+)
 @pytest.mark.parametrize("entrypoint", ["transcribe", "transcribe_segments", "live"])
 def test_transcription_preserves_waveform_duration_and_pitch(sample_rate, entrypoint):
     # A one-second tone must remain one second at the same frequency for Whisper.

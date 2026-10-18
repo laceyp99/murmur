@@ -62,7 +62,7 @@ _OPTIONAL_STRING_KEYS = {
 }
 _INTEGER_RANGES = {
     # Sounddevice rates span legacy telephony through high-resolution audio.
-    "sample_rate": (8000, 192000),
+    "sample_rate": (8000, 96000),
     "vad_aggressiveness": (0, 3),
     "vad_padding_ms": (50, 800),
     "vad_silence_duration_ms": (100, 1500),

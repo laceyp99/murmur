@@ -4,7 +4,7 @@ import pytest
 from src.vad_audio import resample_audio
 
 
-@pytest.mark.parametrize("source_rate", [32000, 44100, 48000])
+@pytest.mark.parametrize("source_rate", [32000, 44100, 48000, 96000])
 @pytest.mark.parametrize("frequency", [440, 3000, 6000])
 def test_downsampling_preserves_passband_amplitude(source_rate, frequency):
     positions = np.arange(source_rate) / source_rate
@@ -16,7 +16,7 @@ def test_downsampling_preserves_passband_amplitude(source_rate, frequency):
     assert abs(gain_db) <= 1.0
 
 
-@pytest.mark.parametrize("source_rate", [32000, 44100, 48000])
+@pytest.mark.parametrize("source_rate", [32000, 44100, 48000, 96000])
 @pytest.mark.parametrize("frequency", [9000, 9200, 12000, 15000])
 def test_downsampling_rejects_frequencies_above_target_nyquist(source_rate, frequency):
     positions = np.arange(source_rate) / source_rate

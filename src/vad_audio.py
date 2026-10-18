@@ -24,8 +24,8 @@ def resample_audio(audio: np.ndarray, source_rate: int, target_rate: int) -> np.
     target_length = max(1, round(mono_audio.size * target_rate / source_rate))
     if source_rate > target_rate:
         # Scale the filter with the rate ratio so its transition stays similar
-        # across source rates. At 16 kHz output it preserves speech through
-        # 6 kHz and rejects noise from 9 kHz upward by at least 40 dB.
+        # across source rates. Linear interpolation below can still attenuate
+        # the upper speech band at lower source rates (tracked in issue #85).
         half_width = int(np.ceil(16 * source_rate / target_rate))
         offsets = np.arange(-half_width, half_width + 1, dtype=np.float64)
         cutoff = 0.45 * target_rate / source_rate

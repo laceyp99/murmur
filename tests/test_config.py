@@ -134,6 +134,9 @@ def test_config_recovers_from_invalid_utf8_bytes(tmp_path, monkeypatch):
         ("sample_rate", -16000),
         ("sample_rate", 16000.5),
         ("sample_rate", True),
+        ("sample_rate", 96001),
+        ("sample_rate", 176400),
+        ("sample_rate", 192000),
         ("max_recording_duration", math.inf),
         ("max_recording_duration", -math.inf),
         ("max_recording_duration", math.nan),
@@ -182,13 +185,16 @@ def test_invalid_known_values_are_backed_up_and_repaired(
     assert len(list(config_dir.glob("config.corrupt*.json"))) == 1
 
 
-def test_valid_custom_config_values_are_preserved(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "sample_rate", [8000, 16000, 22050, 24000, 44100, 48000, 96000]
+)
+def test_valid_custom_config_values_are_preserved(tmp_path, monkeypatch, sample_rate):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     config_dir = tmp_path / "murmur"
     config_dir.mkdir()
     config_file = config_dir / "config.json"
     values = {
-        "sample_rate": 44100,
+        "sample_rate": sample_rate,
         "model": "custom-whisper-model",
         "ollama_model_name": "custom:latest",
         "max_recording_duration": 45.5,

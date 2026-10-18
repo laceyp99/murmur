@@ -158,7 +158,7 @@ resample to Whisper's 16 kHz rate before amplitude normalization and inference.
 resampling for 16 kHz input. The original waveform and segment timing metadata
 remain at the recording rate, preserving the full recording for fallback.
 
-Recording defaults to 16 kHz, but other configured rates remain supported when
+Recording defaults to 16 kHz and accepts configured rates from 8 to 96 kHz when
 the input device accepts them. Live VAD supports 8, 16, 32, and 48 kHz; other
 rates use the offline fallback. Higher recording rates use larger buffers and
 require conversion before inference. Before downsampling, the shared resampler
@@ -169,6 +169,8 @@ endpoint padding; upsampling retains linear interpolation.
 Peak normalization remains unchanged and can amplify residual noise in noise-only
 clips. Normalization, noise suppression, and recognition accuracy evaluation are
 tracked separately in [issue #85](https://github.com/laceyp99/murmur/issues/85).
+The supported 22.05 and 24 kHz rates are accepted exceptions to the initial
+1 dB amplitude target through 6 kHz; improved fidelity is also deferred to #85.
 
 ### Finalization
 
