@@ -104,7 +104,7 @@ objects:
 flowchart LR
     AudioData["Full AudioData.audio"] --> Resample{"Sample rate supported by WebRTC?"}
     Resample -->|yes| VadAudio["Use original waveform"]
-    Resample -->|no| Resampled["Resample to VAD sample rate"]
+    Resample -->|no| Resampled["Resample to VAD sample rate<br/>low-pass before downsampling"]
     Resampled --> Frames["Generate 20 ms frames"]
     VadAudio --> Frames
     Frames --> Detect["_detect_segments"]
@@ -114,7 +114,9 @@ flowchart LR
 ```
 
 Offline VAD can resample unsupported source rates for analysis and then map
-segment bounds back to the original waveform. Live VAD currently requires a
+segment bounds back to the original waveform. Analysis uses the shared resampler,
+which low-pass filters before downsampling; the returned segments retain the
+original recording samples. Live VAD currently requires a
 WebRTC-supported sample rate because it processes frames continuously as audio
 arrives. If live VAD cannot start, recording continues with the full audio
 buffer and the stop-time offline fallback.
