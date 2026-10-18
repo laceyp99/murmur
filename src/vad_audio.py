@@ -14,19 +14,41 @@ def float32_to_pcm16(audio: np.ndarray) -> bytes:
 
 
 def resample_audio(audio: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:
-    """Resample mono float32 audio with linear interpolation."""
+    """Resample mono audio, low-pass filtering before any rate reduction."""
+    if source_rate <= 0 or target_rate <= 0:
+        raise ValueError("sample rates must be positive")
     mono_audio = np.asarray(audio, dtype=np.float32).reshape(-1)
     if mono_audio.size == 0 or source_rate == target_rate:
         return mono_audio.copy()
 
     target_length = max(1, round(mono_audio.size * target_rate / source_rate))
-    source_positions = np.arange(mono_audio.size, dtype=np.float32)
-    target_positions = np.linspace(
-        0,
-        mono_audio.size - 1,
-        num=target_length,
-        dtype=np.float32,
-    )
+    if source_rate > target_rate:
+        # Scale the filter with the rate ratio so its transition stays similar
+        # across source rates. Linear interpolation below can still attenuate
+        # the upper speech band at lower source rates (tracked in issue #85).
+        half_width = int(np.ceil(16 * source_rate / target_rate))
+        offsets = np.arange(-half_width, half_width + 1, dtype=np.float64)
+        cutoff = 0.45 * target_rate / source_rate
+        kernel = 2 * cutoff * np.sinc(2 * cutoff * offsets)
+        kernel *= np.blackman(kernel.size)
+        kernel /= kernel.sum()
+
+        # Center the filter to avoid shifting segment boundaries. Extending the
+        # endpoint values also preserves DC, even for clips shorter than the filter.
+        padded_audio = np.pad(mono_audio, (half_width, half_width), mode="edge")
+        mono_audio = np.convolve(padded_audio, kernel.astype(np.float32), mode="valid")
+        source_positions = np.arange(mono_audio.size, dtype=np.float64)
+        target_positions = (
+            np.arange(target_length, dtype=np.float64) * source_rate / target_rate
+        )
+    else:
+        source_positions = np.arange(mono_audio.size, dtype=np.float32)
+        target_positions = np.linspace(
+            0,
+            mono_audio.size - 1,
+            num=target_length,
+            dtype=np.float32,
+        )
     resampled_audio = np.interp(target_positions, source_positions, mono_audio)
     return np.asarray(resampled_audio, dtype=np.float32)
 

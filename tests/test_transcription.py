@@ -67,7 +67,9 @@ class FakeLLMPostProcessor:
         return True
 
 
-@pytest.mark.parametrize("sample_rate", [8000, 16000, 32000, 44100, 48000])
+@pytest.mark.parametrize(
+    "sample_rate", [8000, 16000, 22050, 24000, 32000, 44100, 48000, 96000]
+)
 @pytest.mark.parametrize("entrypoint", ["transcribe", "transcribe_segments", "live"])
 def test_transcription_preserves_waveform_duration_and_pitch(sample_rate, entrypoint):
     # A one-second tone must remain one second at the same frequency for Whisper.
@@ -104,6 +106,45 @@ def test_transcription_preserves_waveform_duration_and_pitch(sample_rate, entryp
     np.testing.assert_array_equal(audio, original_audio)
     if sample_rate == 16000:
         np.testing.assert_array_equal(prepared_audio, audio / np.max(np.abs(audio)))
+
+
+@pytest.mark.parametrize("entrypoint", ["transcribe", "transcribe_segments", "live"])
+def test_transcription_rejects_high_frequency_noise_before_normalization(entrypoint):
+    sample_rate = 48000
+    positions = np.arange(sample_rate) / sample_rate
+    audio = (
+        0.2 * np.sin(2 * np.pi * 1000 * positions)
+        + 0.6 * np.sin(2 * np.pi * 12000 * positions)
+    ).astype(np.float32)
+    original_audio = audio.copy()
+    model = FakeModel(["hello"])
+    transcriber = Transcriber(config=FakeConfig(), model=model, device="cpu")
+    clip = AudioData(audio=audio, sample_rate=sample_rate, duration=1.0)
+
+    if entrypoint == "transcribe":
+        transcriber.transcribe(clip)
+    elif entrypoint == "transcribe_segments":
+        transcriber.transcribe_segments([clip])
+    else:
+        transcriber.transcribe_segment(
+            LiveSpeechSegment(
+                start_sample=0,
+                end_sample=sample_rate,
+                sample_rate=sample_rate,
+                audio=audio,
+                segment_id=0,
+            )
+        )
+
+    prepared_audio = model.calls[0]["audio"]
+    assert np.max(np.abs(prepared_audio)) == pytest.approx(1.0)
+    # Measure an integer number of periods away from the padded boundaries.
+    spectrum = np.abs(np.fft.rfft(prepared_audio[160:-160]))
+    retained_tone = spectrum[980]
+    folded_noise = spectrum[3920]  # 12 kHz folds to 4 kHz at 16 kHz.
+    assert retained_tone > 1000
+    assert folded_noise / retained_tone <= 0.03
+    np.testing.assert_array_equal(audio, original_audio)
 
 
 @pytest.mark.parametrize("sample_rate", [8000, 16000, 48000])

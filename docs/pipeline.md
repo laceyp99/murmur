@@ -46,7 +46,7 @@ flowchart LR
 
     LiveVad --> Frames["20 ms VAD frames"]
     Frames --> SpeechSegments["Sealed live speech segments"]
-    SpeechSegments --> LivePrepare["Resample to 16 kHz + normalize"]
+    SpeechSegments --> LivePrepare["Resample to 16 kHz<br/>low-pass before downsampling + normalize"]
     LivePrepare --> LiveWhisper["Serial live Whisper transcription"]
     LiveWhisper --> Accumulator["TranscriptAccumulator"]
 
@@ -60,9 +60,9 @@ flowchart LR
     LiveDecision -->|no or degraded| Offline["Fallback from full AudioData"]
     FullBuffer --> Offline
     Offline --> OfflineVad{"Offline VAD available and finds speech?"}
-    OfflineVad -->|yes| OfflinePrepare["Resample segments to 16 kHz + normalize"]
+    OfflineVad -->|yes| OfflinePrepare["Resample segments to 16 kHz<br/>low-pass before downsampling + normalize"]
     OfflinePrepare --> OfflineWhisper["Whisper segment transcription"]
-    OfflineVad -->|no| FullPrepare["Resample full clip to 16 kHz + normalize"]
+    OfflineVad -->|no| FullPrepare["Resample full clip to 16 kHz<br/>low-pass before downsampling + normalize"]
     FullPrepare --> FullClip["Whisper full clip"]
     OfflineWhisper --> OfflineCleanup["transcribe_segments<br/>Whisper + join + cleanup"]
     FullClip --> OfflineCleanup
@@ -158,12 +158,17 @@ resample to Whisper's 16 kHz rate before amplitude normalization and inference.
 resampling for 16 kHz input. The original waveform and segment timing metadata
 remain at the recording rate, preserving the full recording for fallback.
 
-Recording defaults to 16 kHz, but other configured rates remain supported when
+Recording defaults to 16 kHz and accepts configured rates from 8 to 96 kHz when
 the input device accepts them. Live VAD supports 8, 16, 32, and 48 kHz; other
 rates use the offline fallback. Higher recording rates use larger buffers and
-require conversion before inference. The shared resampler uses linear
-interpolation without an anti-aliasing filter, so this conversion preserves
-timing but is not a guarantee of equal recognition quality across rates.
+require conversion before inference. Before downsampling, the shared resampler
+applies a centered NumPy low-pass filter to reduce high-frequency noise folding
+into Whisper's speech band, without shifting segment timing. Short clips use
+endpoint padding; upsampling retains linear interpolation.
+
+Peak normalization remains unchanged and can amplify residual noise in noise-only
+clips. Conversion from the supported 22.05 and 24 kHz rates can attenuate
+6 kHz audio by more than 1 dB.
 
 ### Finalization
 

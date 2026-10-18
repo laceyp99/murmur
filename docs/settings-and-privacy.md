@@ -102,7 +102,7 @@ The active file stays in place until the replacement is written successfully,
 so a failed repair can be retried on the next launch. Blank Ollama endpoint and
 model fields are allowed while Ollama cleanup is disabled.
 
-Saved sample rates must be integers from 8,000 to 192,000 Hz. Recording limits
+Saved sample rates must be integers from 8,000 to 96,000 Hz. Recording limits
 must be finite numbers from 30 to 1,800 seconds; fractional seconds are supported.
 VAD values and Ollama timeouts use the bounds shown in Settings. Out-of-range
 saved values reset to defaults rather than being clamped.
