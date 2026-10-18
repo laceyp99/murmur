@@ -234,21 +234,21 @@ class Config:
         for key in sorted(invalid_keys):
             setting = SETTINGS_BY_KEY.get(key)
             label = setting.label if setting else key.replace("_", " ").capitalize()
+            label = label.removeprefix("Enable ")
+            label = label[0].upper() + label[1:]
             value = self._config[key]
             if type(value) is bool:
                 value = "on" if value else "off"
             elif value is None:
                 value = "not set"
             elif key == "sample_rate":
-                value = f"{value} Hz"
+                value = f"{value:,} Hz"
             elif key.endswith("_ms"):
                 value = f"{value} ms"
             elif key in {"max_recording_duration", "ollama_timeout_seconds"}:
                 value = f"{value} seconds"
-            changes.append(f"{label}: {value}.")
-        return "\n".join(changes) + (
-            "\nYour other valid settings were kept. Your original file was backed up."
-        )
+            changes.append(f"{label}: {value}")
+        return "; ".join(changes) + (".\nOther settings kept. Original file backed up.")
 
     def _save(self):
         """Save configuration to file."""

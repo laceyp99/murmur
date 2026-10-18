@@ -171,8 +171,8 @@ def test_invalid_known_values_are_backed_up_and_repaired(
     notice = cfg.consume_startup_notice()
     setting = SETTINGS_BY_KEY.get(invalid_key)
     label = setting.label if setting else invalid_key.replace("_", " ").capitalize()
-    assert label in notice
-    assert "Your other valid settings were kept" in notice
+    assert label.removeprefix("Enable ").casefold() in notice.casefold()
+    assert "Other settings kept" in notice
     backups = list(config_dir.glob("config.corrupt*.json"))
     assert len(backups) == 1
     assert backups[0].read_text(encoding="utf-8") == json.dumps(original)
@@ -331,7 +331,7 @@ def test_invalid_ollama_enablement_disables_cleanup(
 
     assert repaired.ollama_enabled is False
     assert repaired.ollama_endpoint == saved["ollama_endpoint"]
-    assert "Enable Ollama cleanup: off" in repaired.consume_startup_notice()
+    assert "Ollama cleanup: off" in repaired.consume_startup_notice()
     assert (
         json.loads(cfg.config_file.read_text(encoding="utf-8"))["ollama_enabled"]
         is False
@@ -356,8 +356,8 @@ def test_recovery_notice_stays_available_until_dismissed_without_saving(
     settings = repaired.get_all()
 
     notice = repaired.get_startup_notice()
-    assert "Sample rate: 16000" in notice
-    assert "Enable Ollama cleanup: off" in notice
+    assert "Sample rate: 16,000 Hz" in notice
+    assert "Ollama cleanup: off" in notice
     assert repaired.get_startup_notice() == notice
     assert repaired.consume_startup_notice() == notice
     assert repaired.get_startup_notice() is None

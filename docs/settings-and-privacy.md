@@ -84,8 +84,9 @@ and keeps a repair notice for the next time you open Settings during that run.
 Before runtime components start, murmur also checks the types and numeric ranges
 of saved settings. Invalid fields return to their defaults while valid settings
 and unknown keys are preserved. The original file is backed up using the same
-`config.corrupt-*.json` naming pattern. A banner above the Settings tabs names the
-repaired settings and their replacement values, even when notifications are off.
+`config.corrupt-*.json` naming pattern. A compact amber warning banner above the
+Settings tabs names the repaired settings and their replacement values, even
+when notifications are off.
 It has only a **Dismiss** action. Closing Settings without dismissing the banner
 keeps it for the next Settings visit during the same app run. Dismiss clears the
 notice without saving or changing settings. The banner does not open Settings

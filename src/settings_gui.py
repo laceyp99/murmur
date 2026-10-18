@@ -820,31 +820,46 @@ class SettingsWindow:
         ctk.CTkButton(button_bar, text="Save", command=self._save).grid(row=0, column=2)
 
     def _add_startup_notice(self, row):
-        banner = ctk.CTkFrame(self.root)
+        banner = ctk.CTkFrame(
+            self.root,
+            fg_color=("#FFF4D6", "#3A2C13"),
+            border_color=("#B7791F", "#A87928"),
+            border_width=1,
+        )
         banner.grid(row=row, column=0, sticky="ew", padx=24, pady=(4, 4))
         banner.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
             banner,
-            text="Some saved settings were repaired",
-            font=ctk.CTkFont(size=16, weight="bold"),
+            text="⚠ Settings were repaired",
+            text_color=("#704400", "#FFD27F"),
+            font=ctk.CTkFont(size=15, weight="bold"),
             anchor="w",
-        ).grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 2))
-        notice_text = ctk.CTkTextbox(
-            banner,
-            height=96,
-            wrap="word",
-            fg_color="transparent",
-            border_width=0,
-        )
-        notice_text.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 4))
-        notice_text.insert("1.0", self._startup_notice)
-        notice_text.configure(state="disabled")
+        ).grid(row=0, column=0, sticky="ew", padx=(12, 8), pady=(8, 2))
         ctk.CTkButton(
             banner,
             text="Dismiss",
             command=self._dismiss_startup_notice,
-            width=90,
-        ).grid(row=2, column=0, sticky="e", padx=16, pady=(4, 12))
+            width=76,
+            height=26,
+            fg_color="transparent",
+            text_color=("#704400", "#FFD27F"),
+            border_color=("#B7791F", "#A87928"),
+            border_width=1,
+            hover_color=("#F0DCA9", "#57421E"),
+        ).grid(row=0, column=1, sticky="ne", padx=(8, 12), pady=(8, 2))
+        notice_text = ctk.CTkTextbox(
+            banner,
+            height=52,
+            wrap="word",
+            fg_color="transparent",
+            text_color=("#5D431B", "#F1D8AA"),
+            border_width=0,
+        )
+        notice_text.grid(
+            row=1, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 8)
+        )
+        notice_text.insert("1.0", self._startup_notice)
+        notice_text.configure(state="disabled")
         self._startup_notice_banner = banner
 
     def _dismiss_startup_notice(self):

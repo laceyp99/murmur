@@ -174,18 +174,19 @@ def test_startup_notice_banner_shows_body_and_dismisses_without_saving(monkeypat
 
     window._add_startup_notice(row=1)
 
-    assert created["labels"][0].kwargs["text"] == "Some saved settings were repaired"
+    assert created["labels"][0].kwargs["text"] == "⚠ Settings were repaired"
     textbox = created["textboxes"][0]
     assert textbox.kwargs == {
-        "height": 96,
+        "height": 52,
         "wrap": "word",
         "fg_color": "transparent",
+        "text_color": ("#5D431B", "#F1D8AA"),
         "border_width": 0,
     }
     assert textbox.inserted == ("1.0", config.startup_notice)
     assert textbox.configured == {"state": "disabled"}
     assert [button.kwargs["text"] for button in created["buttons"]] == ["Dismiss"]
-    assert created["buttons"][0].grid_args["row"] == 2
+    assert created["buttons"][0].grid_args["row"] == 0
     assert config.set_calls == []
     assert config.consume_calls == 0
     banner = window._startup_notice_banner
