@@ -310,7 +310,6 @@ class AudioRecorder:
                         input_backend.mark_stale()
                     with contextlib.suppress(Exception):
                         self._release_stream()
-                    input_status.clear_active()
                 return
             if not active:
                 self._report_capture_error(

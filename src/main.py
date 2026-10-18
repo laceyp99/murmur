@@ -381,12 +381,13 @@ class MurmurApp:
             thread = threading.Thread(
                 target=self._pause_media_for_session, args=(request,), daemon=True
             )
+            # Track before starting so teardown always joins a running pause.
+            self._media_pause_thread = thread
             try:
                 thread.start()
             except RuntimeError:
+                self._media_pause_thread = None
                 print("Warning: Could not start media pause worker")
-            else:
-                self._media_pause_thread = thread
 
     def _media_pause_allowed(self, request: RecordingRequest) -> bool:
         """Do not start a media pause after this recording has begun stopping."""
