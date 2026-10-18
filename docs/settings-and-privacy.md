@@ -106,8 +106,6 @@ Saved sample rates must be integers from 8,000 to 96,000 Hz. Recording limits
 must be finite numbers from 30 to 1,800 seconds; fractional seconds are supported.
 VAD values and Ollama timeouts use the bounds shown in Settings. Out-of-range
 saved values reset to defaults rather than being clamped.
-Existing sample rates above 96 kHz, including 192 kHz, are backed up and reset
-to the 16 kHz default on launch using the same recovery behavior.
 
 ### Advanced manual configuration
 

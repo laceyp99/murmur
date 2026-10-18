@@ -167,10 +167,8 @@ into Whisper's speech band, without shifting segment timing. Short clips use
 endpoint padding; upsampling retains linear interpolation.
 
 Peak normalization remains unchanged and can amplify residual noise in noise-only
-clips. Normalization, noise suppression, and recognition accuracy evaluation are
-tracked separately in [issue #85](https://github.com/laceyp99/murmur/issues/85).
-The supported 22.05 and 24 kHz rates are accepted exceptions to the initial
-1 dB amplitude target through 6 kHz; improved fidelity is also deferred to #85.
+clips. Conversion from the supported 22.05 and 24 kHz rates can attenuate
+6 kHz audio by more than 1 dB.
 
 ### Finalization
 
