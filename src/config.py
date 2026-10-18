@@ -52,6 +52,7 @@ _BOOLEAN_KEYS = {
     "show_recording_overlay",
     "start_with_windows",
     "pause_media_while_recording",
+    "keep_microphone_ready",
     "ollama_enabled",
     "ollama_preload_model",
 }

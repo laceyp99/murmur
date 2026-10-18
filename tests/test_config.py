@@ -132,6 +132,7 @@ def test_config_recovers_from_invalid_utf8_bytes(tmp_path, monkeypatch):
         ("enable_logging", 0),
         ("enable_logging", 1),
         ("enable_logging", None),
+        ("keep_microphone_ready", "false"),
         ("sample_rate", None),
         ("sample_rate", 0),
         ("sample_rate", -16000),

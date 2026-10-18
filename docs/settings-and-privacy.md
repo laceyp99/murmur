@@ -78,8 +78,9 @@ cut off when you speak right after the hotkey. Murmur then keeps the microphone
 open while it runs, so the Windows microphone indicator stays on. Idle audio is
 discarded and never reaches VAD, transcription, or training-data logging. If
 the microphone does not start within three seconds at launch, Murmur falls back
-to opening it on each hotkey press. Refresh or a device change closes the idle
-stream; the next recording reopens it.
+to opening it on each hotkey press. Refresh or an unplugged microphone closes
+the idle stream, and the next recording reopens it. A new microphone choice
+takes effect at the next hotkey press.
 
 ## Persistent configuration
 
