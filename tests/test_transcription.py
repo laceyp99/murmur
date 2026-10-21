@@ -9,6 +9,7 @@ pytest.importorskip("whisper")
 from src.audio import AudioData
 from src.cancellation import TranscriptionCancelledError
 from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
+from src.llm_postprocess import LLMPostProcessor, OllamaClient
 from src.transcription import (
     LOGPROB_THRESHOLD,
     NO_SPEECH_THRESHOLD,
@@ -530,6 +531,36 @@ def test_finalize_segment_texts_sends_boundary_neutral_text_to_llm():
     assert fake_processor.calls == [
         "This should keep flowing even after whisper split it."
     ]
+
+
+def test_transcribe_preserves_whisper_text_when_ollama_content_is_null(capsys):
+    class NullContentClient:
+        def chat(self, **kwargs):
+            return {
+                "message": {"content": None},
+                "done": True,
+                "done_reason": "stop",
+            }
+
+    config = FakeConfig()
+    config.ollama_enabled = True
+    processor = LLMPostProcessor(
+        OllamaClient(
+            config.ollama_endpoint, config.ollama_model_name, client=NullContentClient()
+        )
+    )
+    transcriber = Transcriber(
+        config=config,
+        model=FakeModel(["invoice is $100, due May 5"]),
+        device="cpu",
+        llm_post_processor=processor,
+    )
+    audio = AudioData(
+        audio=np.ones(16000, dtype=np.float32), sample_rate=16000, duration=1.0
+    )
+
+    assert transcriber.transcribe(audio) == "Invoice is $100, due May 5."
+    assert "Invoice" not in capsys.readouterr().out
 
 
 def test_finalize_text_falls_back_when_llm_post_processor_fails():

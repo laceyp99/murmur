@@ -101,7 +101,9 @@ flowchart TB
     Budget -->|no| ReturnLocal
     Budget -->|yes| Ollama["Ollama chat request"]
     Ollama --> Completion{"done=true and done_reason=stop?"}
-    Completion -->|yes| Normalize["Normalize model output"]
+    Completion -->|yes| Content{"Message content is a string?"}
+    Content -->|yes| Normalize["Normalize model output"]
+    Content -->|no| ReturnLocal
     Completion -->|no| ReturnLocal
     Normalize --> Gate{"Acceptable output?"}
     Gate -->|yes| ReturnLLM["Return LLM cleaned text"]
@@ -116,6 +118,11 @@ for both dictionary and SDK-object responses. Output-limit completion
 (`done_reason="length"`), unfinished responses, and missing or unknown completion
 metadata return the locally cleaned transcript through the existing failure
 fallback. No partial model text is accepted or logged.
+
+Message content must be a string for both dictionary and SDK-object responses.
+Null and other non-string values are treated as empty output, so the existing
+acceptance gate retains the locally cleaned Whisper transcript without logging
+the response content.
 
 The completed LLM output is accepted only if it still looks like transcript
 text. The gate rejects output when it is:
