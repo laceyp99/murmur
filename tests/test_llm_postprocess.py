@@ -238,6 +238,50 @@ def test_llm_post_processor_requires_a_normal_completion(
         assert "Ollama post-processing failed" in output
 
 
+@pytest.mark.parametrize("response_kind", ["dict", "object-mapping", "sdk"])
+@pytest.mark.parametrize(
+    "content",
+    [None, 0, False, 1.5, {"private": "response"}, ["private response"], b"private"],
+    ids=["null", "integer", "boolean", "float", "mapping", "list", "bytes"],
+)
+def test_llm_post_processor_preserves_transcript_for_non_string_content(
+    response_kind, content, capsys
+):
+    if response_kind == "dict":
+        response = {
+            "message": {"content": content},
+            "done": True,
+            "done_reason": "stop",
+        }
+    elif response_kind == "object-mapping":
+        response = SimpleNamespace(
+            message={"content": content}, done=True, done_reason="stop"
+        )
+    else:
+        from ollama import ChatResponse, Message
+
+        # Exercise malformed SDK objects without Pydantic coercing the content.
+        response = ChatResponse(
+            message=Message.model_construct(role="assistant", content=content),
+            done=True,
+            done_reason="stop",
+        )
+
+    fake_client = FakeOllamaPackageClient({"response": "ignored"})
+    fake_client.chat_response = response
+    processor = LLMPostProcessor(
+        OllamaClient("http://localhost:11434", MODEL_NAME, client=fake_client)
+    )
+    original = "Invoice is $100, due May 5."
+
+    assert processor.process(original) == original
+    assert len(fake_client.calls) == 1
+    output = capsys.readouterr().out
+    assert "using original transcript" in output
+    assert "Invoice" not in output
+    assert "private" not in output
+
+
 @pytest.mark.parametrize(
     ("done", "done_reason"),
     [(True, None), (False, "stop"), (None, "stop")],

@@ -201,7 +201,8 @@ class OllamaClient:
         if isinstance(response, Mapping):
             message = response.get("message", {})
             if isinstance(message, Mapping):
-                return str(message.get("content", "")).strip()
+                content = message.get("content", "")
+                return content.strip() if isinstance(content, str) else ""
             return ""
 
         message = getattr(response, "message", None)
@@ -209,9 +210,11 @@ class OllamaClient:
             return ""
 
         if isinstance(message, Mapping):
-            return str(message.get("content", "")).strip()
+            content = message.get("content", "")
+        else:
+            content = getattr(message, "content", "")
 
-        return str(getattr(message, "content", "")).strip()
+        return content.strip() if isinstance(content, str) else ""
 
     @staticmethod
     def _extract_model_names(response: Any) -> list[str]:
