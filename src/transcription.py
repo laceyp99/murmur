@@ -159,7 +159,7 @@ class Transcriber:
     def finalize_segment_texts(
         self, segment_texts: Sequence[str], *, cancel_event: Event | None = None
     ) -> str:
-        """Apply boundary-aware segment joining before document-level cleanup."""
+        """Join segments with fewer boundary periods, then clean the document."""
         check_cancelled(cancel_event)
         return self.finalize_text(
             self._join_segment_texts(segment_texts), cancel_event=cancel_event
@@ -350,37 +350,14 @@ class Transcriber:
         return self._fix_common_issues(text)
 
     def _join_segment_texts(self, segment_texts: Sequence[str]) -> str:
-        """Join Whisper chunks while neutralizing artificial VAD boundaries."""
-        normalized_segments: list[str] = []
+        """Remove nonfinal boundary periods while preserving casing and other marks."""
         cleaned_segments = [self._fix_common_issues(text) for text in segment_texts]
         cleaned_segments = [text for text in cleaned_segments if text]
-
-        for index, text in enumerate(cleaned_segments):
-            if index < len(cleaned_segments) - 1:
-                text = self._strip_boundary_sentence_punctuation(text)
-            if index > 0:
-                text = self._lowercase_boundary_start(text)
-            if text:
-                normalized_segments.append(text)
-
-        return self._fix_common_issues(" ".join(normalized_segments))
-
-    def _strip_boundary_sentence_punctuation(self, text: str) -> str:
-        """Remove sentence punctuation added at a non-final chunk boundary."""
-        return re.sub(r"[.!?]+$", "", text).strip()
-
-    def _lowercase_boundary_start(self, text: str) -> str:
-        """Undo likely chunk-start title casing without touching acronyms or I."""
-        match = re.match(r"^(\W*)([A-Z][a-z]+)\b", text)
-        if match is None:
-            return text
-
-        word = match.group(2)
-        if word == "I":
-            return text
-
-        start_index = match.start(2)
-        return f"{text[:start_index]}{word[0].lower()}{text[start_index + 1 :]}"
+        cleaned_segments = [
+            text.rstrip(".") if index < len(cleaned_segments) - 1 else text
+            for index, text in enumerate(cleaned_segments)
+        ]
+        return self._fix_common_issues(" ".join(cleaned_segments))
 
     def _get_audio_duration(self, segment: AudioSegmentLike) -> float:
         """Compute segment duration from the waveform length and sample rate."""

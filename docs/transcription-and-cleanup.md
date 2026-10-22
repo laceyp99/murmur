@@ -49,16 +49,26 @@ flowchart LR
     Chunk1 --> Accumulator
     Chunk2 --> Accumulator
     Accumulator --> Ordered["ordered_chunks() sorted by segment_id"]
-    Ordered --> LiveText["joined live transcript"]
-    LiveText --> Finalize["Transcriber.finalize_text"]
+    Ordered --> Finalize["finalize_segment_texts<br/>remove boundary periods + document cleanup"]
 ```
 
 `TranscriptAccumulator` stores chunks by `segment_id` and returns them in sorted
 order. This makes the output stable even if callback timing changes.
 
 At stop time, the app calls `finalize_segment_texts()` once on the ordered live
-chunk texts. That joins chunks while neutralizing punctuation and capitalization
-artifacts at artificial VAD boundaries, then applies document cleanup.
+chunk texts. As a period-removal experiment, joining strips trailing periods
+from every nonfinal nonempty chunk, preserves supplied casing and other
+punctuation (including question and exclamation marks), and normalizes spacing.
+The offline path uses the same policy. Periods inside a chunk and at the end of
+the final nonempty chunk remain; document cleanup still supplies final punctuation
+when needed.
+
+This reduces sentence breaks caused by pauses but also removes real sentence
+breaks and abbreviation periods at nonfinal chunk endings. Supplied mid-sentence
+capitals remain, including both proper names and unwanted chunk-start capitals.
+Optional Ollama cleanup may make further changes. With Ollama disabled, compare
+the effort of adding intended sentence breaks against deleting unwanted ones
+before deciding whether to keep this policy.
 
 ## Final Cleanup
 
