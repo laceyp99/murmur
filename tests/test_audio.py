@@ -134,6 +134,38 @@ def test_warm_start_crops_only_pre_activation_samples(monkeypatch):
     recorder.close()
 
 
+@pytest.mark.parametrize(
+    ("first_adc_time", "expected_audio", "input_overflowed"),
+    [(9.0, [5, 6], False), (10.0, [3, 4, 5, 6], True)],
+)
+def test_warm_start_overflow_only_flags_audio_retained_after_activation(
+    monkeypatch, first_adc_time, expected_audio, input_overflowed
+):
+    recorder, _ = make_ready_recorder(monkeypatch)
+    assert recorder.prepare()
+    recorder._stream.time = 10.25
+    recorder.start_recording()
+    callback = recorder._stream.kwargs["callback"]
+    callback(
+        np.arange(5).reshape(-1, 1),
+        5,
+        SimpleNamespace(inputBufferAdcTime=first_adc_time),
+        SimpleNamespace(input_overflow=True),
+    )
+    callback(
+        np.array([[5], [6]]),
+        2,
+        SimpleNamespace(inputBufferAdcTime=10.5),
+        None,
+    )
+
+    assert recorder.is_recording()
+    audio = recorder.stop_recording()
+    assert audio.input_overflowed is input_overflowed
+    np.testing.assert_array_equal(audio.audio, expected_audio)
+    recorder.close()
+
+
 def test_prepare_timeout_releases_stream_and_allows_cold_retry(monkeypatch):
     recorder, backend = make_ready_recorder(monkeypatch)
     backend.on_start = None

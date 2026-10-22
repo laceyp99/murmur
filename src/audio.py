@@ -441,9 +441,6 @@ class AudioRecorder:
             if not self._recording:
                 return
 
-            if status and status.input_overflow:
-                self._input_overflowed = True
-
             activation = getattr(self, "_activation_time", None)
             if activation is not None:
                 try:
@@ -457,6 +454,9 @@ class AudioRecorder:
                     pass
                 if not len(indata):
                     return
+
+            if status and status.input_overflow:
+                self._input_overflowed = True
 
             samples_recorded = sum(block.shape[0] for block in self._audio_data)
             max_samples = getattr(self, "_max_recording_samples", None)
