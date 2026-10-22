@@ -1672,6 +1672,46 @@ def test_stop_shows_processing_then_copied(monkeypatch, overlay_calls):
     assert overlay_calls == [("processing", 7, ""), ("success", 7, "")]
 
 
+@pytest.mark.parametrize("live", [False, True])
+def test_overflow_warns_once_at_final_delivery_without_changing_text(
+    monkeypatch, overlay_calls, capsys, live
+):
+    audio = make_audio_data()
+    audio.input_overflowed = True
+    app = make_stop_app(audio)
+    if live:
+        app.live_transcript_accumulator = main_module.TranscriptAccumulator()
+        app.live_transcript_accumulator.add_chunk(
+            SimpleNamespace(segment_id=0, text="private text", latency_seconds=0.1)
+        )
+    else:
+        monkeypatch.setattr(app, "_transcribe_audio", lambda audio: "private text")
+    copied = []
+    monkeypatch.setattr(
+        main_module, "copy_to_clipboard", lambda text: copied.append(text) or True
+    )
+
+    stop_current(app)
+
+    expected = "FINAL:private text" if live else "private text"
+    assert copied == [expected]
+    assert app.logger.entries[0][0] is audio
+    assert app.logger.entries[0][1] == expected
+    assert app.notifications.copied_to_clipboard == 0
+    assert app.notifications.messages == [
+        ("murmur", "Copied. Some audio was lost; review before pasting.")
+    ]
+    assert overlay_calls == [
+        ("processing", 7, ""),
+        ("error", 7, "Copied; audio may be incomplete"),
+    ]
+    stdout = capsys.readouterr().out
+    assert stdout.count("Warning: Microphone input overflow;") == 1
+    assert "private text" not in stdout
+    assert "private text" not in repr(overlay_calls)
+
+
+@pytest.mark.parametrize("input_overflowed", [False, True])
 @pytest.mark.parametrize(
     ("setup", "message"),
     [
@@ -1682,9 +1722,11 @@ def test_stop_shows_processing_then_copied(monkeypatch, overlay_calls):
     ],
 )
 def test_stop_failures_show_fixed_error_without_transcript(
-    monkeypatch, overlay_calls, setup, message
+    monkeypatch, overlay_calls, setup, message, input_overflowed
 ):
-    app = make_stop_app(None if setup == "no_audio" else make_audio_data())
+    audio = make_audio_data()
+    audio.input_overflowed = input_overflowed
+    app = make_stop_app(None if setup == "no_audio" else audio)
     monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: False)
     if setup == "no_speech":
         monkeypatch.setattr(app, "_transcribe_audio", lambda audio_data: "")
@@ -1702,6 +1744,10 @@ def test_stop_failures_show_fixed_error_without_transcript(
     assert overlay_calls[:-1] == expected_processing
     assert "Fallback text" not in repr(overlay_calls)
     assert app.hotkey_manager.idle_calls == 1
+    assert app.notifications.copied_to_clipboard == 0
+    assert not any(
+        "Some audio was lost" in msg for _, msg in app.notifications.messages
+    )
 
 
 def test_live_finalization_error_reports_before_returning_to_idle(
@@ -1777,8 +1823,13 @@ def test_overlay_failure_does_not_interrupt_dictation(monkeypatch, capsys):
     assert "Recording overlay request failed." in capsys.readouterr().out
 
 
-def test_cancel_capture_discards_session_and_resumes_media(monkeypatch, overlay_calls):
-    app = make_stop_app(make_audio_data())
+@pytest.mark.parametrize("input_overflowed", [False, True])
+def test_cancel_capture_discards_session_and_resumes_media(
+    monkeypatch, overlay_calls, input_overflowed
+):
+    audio = make_audio_data()
+    audio.input_overflowed = input_overflowed
+    app = make_stop_app(audio)
     app._was_media_playing = True
     copied = []
     monkeypatch.setattr(main_module, "copy_to_clipboard", copied.append)

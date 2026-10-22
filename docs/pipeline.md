@@ -43,6 +43,9 @@ flowchart LR
     Recorder --> Blocks["100 ms float32 audio blocks"]
     Blocks --> FullBuffer["Full recording buffer"]
     Blocks --> LiveVad
+    Recorder --> Overflow["Input overflow: keep recording,<br/>latch capture-integrity warning"]
+    Overflow -.-> Notify
+    Overflow -.-> OverlayResult
 
     LiveVad --> Frames["20 ms VAD frames"]
     Frames --> SpeechSegments["Sealed live speech segments"]
@@ -128,6 +131,19 @@ Stream status queries share the backend lock with stream closure and refresh.
 A failed status query ends capture through the same audio-preserving error path
 as an unexpected stream stop. Capture-error callbacks carry the originating
 session number so a delayed error cannot finalize a newer recording.
+
+Input overflow is handled separately from a stopped stream. The callback latches
+an `input_overflowed` flag for the current recording and continues storing and
+forwarding delivered audio blocks. Stop includes the flag in `AudioData`, so it
+survives both live and offline finalization. Repeated overflows produce one
+content-safe console warning at finalization. The flag resets on the next
+recording, and idle callbacks do not set it.
+
+Overflow means PortAudio already lost some input samples. Offline fallback
+cannot recover those samples, so overflow alone does not force retranscription.
+If copying succeeds, Murmur replaces ordinary success feedback with an
+incomplete-audio warning. Captured audio and clipboard text are preserved;
+warning text is never added to the transcript.
 
 The current recorder block size is 100 ms:
 
@@ -220,7 +236,8 @@ button performs an action. Clicks outside its rounded shape pass through.
 | User cancels before delivery | `Cancelled`, visible until workers finish and for at least 1 second |
 | Exit | Overlay closes; no late recording or result feedback |
 | Final text copied to the clipboard | Checkmark and `Copied to clipboard`, hidden after about 2 seconds |
-| Start failure, no audio, no speech, transcription failure, or clipboard failure | Warning symbol and a fixed short message, hidden after about 4 seconds |
+| Final text copied after input overflow | Warning symbol and `Copied; audio may be incomplete`, hidden after about 3 seconds |
+| Start failure, no audio, no speech, transcription failure, or clipboard failure | Warning symbol and a fixed short message, hidden after about 3 seconds |
 
 The recording bars appear only after `AudioRecorder` has started the input
 stream and startup commits before cancellation; a failed start shows the error
@@ -236,6 +253,12 @@ settings window, and `MurmurApp` only queues requests to it. Any overlay failure
 is contained there and logged once without content, so capture, fallback,
 cleanup, and clipboard output continue unchanged. Optional media pause/resume
 warnings stay in the tray status and console rather than the overlay.
+
+After input overflow, enabled Windows notifications show `Copied. Some audio
+was lost; review before pasting.` instead of the ordinary copied message.
+Overlay and toast settings still apply independently. If both are disabled,
+only the content-safe console warning remains. Failure and cancellation
+feedback takes precedence over the incomplete-copy warning.
 
 ### Cancellation
 

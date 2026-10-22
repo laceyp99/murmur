@@ -205,6 +205,14 @@ The recording pill appears after the microphone starts successfully. A failed
 start shows a short error instead. Other errors, such as `No speech detected`,
 also appear in the pill.
 
+If microphone input overflows, recording continues and Murmur preserves the
+audio it receives. After copying, the pill shows an amber warning and
+`Copied; audio may be incomplete` for about 3 seconds. Review the text before
+pasting. Enabled Windows notifications show `Copied. Some audio was lost;
+review before pasting.` A content-safe console warning is emitted once per
+affected recording at finalization. Other error overlays also hide after about
+3 seconds. Missing audio cannot be recovered by offline transcription.
+
 By default, the microphone opens on the hotkey and closes between recordings.
 If your first words get cut off, turn on **Settings > General > Keep microphone
 ready** and restart. Optional media pausing runs after capture starts, so a

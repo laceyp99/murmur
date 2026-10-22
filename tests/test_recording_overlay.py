@@ -3,7 +3,6 @@ import pytest
 from src import recording_overlay as overlay_module
 from src.recording_overlay import (
     ERROR,
-    ERROR_HIDE_MS,
     HIDDEN,
     PROCESSING,
     RECORDING,
@@ -111,7 +110,13 @@ def test_processing_replaces_recording_animation():
     ("state", "message", "shown_message", "hide_delay"),
     [
         (SUCCESS, "", SUCCESS_MESSAGE, SUCCESS_HIDE_MS),
-        (ERROR, "Transcription failed", "Transcription failed", ERROR_HIDE_MS),
+        (ERROR, "Transcription failed", "Transcription failed", 3000),
+        (
+            ERROR,
+            "Copied; audio may be incomplete",
+            "Copied; audio may be incomplete",
+            3000,
+        ),
     ],
 )
 def test_result_states_stop_animation_and_auto_hide(
