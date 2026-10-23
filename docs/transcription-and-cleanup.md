@@ -49,16 +49,19 @@ flowchart LR
     Chunk1 --> Accumulator
     Chunk2 --> Accumulator
     Accumulator --> Ordered["ordered_chunks() sorted by segment_id"]
-    Ordered --> LiveText["joined live transcript"]
-    LiveText --> Finalize["Transcriber.finalize_text"]
+    Ordered --> Finalize["finalize_segment_texts<br/>remove boundary periods + document cleanup"]
 ```
 
 `TranscriptAccumulator` stores chunks by `segment_id` and returns them in sorted
 order. This makes the output stable even if callback timing changes.
 
-At stop time, the app calls `finalize_segment_texts()` once on the ordered live
-chunk texts. That joins chunks while neutralizing punctuation and capitalization
-artifacts at artificial VAD boundaries, then applies document cleanup.
+At stop time, `finalize_segment_texts()` joins the ordered live chunks and applies
+document cleanup. The offline path uses the same cleanup. Joining skips empty
+chunks, normalizes spacing, and removes trailing periods from nonfinal chunks
+to reduce breaks caused by pauses. Casing and other punctuation are preserved,
+as are periods inside chunks and at the end of the final chunk. Document cleanup
+adds final punctuation when needed. Real sentence breaks and abbreviation periods
+at nonfinal chunk endings are also removed; unwanted capitals can remain.
 
 ## Final Cleanup
 
