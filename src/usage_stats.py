@@ -77,7 +77,6 @@ class SessionMetadata:
     whisper_device: str | None = None
     cleanup_enabled: bool | None = None
     cleanup_model: str | None = None
-    cleanup_used_model: str | None = None
     capture_seconds: float | None = None
     final_word_count: int | None = None
     stop_to_clipboard_seconds: float | None = None
@@ -416,8 +415,8 @@ class UsageStatsService:
     def export_rows(self) -> Future[list[dict]]:
         """CSV-ready dictionaries in EXPORT_COLUMNS order, with sorted JSON issues.
 
-        Unknown values remain None. Model identities are escaped for spreadsheets
-        in the export only. Stage columns start with stage_ to avoid collisions.
+        Unknown values remain None. Values are raw; the CSV writer escapes
+        spreadsheet formulas. Stage columns start with stage_ to avoid collisions.
         """
         return self._request("export")
 
@@ -753,13 +752,10 @@ class UsageStatsService:
                     "whisper_device",
                     "cleanup_enabled",
                     "cleanup_model",
-                    "cleanup_used_model",
                 )
             )
             groups.setdefault(key, []).append(row)
-            cleanups.setdefault(
-                row["cleanup_used_model"] or row["cleanup_model"], []
-            ).append(row)
+            cleanups.setdefault(row["cleanup_model"], []).append(row)
         return {
             "range": "all retained history",
             "sessions": len(rows),
@@ -790,7 +786,6 @@ class UsageStatsService:
                             "whisper_device",
                             "cleanup_enabled",
                             "cleanup_model",
-                            "cleanup_used_model",
                         ),
                         key,
                         strict=True,
@@ -915,14 +910,10 @@ EXPORT_COLUMNS = (
 def _export_row(row):
     """Stable CSV-ready values. Issues use sorted JSON objects with counted codes.
 
-    None is retained for csv.writer to render as an empty cell. Formula-leading
-    model names get an apostrophe only in exported values, never in SQLite.
+    None is retained for csv.writer to render as an empty cell. Values are raw;
+    the CSV writer in settings_gui escapes spreadsheet formulas.
     """
     result = {key: row[key] for key in _SESSION_COLUMNS}
-    for key in ("whisper_model", "cleanup_model", "cleanup_used_model"):
-        value = result[key]
-        if value and value.lstrip().startswith(("=", "+", "-", "@")):
-            result[key] = "'" + value
     for stage in STAGES:
         for field in _STAGE_COLUMNS:
             result[f"stage_{stage}_{field}"] = row["stages"].get(stage, {}).get(field)

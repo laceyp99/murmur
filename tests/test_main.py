@@ -2761,7 +2761,7 @@ def test_statistics_observer_classifies_recovered_cleanup_and_uses_fixed_collect
     assert summary["stages"]["live_whisper"]["count"] == 0
     rows = usage_service.export_rows().result(timeout=3)
     completed = next(row for row in rows if row["outcome"] == "success")
-    assert completed["cleanup_used_model"] == "actual-model"
+    assert completed["cleanup_model"] == "actual-model"
     assert completed["stage_ollama_cleanup_failed_count"] == 1
 
 

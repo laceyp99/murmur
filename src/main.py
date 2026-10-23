@@ -168,14 +168,10 @@ class MurmurApp:
                 metadata = dict(event["metadata"])
                 if "device" in metadata:
                     metadata["whisper_device"] = metadata.pop("device")
-                if metadata.get("cleanup_model"):
-                    metadata["cleanup_used_model"] = metadata["cleanup_model"]
                 collector.update(**metadata)
-                outcome = {
-                    "applied": "success",
-                    "rejected": "failed",
-                    "unavailable": "failed",
-                }.get(event["outcome"], event["outcome"])
+                outcome = (
+                    "failed" if event["outcome"] == "unavailable" else event["outcome"]
+                )
                 collector.stage(
                     stage,
                     outcome,
@@ -185,9 +181,7 @@ class MurmurApp:
                     category = "skip" if outcome == "skipped" else event["category"]
                     collector.issue(
                         stage,
-                        "cleanup_context_skip"
-                        if event["code"] == "cleanup_context_skipped"
-                        else event["code"],
+                        event["code"],
                         category=category
                         if category in {"error", "unavailable", "routing", "skip"}
                         else "error",

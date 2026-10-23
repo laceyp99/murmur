@@ -286,9 +286,10 @@ CSV export has one row per session, fixed headers, run provenance, and counted
 issue codes encoded as deterministic JSON. Each pipeline stage has four
 columns: `stage_<name>_outcome`, `stage_<name>_seconds` (total across
 attempts), `stage_<name>_attempts`, and `stage_<name>_failed_count`. Durations
-are rounded to milliseconds. Missing values become empty cells. Model names that resemble spreadsheet formulas are
-escaped only in the export. File formatting/writing occurs outside the database
-transaction and UI thread. An empty history export writes no file.
+are rounded to milliseconds. Missing values become empty cells. Text values that
+resemble spreadsheet formulas are escaped in the CSV file only, never in the
+database. File formatting/writing occurs outside the database transaction and UI
+thread. An empty history export writes no file.
 
 ## Vocabulary and network boundary
 

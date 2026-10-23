@@ -372,17 +372,15 @@ def test_bounded_nonblocking_snapshots_and_controls(service, monkeypatch):
     assert barrier(service)["sessions"] == 0
 
 
-def test_export_formula_protection_and_fixed_unknown_code(service):
+def test_export_rows_stay_raw_and_unknown_codes_are_fixed(service):
     collector = service.start_session()
-    collector.update(
-        whisper_model="=1+1", cleanup_model=" @bad", cleanup_used_model="-cmd"
-    )
+    collector.update(whisper_model="=1+1", cleanup_model=" @bad")
     collector.issue("capture", "raw secret exception")
     collector.finish("failed")
     row = service.export_rows().result(timeout=5)[0]
-    assert row["whisper_model"] == "'=1+1"
-    assert row["cleanup_model"] == "' @bad"
-    assert row["cleanup_used_model"] == "'-cmd"
+    # Formula escaping belongs to the CSV writer, not the export rows.
+    assert row["whisper_model"] == "=1+1"
+    assert row["cleanup_model"] == " @bad"
     assert json.loads(row["issues"])[0]["code"] == "unknown_error"
     with sqlite3.connect(service.path) as connection:
         payload = connection.execute("SELECT payload FROM sessions").fetchone()[0]

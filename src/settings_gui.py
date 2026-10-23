@@ -198,7 +198,7 @@ def _statistics_view(summary) -> StatisticsView:
             f"{(group.get('whisper_device') or 'unknown').upper()}"
         )
         if group.get("cleanup_enabled"):
-            cleanup = group.get("cleanup_used_model") or group.get("cleanup_model")
+            cleanup = group.get("cleanup_model")
             label += f" + {cleanup or 'unknown'} cleanup"
         sessions = group.get("sessions", 0)
         median = _seconds(group.get("latency", {}).get("median_seconds"))
