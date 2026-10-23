@@ -33,6 +33,7 @@ class AudioData:
     audio: np.ndarray
     sample_rate: int
     duration: float
+    input_overflowed: bool = False
 
 
 class AudioRecorder:
@@ -63,6 +64,7 @@ class AudioRecorder:
         self._recording_limit_reached = False
         self._on_capture_error: Callable[[str], None] | None = None
         self._capture_error_reported = False
+        self._input_overflowed = False
         self._lifecycle_lock = threading.RLock()
         self._closed = False
         self._first_callback = threading.Event()
@@ -222,6 +224,7 @@ class AudioRecorder:
             self._block_callback_failed = False
             self._recording_limit_reached = False
             self._capture_error_reported = False
+            self._input_overflowed = False
 
         if reusable:
             return
@@ -398,7 +401,10 @@ class AudioRecorder:
             duration = len(audio) / self.sample_rate
             self._audio_data = []
             return AudioData(
-                audio=audio, sample_rate=self.sample_rate, duration=duration
+                audio=audio,
+                sample_rate=self.sample_rate,
+                duration=duration,
+                input_overflowed=self._input_overflowed,
             )
 
     def is_recording(self) -> bool:
@@ -448,6 +454,9 @@ class AudioRecorder:
                     pass
                 if not len(indata):
                     return
+
+            if status and status.input_overflow:
+                self._input_overflowed = True
 
             samples_recorded = sum(block.shape[0] for block in self._audio_data)
             max_samples = getattr(self, "_max_recording_samples", None)

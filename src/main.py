@@ -48,6 +48,7 @@ OVERLAY_NO_AUDIO = "No audio captured"
 OVERLAY_NO_SPEECH = "No speech detected"
 OVERLAY_TRANSCRIPTION_FAILED = "Transcription failed"
 OVERLAY_CLIPBOARD_FAILED = "Couldn't copy to clipboard"
+OVERLAY_AUDIO_INCOMPLETE = "Copied; some audio lost"
 
 
 class MurmurApp:
@@ -638,6 +639,11 @@ class MurmurApp:
     ) -> None:
         """Finalize stop-time output from the live transcript, or fall back offline."""
         check_cancelled(self._cancel_event)
+        if audio_data.input_overflowed:
+            print(
+                "Warning: Microphone input overflow; some audio was lost. "
+                "Finalizing captured audio; transcript may be incomplete."
+            )
         if self._live_pipeline_degraded:
             reason = (
                 self._live_pipeline_degraded_reason or "Live transcription degraded"
@@ -790,8 +796,14 @@ class MurmurApp:
         if copied:
             print(f"Finalized in {runtime:.1f}s; copied to clipboard.")
             self._print_live_segment_metrics(live_segment_metrics)
-            self.notifications.notify_transcription_copied()
-            self._show_overlay(SUCCESS)
+            if audio_data.input_overflowed:
+                self.notifications.notify(
+                    "murmur", "Some audio was lost. Check the copied text."
+                )
+                self._show_overlay(ERROR, OVERLAY_AUDIO_INCOMPLETE)
+            else:
+                self.notifications.notify_transcription_copied()
+                self._show_overlay(SUCCESS)
             return
 
         print(f"Finalized in {runtime:.1f}s; failed to copy to clipboard.")

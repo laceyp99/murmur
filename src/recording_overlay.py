@@ -26,7 +26,7 @@ CANCELLED_HIDE_MS = 1000
 
 SUCCESS_MESSAGE = "Copied to clipboard"
 SUCCESS_HIDE_MS = 2000
-ERROR_HIDE_MS = 4000
+ERROR_HIDE_MS = 3000
 ANIMATION_FRAME_MS = 40
 
 # A session's stages only move forward, so a late request cannot rewind it.

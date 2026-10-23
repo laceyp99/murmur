@@ -1,4 +1,5 @@
 import threading
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -130,6 +131,38 @@ def test_warm_start_crops_only_pre_activation_samples(monkeypatch):
     info = type("TimeInfo", (), {"inputBufferAdcTime": 10.0})()
     recorder._stream.kwargs["callback"](np.arange(5).reshape(-1, 1), 5, info, None)
     np.testing.assert_array_equal(recorder.stop_recording().audio, [2, 3, 4])
+    recorder.close()
+
+
+@pytest.mark.parametrize(
+    ("first_adc_time", "expected_audio", "input_overflowed"),
+    [(9.0, [5, 6], False), (10.0, [3, 4, 5, 6], True)],
+)
+def test_warm_start_overflow_only_flags_audio_retained_after_activation(
+    monkeypatch, first_adc_time, expected_audio, input_overflowed
+):
+    recorder, _ = make_ready_recorder(monkeypatch)
+    assert recorder.prepare()
+    recorder._stream.time = 10.25
+    recorder.start_recording()
+    callback = recorder._stream.kwargs["callback"]
+    callback(
+        np.arange(5).reshape(-1, 1),
+        5,
+        SimpleNamespace(inputBufferAdcTime=first_adc_time),
+        SimpleNamespace(input_overflow=True),
+    )
+    callback(
+        np.array([[5], [6]]),
+        2,
+        SimpleNamespace(inputBufferAdcTime=10.5),
+        None,
+    )
+
+    assert recorder.is_recording()
+    audio = recorder.stop_recording()
+    assert audio.input_overflowed is input_overflowed
+    np.testing.assert_array_equal(audio.audio, expected_audio)
     recorder.close()
 
 
@@ -337,6 +370,46 @@ def test_audio_callback_hands_block_to_registered_callback():
     np.testing.assert_array_equal(recorder._audio_data[0], input_block)
     assert len(callback_blocks) == 1
     np.testing.assert_array_equal(callback_blocks[0], input_block)
+
+
+@pytest.mark.parametrize("keep_ready", [False, True])
+def test_input_overflow_preserves_audio_and_resets_next_recording(
+    monkeypatch, keep_ready
+):
+    recorder, backend = make_fake_recorder(monkeypatch)
+    recorder._keep_microphone_ready = keep_ready
+    delivered = []
+    errors = []
+    recorder.set_block_callback(delivered.append)
+    recorder.set_capture_error_callback(errors.append)
+    recorder.start_recording()
+    callback = backend.streams[-1].kwargs["callback"]
+    block = np.array([[0.1], [-0.2]], dtype=np.float32)
+    overflow = SimpleNamespace(input_overflow=True)
+
+    for status in (overflow, overflow, None):
+        callback(block, 2, None, status)
+
+    assert recorder.is_recording()
+    assert errors == []
+    assert len(delivered) == 3
+    audio = recorder.stop_recording()
+    assert audio.input_overflowed is True
+    np.testing.assert_array_equal(audio.audio, np.tile(block.flatten(), 3))
+    for delivered_block in delivered:
+        np.testing.assert_array_equal(delivered_block, block)
+
+    # Idle overflow callbacks on a ready stream must not taint the next session.
+    callback(block, 2, None, overflow)
+    recorder.start_recording()
+    backend.streams[-1].kwargs["callback"](
+        block, 2, None, SimpleNamespace(input_overflow=False)
+    )
+    clean_audio = recorder.stop_recording()
+    assert clean_audio.input_overflowed is False
+    assert audio.input_overflowed is True
+    np.testing.assert_array_equal(clean_audio.audio, block.flatten())
+    recorder.close()
 
 
 def test_audio_callback_logs_error_once_disables_callback_and_keeps_recording(capsys):
