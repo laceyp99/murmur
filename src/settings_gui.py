@@ -1693,10 +1693,11 @@ class SettingsWindow:
             return
         if messagebox.askyesno(
             "Delete Session History",
-            "Permanently delete all dictation session history? This cannot be undone.\n\n"
-            "This removes every recorded session, timing, and issue count. Murmur "
-            "keeps a list of the app versions it has run (no times or session "
-            "details), exported CSV files, and training data.\n\n"
+            "Permanently delete all dictation session history?\n"
+            "This cannot be undone.\n\n"
+            "Removes: every recorded session, timing, and issue count.\n\n"
+            "Keeps: a list of the app versions Murmur has run (no times or "
+            "session details), exported CSV files, and training data.\n\n"
             "Sessions still in progress will not bring deleted history back.",
             parent=self.root,
             icon="warning",
