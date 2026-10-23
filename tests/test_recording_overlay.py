@@ -113,8 +113,8 @@ def test_processing_replaces_recording_animation():
         (ERROR, "Transcription failed", "Transcription failed", 3000),
         (
             ERROR,
-            "Copied; audio may be incomplete",
-            "Copied; audio may be incomplete",
+            "Copied; some audio lost",
+            "Copied; some audio lost",
             3000,
         ),
     ],

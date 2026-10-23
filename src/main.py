@@ -48,7 +48,7 @@ OVERLAY_NO_AUDIO = "No audio captured"
 OVERLAY_NO_SPEECH = "No speech detected"
 OVERLAY_TRANSCRIPTION_FAILED = "Transcription failed"
 OVERLAY_CLIPBOARD_FAILED = "Couldn't copy to clipboard"
-OVERLAY_AUDIO_INCOMPLETE = "Copied; audio may be incomplete"
+OVERLAY_AUDIO_INCOMPLETE = "Copied; some audio lost"
 
 
 class MurmurApp:
@@ -798,7 +798,7 @@ class MurmurApp:
             self._print_live_segment_metrics(live_segment_metrics)
             if audio_data.input_overflowed:
                 self.notifications.notify(
-                    "murmur", "Copied. Some audio was lost; review before pasting."
+                    "murmur", "Some audio was lost. Check the copied text."
                 )
                 self._show_overlay(ERROR, OVERLAY_AUDIO_INCOMPLETE)
             else:

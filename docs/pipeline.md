@@ -236,7 +236,7 @@ button performs an action. Clicks outside its rounded shape pass through.
 | User cancels before delivery | `Cancelled`, visible until workers finish and for at least 1 second |
 | Exit | Overlay closes; no late recording or result feedback |
 | Final text copied to the clipboard | Checkmark and `Copied to clipboard`, hidden after about 2 seconds |
-| Final text copied after input overflow | Warning symbol and `Copied; audio may be incomplete`, hidden after about 3 seconds |
+| Final text copied after input overflow | Warning symbol and `Copied; some audio lost`, hidden after about 3 seconds |
 | Start failure, no audio, no speech, transcription failure, or clipboard failure | Warning symbol and a fixed short message, hidden after about 3 seconds |
 
 The recording bars appear only after `AudioRecorder` has started the input
@@ -254,8 +254,8 @@ is contained there and logged once without content, so capture, fallback,
 cleanup, and clipboard output continue unchanged. Optional media pause/resume
 warnings stay in the tray status and console rather than the overlay.
 
-After input overflow, enabled Windows notifications show `Copied. Some audio
-was lost; review before pasting.` instead of the ordinary copied message.
+After input overflow, enabled Windows notifications show `Some audio was lost.
+Check the copied text.` instead of the ordinary copied message.
 Overlay and toast settings still apply independently. If both are disabled,
 only the content-safe console warning remains. Failure and cancellation
 feedback takes precedence over the incomplete-copy warning.

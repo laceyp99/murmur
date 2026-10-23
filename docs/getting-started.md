@@ -207,9 +207,9 @@ also appear in the pill.
 
 If microphone input overflows, recording continues and Murmur preserves the
 audio it receives. After copying, the pill shows an amber warning and
-`Copied; audio may be incomplete` for about 3 seconds. Review the text before
-pasting. Enabled Windows notifications show `Copied. Some audio was lost;
-review before pasting.` A content-safe console warning is emitted once per
+`Copied; some audio lost` for about 3 seconds. Review the text before
+pasting. Enabled Windows notifications show `Some audio was lost. Check the
+copied text.` A content-safe console warning is emitted once per
 affected recording at finalization. Other error overlays also hide after about
 3 seconds. Missing audio cannot be recovered by offline transcription.
 

@@ -1699,11 +1699,11 @@ def test_overflow_warns_once_at_final_delivery_without_changing_text(
     assert app.logger.entries[0][1] == expected
     assert app.notifications.copied_to_clipboard == 0
     assert app.notifications.messages == [
-        ("murmur", "Copied. Some audio was lost; review before pasting.")
+        ("murmur", "Some audio was lost. Check the copied text.")
     ]
     assert overlay_calls == [
         ("processing", 7, ""),
-        ("error", 7, "Copied; audio may be incomplete"),
+        ("error", 7, "Copied; some audio lost"),
     ]
     stdout = capsys.readouterr().out
     assert stdout.count("Warning: Microphone input overflow;") == 1
