@@ -815,7 +815,7 @@ class MurmurApp:
             raise
         except Exception:
             check_cancelled(self._cancel_event)
-            self._stats("issue", "offline_whisper", "whisper_failed")
+            self._stats("issue_once", "offline_whisper", "whisper_failed")
             self._stats("finish", "failed")
             print("Transcription failed.")
             self.notifications.notify_error("Transcription failed.")

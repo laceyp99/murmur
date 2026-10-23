@@ -236,6 +236,17 @@ class SessionCollector:
             self._issue(stage, code, category, recovered)
             self._publish()
 
+    def issue_once(self, stage, code, category="error"):
+        """Record a terminal issue unless an observer already counted it."""
+        with self._lock:
+            if self._snapshot.outcome != "running" or any(
+                issue.stage == stage and issue.code == code
+                for issue in self._snapshot.issues
+            ):
+                return
+            self._issue(stage, code, category, False)
+            self._publish()
+
     def finish(self, outcome, **allowed_metadata):
         if outcome not in TERMINAL_OUTCOMES:
             raise ValueError("Invalid terminal outcome")
@@ -354,6 +365,10 @@ class UsageStatsService:
             raise ValueError("enabled must be bool")
         with self._state_lock:
             self._enabled = enabled
+            needs_open = enabled and self._generation is None
+        if needs_open:
+            # Open storage before the next session; busy or closed is harmless.
+            self._request("retry")
 
     def start_session(self) -> SessionCollector | None:
         with self._state_lock:
@@ -516,11 +531,13 @@ class UsageStatsService:
                 with self._state_lock:
                     if self._enabled is None:
                         self._enabled = enabled
-            try:
-                connection, run_lock = self._open()
-            except Exception:
-                self._storage_error = "storage_unavailable"
-                self._incomplete = True
+            # Opted-out runs leave no database, run row, or lock file behind.
+            if self._enabled:
+                try:
+                    connection, run_lock = self._open()
+                except Exception:
+                    self._storage_error = "storage_unavailable"
+                    self._incomplete = True
             while True:
                 kind, snapshot, future = self._queue.get()
                 if kind == "close":
@@ -529,9 +546,13 @@ class UsageStatsService:
                 if future is not None:
                     future.set_running_or_notify_cancel()
                 try:
-                    if connection is None:
+                    # Opted out with no history: answer empty without creating it.
+                    rows, gap = [], 0
+                    if connection is None and (self._enabled or self.path.exists()):
                         connection, run_lock = self._open()
-                    if kind == "snapshot":
+                    if connection is None:
+                        pass
+                    elif kind == "snapshot":
                         self._write(connection, snapshot)
                     elif kind == "clear":
                         with connection:
@@ -553,13 +574,11 @@ class UsageStatsService:
                             gap = connection.execute(
                                 "SELECT incomplete FROM metadata"
                             ).fetchone()[0]
-                        self._storage_error = None
-                        result = (
-                            self._summary(rows, gap)
-                            if kind == "summary"
-                            else [_export_row(row) for row in rows]
-                        )
                     self._storage_error = None
+                    if kind == "summary":
+                        result = self._summary(rows, gap)
+                    elif kind == "export":
+                        result = [_export_row(row) for row in rows]
                 except Exception:
                     self._incomplete = True
                     self._storage_error = "storage_unavailable"
@@ -589,6 +608,9 @@ class UsageStatsService:
                 "SELECT generation FROM metadata"
             ).fetchone()[0]
             if generation != snapshot.generation:
+                if self._generation != generation:
+                    # Another instance deleted history; this session is lost.
+                    self._incomplete = True
                 self._generation = generation
                 return
             old = connection.execute(

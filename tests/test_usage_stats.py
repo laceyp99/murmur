@@ -135,6 +135,38 @@ def test_toggle_applies_to_next_session(service):
     assert barrier(service)["sessions"] == 2
 
 
+def test_disabled_run_creates_no_storage_until_enabled(tmp_path):
+    path = tmp_path / "statistics.sqlite3"
+    stats = UsageStatsService(path, enabled=False, provenance={})
+    try:
+        assert barrier(stats)["sessions"] == 0
+        assert stats.export_rows().result(timeout=5) == []
+        stats.clear().result(timeout=5)
+        assert list(tmp_path.iterdir()) == []
+        stats.set_enabled(True)
+        barrier(stats)
+        stats.start_session().finish("success")
+        assert barrier(stats)["counts"]["success"] == 1
+    finally:
+        assert stats.close(timeout=5)
+
+
+def test_cross_instance_delete_marks_lost_session_incomplete(service):
+    other = UsageStatsService(service.path, enabled=True, provenance={})
+    try:
+        barrier(other)
+        service.clear().result(timeout=5)
+        assert barrier(service)["incomplete"] is False
+        other.start_session().finish("success")
+        summary = barrier(other)
+        assert summary["sessions"] == 0
+        assert summary["incomplete"] is True
+        other.start_session().finish("success")
+        assert barrier(other)["sessions"] == 1
+    finally:
+        assert other.close(timeout=5)
+
+
 def test_cross_instance_generation_fences_every_old_snapshot(service):
     other = UsageStatsService(service.path, enabled=True, provenance={})
     try:

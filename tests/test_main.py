@@ -2702,6 +2702,31 @@ def test_statistics_separates_normal_routing_from_error_fallback(
     assert rows[0]["transcription_route"] == "full_clip"
 
 
+@pytest.mark.parametrize("observed", [False, True])
+def test_statistics_counts_one_whisper_failure_once(
+    usage_service, monkeypatch, observed
+):
+    from src.observations import emit_observation
+
+    app = make_app(None, FakeTranscriber())
+    app._stats_session = usage_service.start_session()
+    app.notifications = FakeNotifications()
+    app.hotkey_manager = FakeHotkeyManager()
+
+    def fail_transcription(audio_data):
+        if observed:
+            emit_observation(
+                outcome="failed", seconds=0.1, code="whisper_failed", category="error"
+            )
+        raise RuntimeError("model unavailable")
+
+    monkeypatch.setattr(app, "_transcribe_audio", fail_transcription)
+    app._process_audio(make_audio_data(), finalization_started_at=10.0)
+    summary = usage_service.summary().result(timeout=3)
+    assert summary["counts"]["failed"] == 1
+    assert summary["issues"] == {"whisper_failed": 1}
+
+
 def test_statistics_observer_classifies_recovered_cleanup_and_uses_fixed_collector(
     usage_service,
 ):

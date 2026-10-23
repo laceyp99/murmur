@@ -238,7 +238,8 @@ unavailable Git information report unknown values rather than guessing.
 
 **Save** applies a collection toggle to the next session. A session already
 collecting finishes normally; enabling does not enroll an active session midway.
-Disabling retains existing history. Another running instance needs a restart to
+Disabling retains existing history. A run that starts with collection disabled
+creates no statistics database. Another running instance needs a restart to
 observe the saved toggle because configuration is held in each process.
 Training-data logging remains independently opt-in. A malformed statistics
 boolean repairs to off; whole-file config recovery restores defaults, including
