@@ -244,12 +244,14 @@ def test_clean_close_removes_only_finished_run_lock(tmp_path):
 
 
 def test_startup_prunes_exited_locks_but_keeps_live_owner(service):
+    service.start_session()
+    barrier(service)
     lock_dir = service.path.parent / "statistics.sqlite3.runs"
     (lock_dir / "exited-run.lock").write_bytes(b"\0")
     other = UsageStatsService(service.path, enabled=True, provenance={})
     try:
         barrier(other)
-        assert lock_names(other) == sorted([service.run_id, other.run_id])
+        assert lock_names(other) == [service.run_id]
     finally:
         assert other.close(timeout=5)
 
@@ -263,9 +265,27 @@ def test_reconciled_crash_lock_is_pruned(tmp_path):
     restarted = UsageStatsService(path, enabled=True, provenance={})
     try:
         assert barrier(restarted)["counts"]["interrupted"] == 1
-        assert lock_names(restarted) == [restarted.run_id]
+        assert lock_names(restarted) == []
     finally:
         assert restarted.close(timeout=5)
+
+
+def test_runs_without_sessions_leave_no_run_row_or_lock(tmp_path):
+    path = tmp_path / "statistics.sqlite3"
+    first = UsageStatsService(path, enabled=True, provenance={})
+    barrier(first)
+    first.start_session().finish("success")
+    assert first.close(timeout=5)
+    for enabled in (False, True):
+        idle = UsageStatsService(path, enabled=enabled, provenance={})
+        try:
+            assert barrier(idle)["sessions"] == 1
+            assert lock_names(idle) == []
+        finally:
+            assert idle.close(timeout=5)
+    with sqlite3.connect(path) as connection:
+        runs = connection.execute("SELECT run_id FROM runs").fetchall()
+    assert runs == [(first.run_id,)]
 
 
 def test_uncertain_owner_preserves_active_history(service, monkeypatch):

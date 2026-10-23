@@ -249,11 +249,11 @@ History is retained until explicitly deleted. **Delete Session History** asks
 for confirmation and clears every session, stage timing, and issue count across
 instances. A database generation check rejects old pending writes, so an active
 session cannot restore deleted history. It keeps the list of app versions that
-have run (one row per launch with app version, Git commit, and uncommitted-change
+have run (one row per launch that recorded a session, with app version, Git commit, and uncommitted-change
 flag; no times or session details), training data, and previously exported CSV
 files.
 
-Each run holds a small lock file in `statistics.sqlite3.runs\`. Unfinished
+A run creates a small lock file in `statistics.sqlite3.runs\` and its run record when it records its first session; launches that never record one leave neither. Unfinished
 sessions are marked interrupted on a later launch only when the owning run's
 lock establishes that it exited; live or uncertain owners are preserved. A run
 deletes its own lock file on clean exit when none of its sessions are

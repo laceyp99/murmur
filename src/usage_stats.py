@@ -348,6 +348,8 @@ class UsageStatsService:
         self._incomplete = False
         self._reconciliation_incomplete = False
         self._storage_error = None
+        self._run_lock = None
+        self._lock_dir = self.path.parent / (self.path.name + ".runs")
         self._closed = False
         self._state_lock = threading.Lock()
         self._queue = queue.Queue()
@@ -437,10 +439,10 @@ class UsageStatsService:
         return not self._thread.is_alive()
 
     def _open(self):
+        """Open storage and reconcile crashed runs; this run registers on first write."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        lock_dir = self.path.parent / (self.path.name + ".runs")
+        lock_dir = self._lock_dir
         lock_dir.mkdir(exist_ok=True)
-        run_lock = _RunLock(lock_dir / (self.run_id + ".lock"))
         connection = None
         try:
             connection = sqlite3.connect(self.path, timeout=0.1)
@@ -465,14 +467,6 @@ class UsageStatsService:
                     "CREATE TABLE IF NOT EXISTS issues (session_id TEXT, stage TEXT, code TEXT, category TEXT, recovered INTEGER, count INTEGER, PRIMARY KEY(session_id,stage,code,category,recovered))"
                 )
                 connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-            if self._provenance is None:
-                try:
-                    from .build_info import get_build_info
-
-                    self._provenance = get_build_info()
-                except Exception:
-                    self._provenance = {}
-            info = self._provenance
             with connection:
                 connection.execute("BEGIN IMMEDIATE")
                 generation = connection.execute(
@@ -498,26 +492,30 @@ class UsageStatsService:
                                 "UPDATE sessions SET outcome='interrupted',payload=? WHERE session_id=?",
                                 (json.dumps(data), session_id),
                             )
-                connection.execute(
-                    "INSERT OR IGNORE INTO runs VALUES (?,?,?,?)",
-                    (
-                        self.run_id,
-                        info.get("app_version"),
-                        info.get("git_commit"),
-                        info.get("git_dirty")
-                        if type(info.get("git_dirty")) is bool
-                        else None,
-                    ),
-                )
             self._prune_locks(connection, lock_dir)
             self._generation = generation
             self._storage_error = None
-            return connection, run_lock
+            return connection
         except BaseException:
             if connection is not None:
                 connection.close()
-            run_lock.close()
             raise
+
+    def _register_run(self, connection):
+        """Lock and record this run before its first session row is committed."""
+        if self._run_lock is None:
+            self._run_lock = _RunLock(self._lock_dir / (self.run_id + ".lock"))
+        info = self._provenance or {}
+        dirty = info.get("git_dirty")
+        connection.execute(
+            "INSERT OR IGNORE INTO runs VALUES (?,?,?,?)",
+            (
+                self.run_id,
+                info.get("app_version"),
+                info.get("git_commit"),
+                dirty if type(dirty) is bool else None,
+            ),
+        )
 
     def _prune_locks(self, connection, lock_dir):
         """Delete exited runs' lock files once no unfinished session needs them."""
@@ -537,8 +535,9 @@ class UsageStatsService:
                     with suppress(OSError):
                         path.unlink()
 
-    def _release_lock(self, connection, run_lock):
+    def _release_lock(self, connection):
         """Close this run's lock, deleting it unless a session still needs it."""
+        run_lock = self._run_lock
         try:
             unfinished = connection.execute(
                 "SELECT 1 FROM sessions WHERE run_id=? AND outcome='running'",
@@ -553,7 +552,7 @@ class UsageStatsService:
                 path.unlink()
 
     def _work(self):
-        connection = run_lock = None
+        connection = None
         try:
             if self._enabled is None:
                 from .config import get_config
@@ -565,10 +564,10 @@ class UsageStatsService:
                 with self._state_lock:
                     if self._enabled is None:
                         self._enabled = enabled
-            # Opted-out runs leave no database, run row, or lock file behind.
+            # Opted-out runs create no database; runs register on first session.
             if self._enabled:
                 try:
-                    connection, run_lock = self._open()
+                    connection = self._open()
                 except Exception:
                     self._storage_error = "storage_unavailable"
                     self._incomplete = True
@@ -583,7 +582,7 @@ class UsageStatsService:
                     # Opted out with no history: answer empty without creating it.
                     rows, gap = [], 0
                     if connection is None and (self._enabled or self.path.exists()):
-                        connection, run_lock = self._open()
+                        connection = self._open()
                     if connection is None:
                         pass
                     elif kind == "snapshot":
@@ -630,12 +629,20 @@ class UsageStatsService:
                     else:
                         future.set_result(result)
         finally:
-            if run_lock is not None:
-                self._release_lock(connection, run_lock)
+            if self._run_lock is not None:
+                self._release_lock(connection)
             if connection is not None:
                 connection.close()
 
     def _write(self, connection, snapshot):
+        if self._provenance is None:
+            # Git probes can take seconds; resolve before taking the write lock.
+            try:
+                from .build_info import get_build_info
+
+                self._provenance = get_build_info()
+            except Exception:
+                self._provenance = {}
         with connection:
             connection.execute("BEGIN IMMEDIATE")
             generation = connection.execute(
@@ -653,6 +660,7 @@ class UsageStatsService:
             ).fetchone()
             if old and old[0] != "running":
                 return
+            self._register_run(connection)
             payload = asdict(snapshot)
             payload.pop("stages")
             payload.pop("issues")
