@@ -2,6 +2,7 @@ import hashlib
 import io
 import os
 import runpy
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -120,3 +121,51 @@ def test_packaging_self_check_records_failure(monkeypatch, tmp_path: Path):
     assert "RuntimeError: dependency unavailable" in error_log.read_text(
         encoding="utf-8"
     )
+
+
+def test_startup_freezes_identity_before_desktop_runtime(monkeypatch):
+    from src import build_info
+
+    events = []
+    monkeypatch.setattr(build_info, "get_build_info", lambda: events.append("identity"))
+    monkeypatch.setitem(
+        sys.modules, "src.main", SimpleNamespace(main=lambda: events.append("runtime"))
+    )
+    run._run_app()
+    assert events == ["identity", "runtime"]
+
+
+def test_packaging_self_check_commits_sqlite_transaction(monkeypatch):
+    connect = sqlite3.connect
+    statements = []
+    connections = []
+
+    def open_database(database):
+        assert database == ":memory:"
+        connection = connect(database)
+        connection.set_trace_callback(statements.append)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", open_database)
+    # Stop after the SQLite check, before any model or desktop imports.
+    monkeypatch.setitem(sys.modules, "numpy", None)
+    with pytest.raises(ModuleNotFoundError, match="numpy"):
+        run._run_packaging_self_check()
+    assert "BEGIN " in statements
+    assert "INSERT INTO packaging_check VALUES (1)" in statements
+    assert "COMMIT" in statements
+    assert "SELECT value FROM packaging_check" in statements
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connections[0].execute("SELECT 1")
+
+
+def test_packaging_self_check_reports_sqlite_failure(monkeypatch, tmp_path):
+    def fail(database):
+        raise sqlite3.OperationalError("SQLite unavailable")
+
+    error_log = tmp_path / "error.txt"
+    monkeypatch.setattr(sqlite3, "connect", fail)
+    monkeypatch.setenv("MURMUR_PACKAGING_SELF_CHECK_LOG", str(error_log))
+    assert run._packaging_self_check_exit_code() == 1
+    assert "SQLite unavailable" in error_log.read_text("utf-8")

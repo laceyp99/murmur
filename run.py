@@ -17,6 +17,9 @@ from src.launch import ensure_output_streams as _ensure_output_streams
 
 def _run_app() -> None:
     """Import and start the desktop runtime after handling build-only commands."""
+    from src.build_info import get_build_info
+
+    get_build_info()
     from src.main import main
 
     main()
@@ -24,6 +27,16 @@ def _run_app() -> None:
 
 def _run_packaging_self_check() -> None:
     """Exercise packaged dependencies without starting the desktop runtime."""
+    import sqlite3
+    from contextlib import closing
+
+    with closing(sqlite3.connect(":memory:")) as connection:
+        with connection:
+            connection.execute("CREATE TABLE packaging_check (value INTEGER)")
+            connection.execute("INSERT INTO packaging_check VALUES (1)")
+        if connection.execute("SELECT value FROM packaging_check").fetchone() != (1,):
+            raise RuntimeError("SQLite transaction is unavailable")
+
     import numpy as np
     import torch
     import whisper
