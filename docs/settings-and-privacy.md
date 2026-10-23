@@ -282,9 +282,11 @@ sessions are reconciled.
   Model comparisons include recording length and cleanup context; they measure
   observed performance, not transcription accuracy or causal improvement.
 
-CSV export has one row per session, fixed headers, stage summary columns, run
-provenance, and counted issue codes encoded as deterministic JSON. Missing
-values become empty cells. Model names that resemble spreadsheet formulas are
+CSV export has one row per session, fixed headers, run provenance, and counted
+issue codes encoded as deterministic JSON. Each pipeline stage has four
+columns: `stage_<name>_outcome`, `stage_<name>_seconds` (total across
+attempts), `stage_<name>_attempts`, and `stage_<name>_failed_count`. Durations
+are rounded to milliseconds. Missing values become empty cells. Model names that resemble spreadsheet formulas are
 escaped only in the export. File formatting/writing occurs outside the database
 transaction and UI thread. An empty history export writes no file.
 

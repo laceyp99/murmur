@@ -903,16 +903,8 @@ _SESSION_COLUMNS = (
     "git_commit",
     "git_dirty",
 )
-_STAGE_COLUMNS = (
-    "outcome",
-    "seconds",
-    "success_seconds",
-    "failed_seconds",
-    "attempts",
-    "success_count",
-    "failed_count",
-    "skipped_count",
-)
+# Per-stage export: total seconds across attempts; other counts are derivable.
+_STAGE_COLUMNS = ("outcome", "seconds", "attempts", "failed_count")
 EXPORT_COLUMNS = (
     *_SESSION_COLUMNS,
     *(f"stage_{stage}_{field}" for stage in STAGES for field in _STAGE_COLUMNS),
@@ -934,6 +926,9 @@ def _export_row(row):
     for stage in STAGES:
         for field in _STAGE_COLUMNS:
             result[f"stage_{stage}_{field}"] = row["stages"].get(stage, {}).get(field)
+    for key, value in result.items():
+        if type(value) is float:
+            result[key] = round(value, 3)  # Millisecond precision.
     result["issues"] = json.dumps(row["issues"], sort_keys=True, separators=(",", ":"))
     return result
 

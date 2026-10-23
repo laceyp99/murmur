@@ -79,6 +79,22 @@ def test_terminal_snapshot_is_idempotent_and_unknown_stays_null(service):
     assert row["git_commit"] == "a" * 40
     assert row["git_dirty"] is True
     assert row["stage_clipboard_seconds"] is None
+    assert row["stage_offline_whisper_seconds"] == 5
+    assert row["stage_offline_whisper_attempts"] == 2
+    assert row["stage_offline_whisper_failed_count"] == 1
+
+
+def test_export_rounds_durations_to_milliseconds(service):
+    collector = service.start_session()
+    collector.update(capture_seconds=7.123456)
+    collector.stage("clipboard", "success", seconds=0.0034710000036)
+    collector.finish("success", stop_to_clipboard_seconds=0.9475691000116)
+    barrier(service)
+    row = service.export_rows().result(timeout=5)[0]
+    assert row["capture_seconds"] == 7.123
+    assert row["stage_clipboard_seconds"] == 0.003
+    assert row["stop_to_clipboard_seconds"] == 0.948
+    assert len(EXPORT_COLUMNS) == len(set(EXPORT_COLUMNS))
 
 
 def test_exact_metrics_and_context_groups(service):
