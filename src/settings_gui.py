@@ -1,6 +1,7 @@
 """Settings GUI for murmur using customtkinter."""
 
 import contextlib
+import csv
 import ctypes
 import math
 import queue
@@ -10,7 +11,8 @@ import tkinter as tk
 import weakref
 from ctypes import wintypes
 from datetime import datetime
-from tkinter import messagebox
+from pathlib import Path
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 from PIL import Image
@@ -37,9 +39,112 @@ from .settings_schema import (
     parse_numeric_text,
     settings_for_tab,
 )
+from .usage_stats import EXPORT_COLUMNS, StatisticsBusyError, get_usage_stats
 from .windows_identity import (
     configure_windows_app_identity as _configure_windows_app_identity,
 )
+
+
+def _write_statistics_csv(path, rows):
+    """Write the service's flattened, content-free export outside its transaction."""
+    with Path(path).open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=EXPORT_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            values = {key: row.get(key) for key in EXPORT_COLUMNS}
+            for key, value in values.items():
+                if isinstance(value, str) and (
+                    value.startswith(("\t", "\r", "\n"))
+                    or value.lstrip().startswith(("=", "+", "-", "@"))
+                ):
+                    values[key] = "'" + value
+            writer.writerow(values)
+
+
+def _statistics_text(summary):
+    """Present service aggregates without recalculating metrics in the view."""
+
+    def number(value, unit=""):
+        return "unavailable" if value is None else f"{value:.2f}{unit}"
+
+    def rate(value):
+        return "no data" if value is None else f"{value:.1%}"
+
+    def latency(value):
+        text = (
+            f"median {number(value.get('median_seconds'), ' s')}, "
+            f"p95 {number(value.get('p95_seconds'), ' s')} "
+            f"(n={value.get('count', 0)})"
+        )
+        if value.get("small_sample"):
+            text += "; small sample, fewer than 20 observations"
+        return text
+
+    def stage_text(value):
+        return (
+            f"attempts {value.get('attempts', 0)}, applied/success {value.get('success_count', 0)}, "
+            f"failed {value.get('failed_count', 0)}, skipped {value.get('skipped_count', 0)}; "
+            f"successful work/session {number(value.get('mean_seconds'), ' s')} "
+            f"(n={value.get('seconds_count', 0)}); "
+            f"failed work/session {number(value.get('mean_failed_seconds'), ' s')} "
+            f"(n={value.get('failed_seconds_count', 0)})"
+        )
+
+    lines = ["Range: all retained history"]
+    if not summary.get("storage_available", True):
+        lines.append("Storage unavailable. History may be incomplete; try Refresh.")
+    if not summary.get("enabled", True):
+        lines.append("Collection disabled. Retained history remains available.")
+    if summary.get("incomplete") or summary.get("reconciliation_incomplete"):
+        lines.append(
+            "Incomplete history. Some sessions or measurements may be missing."
+        )
+    if not summary.get("sessions", 0):
+        lines.append("No statistics history yet.")
+    counts = summary.get("counts", {})
+    lines.extend(
+        [
+            f"Sessions {summary.get('sessions', 0)}; active {summary.get('active_sessions', 0)}",
+            f"Success {counts.get('success', 0)}; failed {counts.get('failed', 0)}; "
+            f"success rate {rate(summary.get('success_rate'))} (success / (success + failed))",
+            f"Cancelled {counts.get('cancelled', 0)}; no speech {counts.get('no_speech', 0)}; "
+            f"interrupted {counts.get('interrupted', 0)}",
+            f"Captured {number(summary.get('captured_minutes'), ' min')}; "
+            f"mean recording {number(summary.get('mean_capture_seconds'), ' s')} "
+            f"(n={summary.get('recording_count', 0)}); delivered words {summary.get('delivered_words', 0)}",
+            f"Error-recovery transcription fallback {summary.get('fallback_count', 0)}/"
+            f"{summary.get('fallback_denominator', 0)} ({rate(summary.get('fallback_rate'))}); "
+            f"recovered failures {summary.get('recovered_failures', 0)}",
+            f"Normal offline routing: empty live transcript {summary.get('normal_routing_counts', {}).get('live_empty', 0)}; "
+            f"no speech segments {summary.get('normal_routing_counts', {}).get('vad_no_segments', 0)}",
+            "Successful stop-to-clipboard: " + latency(summary.get("latency", {})),
+            "Stage times may overlap. Recording, inference work, and clipboard wait differ.",
+        ]
+    )
+    for name, value in summary.get("stages", {}).items():
+        lines.append(f"{name.replace('_', ' ').capitalize()}: {stage_text(value)}")
+    lines.append(
+        "Model comparisons are observational and do not measure accuracy or causal speed gains."
+    )
+    for group in summary.get("model_groups", []):
+        context = (
+            (group.get("cleanup_used_model") or group.get("cleanup_model") or "unknown")
+            if group.get("cleanup_enabled")
+            else "disabled"
+        )
+        lines.append(
+            f"Whisper {group.get('whisper_model') or 'unknown'} / "
+            f"{group.get('whisper_device') or 'unknown'}; cleanup {context}; "
+            f"sessions {group.get('sessions', 0)}; recording mean "
+            f"{number(group.get('mean_capture_seconds'), ' s')} (n={group.get('recording_count', 0)}); "
+            f"inference work mean {number(group.get('inference_work_seconds'), ' s')}; "
+            + latency(group.get("latency", {}))
+        )
+    lines.extend(
+        f"Cleanup {group.get('model') or 'unknown'} (device unknown): {stage_text(group)}"
+        for group in summary.get("cleanup_groups", [])
+    )
+    return "\n\n".join(lines)
 
 
 def _format_bytes(size_bytes):
@@ -591,6 +696,8 @@ class SettingsWindow:
         self._ollama_test_button = None
         self._ollama_test_in_progress = False
         self._ollama_test_token = None
+        self._statistics_results = queue.Queue()
+        self._statistics_token = None
 
         self._window_icon = _apply_window_icon(self.root)
 
@@ -691,6 +798,9 @@ class SettingsWindow:
         self.ollama_preload_model_var = tk.BooleanVar(
             master=self.root, value=self.config.ollama_preload_model
         )
+        self.statistics_var = tk.BooleanVar(
+            master=self.root, value=self.config.enable_statistics
+        )
         self.setting_vars.update(
             {
                 "hotkey": self.hotkey_var,
@@ -700,6 +810,7 @@ class SettingsWindow:
                 "enable_notifications": self.notify_var,
                 "show_recording_overlay": self.overlay_var,
                 "enable_logging": self.logging_var,
+                "enable_statistics": self.statistics_var,
                 "start_with_windows": self.autostart_var,
                 "pause_media_while_recording": self.pause_media_var,
                 "keep_microphone_ready": self.keep_microphone_ready_var,
@@ -817,6 +928,8 @@ class SettingsWindow:
             text="Delete Logged Data",
             command=self._purge_training_data,
         ).grid(row=2, column=0, sticky="w", padx=16, pady=(4, 10))
+
+        self._setup_statistics(tab_contents["Statistics"])
 
         for tab_name in TAB_ORDER:
             self._add_tab_reset_button(tab_contents[tab_name], tab_name)
@@ -1268,6 +1381,148 @@ class SettingsWindow:
 
         threading.Thread(target=run, daemon=True).start()
 
+    def _setup_statistics(self, parent):
+        self._add_switch(
+            parent,
+            0,
+            "Collect local statistics",
+            self.statistics_var,
+            "Save applies to future sessions. Current sessions keep their collection choice. "
+            "History is retained until deletion. Training data logging is independent.",
+        )
+        ctk.CTkLabel(
+            parent,
+            text="Local counts, timings, model names and reliability metadata only. "
+            "No audio, dictated text, prompts or endpoints. All retained history is shown.",
+            anchor="w",
+            justify="left",
+            wraplength=560,
+        ).grid(row=1, column=0, sticky="ew", padx=16, pady=8)
+        self._statistics_buttons = []
+        for row, (label, command) in enumerate(
+            (
+                ("Refresh", self._refresh_statistics),
+                ("Export CSV", self._export_statistics),
+                ("Delete Statistics", self._delete_statistics),
+            ),
+            start=2,
+        ):
+            button = ctk.CTkButton(parent, text=label, command=command)
+            button.grid(row=row, column=0, sticky="w", padx=16, pady=4)
+            self._statistics_buttons.append(button)
+        self._statistics_status = ctk.CTkLabel(
+            parent,
+            text="",
+            anchor="w",
+            justify="left",
+            wraplength=560,
+        )
+        self._statistics_status.grid(row=5, column=0, sticky="ew", padx=16, pady=8)
+        self.root.after(0, self._refresh_statistics)
+
+    def _statistics_request(self, operation, path=None):
+        if getattr(self, "_closed", False) or self._statistics_token is not None:
+            return
+        token = threading.Event()
+        self._statistics_token = token
+        results = self._statistics_results
+        self._statistics_status.configure(text="Statistics busy. Working...")
+        for button in self._statistics_buttons:
+            button.configure(state="disabled")
+
+        def work():
+            try:
+                service = get_usage_stats()
+                if operation == "summary":
+                    result = service.summary().result()
+                elif operation == "clear":
+                    result = service.clear().result()
+                else:
+                    rows = service.export_rows().result()
+                    result = len(rows)
+                    if rows and not token.is_set():
+                        _write_statistics_csv(path, rows)
+                results.put((token, operation, result, None))
+            except Exception as exc:
+                results.put((token, operation, None, exc))
+
+        threading.Thread(target=work, daemon=True).start()
+        self.root.after(100, self._poll_statistics_result)
+
+    def _poll_statistics_result(self):
+        if getattr(self, "_closed", False):
+            return
+        while True:
+            try:
+                token, operation, result, error = self._statistics_results.get_nowait()
+            except queue.Empty:
+                break
+            if token is not self._statistics_token or token.is_set():
+                continue
+            self._statistics_token = None
+            for button in self._statistics_buttons:
+                button.configure(state="normal")
+            if error is not None:
+                text = (
+                    "Statistics busy. Try again."
+                    if isinstance(error, StatisticsBusyError)
+                    else "Statistics storage unavailable or operation failed. Try again."
+                )
+                self._statistics_status.configure(text=text)
+                if operation != "summary":
+                    messagebox.showerror(_APP_DISPLAY_NAME, text, parent=self.root)
+            elif operation == "summary":
+                self._statistics_status.configure(text=_statistics_text(result))
+            elif operation == "clear":
+                messagebox.showinfo(
+                    _APP_DISPLAY_NAME, "Statistics deleted.", parent=self.root
+                )
+                self._refresh_statistics()
+                return
+            else:
+                self._statistics_status.configure(
+                    text="Export finished. Refresh to view history."
+                )
+                messagebox.showinfo(
+                    _APP_DISPLAY_NAME,
+                    f"Exported {result} session(s)."
+                    if result
+                    else "No statistics history to export. No file was written.",
+                    parent=self.root,
+                )
+        if self._statistics_token is not None:
+            self.root.after(100, self._poll_statistics_result)
+
+    def _refresh_statistics(self):
+        self._statistics_request("summary")
+
+    def _export_statistics(self):
+        if self._statistics_token is not None:
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Export Statistics",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv")],
+            initialfile="murmur-statistics.csv",
+        )
+        if path:
+            self._statistics_request("export", path)
+
+    def _delete_statistics(self):
+        if self._statistics_token is not None:
+            return
+        if messagebox.askyesno(
+            "Delete Statistics",
+            "Permanently delete all locally stored statistics? This cannot be undone. "
+            "Previously exported CSV files and training data are kept. "
+            "Active sessions will not restore deleted statistics.",
+            parent=self.root,
+            icon="warning",
+            default="no",
+        ):
+            self._statistics_request("clear")
+
     def _purge_training_data(self):
         summary = self.logger.get_storage_summary()
         if summary.file_count == 0:
@@ -1394,6 +1649,9 @@ class SettingsWindow:
             "ollama_preload_model": self.ollama_preload_model_var.get(),
         }
         updated_values.update(numeric_values)
+        statistics_var = getattr(self, "statistics_var", None)
+        if statistics_var is not None:
+            updated_values["enable_statistics"] = statistics_var.get()
 
         restart_settings = self._changed_restart_settings(updated_values)
 
@@ -1412,6 +1670,17 @@ class SettingsWindow:
                 parent=self.root,
             )
             return
+
+        if statistics_var is not None:
+            try:
+                get_usage_stats().set_enabled(updated_values["enable_statistics"])
+            except Exception:
+                messagebox.showwarning(
+                    _APP_DISPLAY_NAME,
+                    "Settings saved, but statistics collection could not be updated. "
+                    "Restart murmur to apply this setting.",
+                    parent=self.root,
+                )
 
         if old_overlay_enabled and not self.overlay_var.get():
             close_overlay()
@@ -1456,6 +1725,10 @@ class SettingsWindow:
             return
 
         self._closed = True
+        statistics_token = getattr(self, "_statistics_token", None)
+        if statistics_token is not None:
+            statistics_token.set()
+        self._statistics_token = None
         window_icon = getattr(self, "_window_icon", None)
         try:
             if window_icon is not None:
