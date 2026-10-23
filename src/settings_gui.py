@@ -10,6 +10,7 @@ import threading
 import tkinter as tk
 import weakref
 from ctypes import wintypes
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -61,90 +62,169 @@ def _write_statistics_csv(path, rows):
             writer.writerow(values)
 
 
-def _statistics_text(summary):
-    """Present service aggregates without recalculating metrics in the view."""
+Row = tuple[str, str]
 
-    def number(value, unit=""):
-        return "unavailable" if value is None else f"{value:.2f}{unit}"
 
-    def rate(value):
-        return "no data" if value is None else f"{value:.1%}"
+@dataclass(frozen=True)
+class StatisticsView:
+    """Display-ready statistics; the Statistics tab renders this without math."""
 
-    def latency(value):
-        text = (
-            f"median {number(value.get('median_seconds'), ' s')}, "
-            f"p95 {number(value.get('p95_seconds'), ' s')} "
-            f"(n={value.get('count', 0)})"
+    notices: tuple[str, ...]
+    empty: tuple[str, str] | None
+    tiles: tuple[Row, ...]
+    sections: tuple[tuple[str, tuple[Row, ...]], ...]
+    footnotes: tuple[str, ...]
+
+
+_STAGE_LABELS = {
+    "capture": "Recording",
+    "preparation": "Preparation",
+    "live_whisper": "Live Whisper",
+    "offline_segmentation": "Offline segmentation",
+    "offline_whisper": "Offline Whisper",
+    "local_cleanup": "Text cleanup",
+    "ollama_cleanup": "Ollama cleanup",
+    "clipboard": "Clipboard",
+}
+
+
+def _seconds(value):
+    if value is None:
+        return "n/a"
+    if value < 0.1:
+        # Quick steps read as zero in seconds; milliseconds show they ran.
+        return "<1 ms" if 0 < value < 0.0005 else f"{value * 1000:.0f} ms"
+    return f"{value:.2f} s" if value < 1 else f"{value:.1f} s"
+
+
+def _percent(value):
+    return "n/a" if value is None else f"{value:.0%}"
+
+
+def _stage_ran(value):
+    return bool(value.get("success_count") or value.get("failed_count"))
+
+
+def _stage_value(value):
+    counts = [
+        f"{value[key]} {word}"
+        for key, word in (
+            ("success_count", "ok"),
+            ("failed_count", "failed"),
+            ("skipped_count", "skipped"),
         )
-        if value.get("small_sample"):
-            text += "; small sample, fewer than 20 observations"
-        return text
+        if value.get(key)
+    ]
+    text = ", ".join(counts) or "no attempts"
+    if value.get("mean_seconds") is not None:
+        text += f" · {_seconds(value['mean_seconds'])} avg"
+    return text
 
-    def stage_text(value):
-        return (
-            f"attempts {value.get('attempts', 0)}, applied/success {value.get('success_count', 0)}, "
-            f"failed {value.get('failed_count', 0)}, skipped {value.get('skipped_count', 0)}; "
-            f"successful work/session {number(value.get('mean_seconds'), ' s')} "
-            f"(n={value.get('seconds_count', 0)}); "
-            f"failed work/session {number(value.get('mean_failed_seconds'), ' s')} "
-            f"(n={value.get('failed_seconds_count', 0)})"
-        )
 
-    lines = ["Range: all retained history"]
+def _statistics_view(summary) -> StatisticsView:
+    """Turn service aggregates into labelled values without recalculating them."""
+    notices = []
     if not summary.get("storage_available", True):
-        lines.append("Storage unavailable. History may be incomplete; try Refresh.")
-    if not summary.get("enabled", True):
-        lines.append("Collection disabled. Retained history remains available.")
+        notices.append("Storage unavailable. History may be incomplete; try Refresh.")
     if summary.get("incomplete") or summary.get("reconciliation_incomplete"):
-        lines.append(
-            "Incomplete history. Some sessions or measurements may be missing."
-        )
+        notices.append("Some sessions or measurements may be missing.")
     if not summary.get("sessions", 0):
-        lines.append("No statistics history yet.")
+        empty = (
+            ("No sessions yet", "Dictate something, then press Refresh.")
+            if summary.get("enabled", True)
+            else ("Collection is off", "Turn it on and press Save to start.")
+        )
+        return StatisticsView(tuple(notices), empty, (), (), ())
+    if not summary.get("enabled", True):
+        notices.append("Collection is off. Existing history is still shown.")
+
     counts = summary.get("counts", {})
-    lines.extend(
-        [
-            f"Sessions {summary.get('sessions', 0)}; active {summary.get('active_sessions', 0)}",
-            f"Success {counts.get('success', 0)}; failed {counts.get('failed', 0)}; "
-            f"success rate {rate(summary.get('success_rate'))} (success / (success + failed))",
-            f"Cancelled {counts.get('cancelled', 0)}; no speech {counts.get('no_speech', 0)}; "
-            f"interrupted {counts.get('interrupted', 0)}",
-            f"Captured {number(summary.get('captured_minutes'), ' min')}; "
-            f"mean recording {number(summary.get('mean_capture_seconds'), ' s')} "
-            f"(n={summary.get('recording_count', 0)}); delivered words {summary.get('delivered_words', 0)}",
-            f"Error-recovery transcription fallback {summary.get('fallback_count', 0)}/"
-            f"{summary.get('fallback_denominator', 0)} ({rate(summary.get('fallback_rate'))}); "
-            f"recovered failures {summary.get('recovered_failures', 0)}",
-            f"Normal offline routing: empty live transcript {summary.get('normal_routing_counts', {}).get('live_empty', 0)}; "
-            f"no speech segments {summary.get('normal_routing_counts', {}).get('vad_no_segments', 0)}",
-            "Successful stop-to-clipboard: " + latency(summary.get("latency", {})),
-            "Stage times may overlap. Recording, inference work, and clipboard wait differ.",
-        ]
+    latency = summary.get("latency", {})
+    routing = summary.get("normal_routing_counts", {})
+    tiles = (
+        (str(summary.get("sessions", 0)), "Sessions"),
+        (_percent(summary.get("success_rate")), "Success rate"),
+        (_seconds(latency.get("median_seconds")), "Median wait"),
+        (str(summary.get("delivered_words") or 0), "Words delivered"),
     )
-    for name, value in summary.get("stages", {}).items():
-        lines.append(f"{name.replace('_', ' ').capitalize()}: {stage_text(value)}")
-    lines.append(
-        "Model comparisons are observational and do not measure accuracy or causal speed gains."
+    reliability = [
+        (
+            "Succeeded / failed",
+            f"{counts.get('success', 0)} / {counts.get('failed', 0)}",
+        ),
+        (
+            "Cancelled / no speech / interrupted",
+            f"{counts.get('cancelled', 0)} / {counts.get('no_speech', 0)} / "
+            f"{counts.get('interrupted', 0)}",
+        ),
+        (
+            "Recovered by transcription fallback",
+            f"{summary.get('fallback_count', 0)} of "
+            f"{summary.get('fallback_denominator', 0)}",
+        ),
+        ("Problems recovered automatically", str(summary.get("recovered_failures", 0))),
+        (
+            "Routed offline (empty live text / no speech found)",
+            f"{routing.get('live_empty', 0)} / {routing.get('vad_no_segments', 0)}",
+        ),
+    ]
+    if summary.get("active_sessions"):
+        reliability.append(("In progress", str(summary["active_sessions"])))
+    minutes = summary.get("captured_minutes")
+    speed = (
+        (
+            "Stop to clipboard (median / p95)",
+            f"{_seconds(latency.get('median_seconds'))} / "
+            f"{_seconds(latency.get('p95_seconds'))}",
+        ),
+        ("Average recording", _seconds(summary.get("mean_capture_seconds"))),
+        ("Total recorded", "n/a" if minutes is None else f"{minutes:.1f} min"),
     )
+    sections = [("Reliability", tuple(reliability)), ("Speed", speed)]
+    stages = tuple(
+        (
+            _STAGE_LABELS.get(name, name.replace("_", " ").capitalize()),
+            _stage_value(value),
+        )
+        for name, value in summary.get("stages", {}).items()
+        if _stage_ran(value) or value.get("skipped_count")
+    )
+    if stages:
+        sections.append(("Stages", stages))
+    models = []
     for group in summary.get("model_groups", []):
-        context = (
-            (group.get("cleanup_used_model") or group.get("cleanup_model") or "unknown")
-            if group.get("cleanup_enabled")
-            else "disabled"
+        label = (
+            f"{group.get('whisper_model') or 'unknown'} · "
+            f"{(group.get('whisper_device') or 'unknown').upper()}"
         )
-        lines.append(
-            f"Whisper {group.get('whisper_model') or 'unknown'} / "
-            f"{group.get('whisper_device') or 'unknown'}; cleanup {context}; "
-            f"sessions {group.get('sessions', 0)}; recording mean "
-            f"{number(group.get('mean_capture_seconds'), ' s')} (n={group.get('recording_count', 0)}); "
-            f"inference work mean {number(group.get('inference_work_seconds'), ' s')}; "
-            + latency(group.get("latency", {}))
+        if group.get("cleanup_enabled"):
+            cleanup = group.get("cleanup_used_model") or group.get("cleanup_model")
+            label += f" + {cleanup or 'unknown'} cleanup"
+        sessions = group.get("sessions", 0)
+        median = _seconds(group.get("latency", {}).get("median_seconds"))
+        models.append(
+            (label, f"{sessions} session{'s' * (sessions != 1)} · {median} median")
         )
-    lines.extend(
-        f"Cleanup {group.get('model') or 'unknown'} (device unknown): {stage_text(group)}"
-        for group in summary.get("cleanup_groups", [])
+    cleanup_groups = [g for g in summary.get("cleanup_groups", []) if _stage_ran(g)]
+    # One cleanup model is already covered by the Ollama cleanup stage row.
+    if len(cleanup_groups) > 1:
+        models.extend(
+            (f"{group.get('model') or 'unknown'} cleanup", _stage_value(group))
+            for group in cleanup_groups
+        )
+    if models:
+        sections.append(("Models", tuple(models)))
+
+    footnotes = ["Stage times overlap, so they don't add up to the wait."]
+    if latency.get("small_sample"):
+        footnotes.insert(
+            0,
+            f"Fewer than 20 successful sessions so far ({latency.get('count', 0)}), "
+            "so speed numbers may swing.",
+        )
+    return StatisticsView(
+        tuple(notices), None, tiles, tuple(sections), tuple(footnotes)
     )
-    return "\n\n".join(lines)
 
 
 def _format_bytes(size_bytes):
@@ -155,6 +235,21 @@ def _format_bytes(size_bytes):
     return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 
+_MUTED_TEXT = ("gray35", "gray70")
+_OUTLINE_BUTTON = {
+    "fg_color": "transparent",
+    "border_width": 1,
+    "border_color": ("gray55", "gray40"),
+    "text_color": ("gray10", "gray90"),
+    "hover_color": ("gray78", "gray25"),
+}
+# Destructive actions: outlined in red so they stand apart from normal buttons.
+_DANGER_BUTTON = {
+    **_OUTLINE_BUTTON,
+    "border_color": ("#C0392B", "#C94B4B"),
+    "text_color": ("#B03A2E", "#FF8A80"),
+    "hover_color": ("#F6D5D1", "#4A2323"),
+}
 _INVALID_RESTART_COMPARE_VALUE = object()
 _APP_DISPLAY_NAME = "murmur"
 _SETTINGS_TITLE = "murmur settings"
@@ -927,6 +1022,7 @@ class SettingsWindow:
             privacy,
             text="Delete Logged Data",
             command=self._purge_training_data,
+            **_DANGER_BUTTON,
         ).grid(row=2, column=0, sticky="w", padx=16, pady=(4, 10))
 
         self._setup_statistics(tab_contents["Statistics"])
@@ -1387,38 +1483,120 @@ class SettingsWindow:
             0,
             "Collect local statistics",
             self.statistics_var,
-            "Save applies to future sessions. Current sessions keep their collection choice. "
-            "History is retained until deletion. Training data logging is independent.",
+            "Counts and timings only, stored on this PC. No audio or dictated text.",
         )
-        ctk.CTkLabel(
-            parent,
-            text="Local counts, timings, model names and reliability metadata only. "
-            "No audio, dictated text, prompts or endpoints. All retained history is shown.",
-            anchor="w",
-            justify="left",
-            wraplength=560,
-        ).grid(row=1, column=0, sticky="ew", padx=16, pady=8)
-        self._statistics_buttons = []
-        for row, (label, command) in enumerate(
-            (
-                ("Refresh", self._refresh_statistics),
-                ("Export CSV", self._export_statistics),
-                ("Delete Session History", self._delete_statistics),
-            ),
-            start=2,
-        ):
-            button = ctk.CTkButton(parent, text=label, command=command)
-            button.grid(row=row, column=0, sticky="w", padx=16, pady=4)
-            self._statistics_buttons.append(button)
+        actions = ctk.CTkFrame(parent, fg_color="transparent")
+        actions.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 4))
+        actions.grid_columnconfigure(2, weight=1)
+        refresh = ctk.CTkButton(
+            actions, text="Refresh", width=96, command=self._refresh_statistics
+        )
+        refresh.grid(row=0, column=0, padx=(0, 8))
+        export = ctk.CTkButton(
+            actions,
+            text="Export CSV",
+            width=96,
+            command=self._export_statistics,
+            **_OUTLINE_BUTTON,
+        )
+        export.grid(row=0, column=1)
+        delete = ctk.CTkButton(
+            actions,
+            text="Delete Session History",
+            command=self._delete_statistics,
+            **_DANGER_BUTTON,
+        )
+        delete.grid(row=0, column=2, sticky="e")
+        self._statistics_buttons = [refresh, export, delete]
         self._statistics_status = ctk.CTkLabel(
             parent,
             text="",
             anchor="w",
             justify="left",
-            wraplength=560,
+            text_color=_MUTED_TEXT,
+            wraplength=620,
         )
-        self._statistics_status.grid(row=5, column=0, sticky="ew", padx=16, pady=8)
+        self._statistics_status.grid(row=2, column=0, sticky="ew", padx=16)
+        self._statistics_body = ctk.CTkFrame(parent, fg_color="transparent")
+        self._statistics_body.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 8))
+        self._statistics_body.grid_columnconfigure(0, weight=1)
         self.root.after(0, self._refresh_statistics)
+
+    def _render_statistics(self, view: StatisticsView):
+        """Rebuild the Statistics body from a display-ready view."""
+        body = self._statistics_body
+        for child in body.winfo_children():
+            child.destroy()
+        row = 0
+        for notice in view.notices:
+            ctk.CTkLabel(
+                body,
+                text=notice,
+                anchor="w",
+                justify="left",
+                fg_color=("#FFF4D6", "#3A2C13"),
+                text_color=("#704400", "#FFD27F"),
+                corner_radius=6,
+                wraplength=600,
+            ).grid(row=row, column=0, sticky="ew", pady=(0, 6), ipadx=8, ipady=4)
+            row += 1
+        if view.empty is not None:
+            title, hint = view.empty
+            ctk.CTkLabel(
+                body, text=title, font=ctk.CTkFont(size=18, weight="bold")
+            ).grid(row=row, column=0, pady=(32, 4))
+            ctk.CTkLabel(body, text=hint, text_color=_MUTED_TEXT).grid(
+                row=row + 1, column=0, pady=(0, 32)
+            )
+            return
+
+        tiles = ctk.CTkFrame(body, fg_color="transparent")
+        tiles.grid(row=row, column=0, sticky="ew", pady=(8, 4))
+        for column, (value, label) in enumerate(view.tiles):
+            tiles.grid_columnconfigure(column, weight=1, uniform="tile")
+            tile = ctk.CTkFrame(tiles, fg_color=("gray80", "gray22"), corner_radius=8)
+            tile.grid(
+                row=0, column=column, sticky="ew", padx=(0 if column == 0 else 8, 0)
+            )
+            ctk.CTkLabel(
+                tile, text=value, anchor="w", font=ctk.CTkFont(size=22, weight="bold")
+            ).grid(row=0, column=0, sticky="w", padx=12, pady=(10, 0))
+            ctk.CTkLabel(tile, text=label, anchor="w", text_color=_MUTED_TEXT).grid(
+                row=1, column=0, sticky="w", padx=12, pady=(0, 10)
+            )
+        row += 1
+
+        for title, rows in view.sections:
+            ctk.CTkLabel(
+                body,
+                text=title.upper(),
+                anchor="w",
+                text_color=_MUTED_TEXT,
+                font=ctk.CTkFont(size=12, weight="bold"),
+            ).grid(row=row, column=0, sticky="w", pady=(14, 2))
+            row += 1
+            for label, value in rows:
+                line = ctk.CTkFrame(body, fg_color="transparent")
+                line.grid(row=row, column=0, sticky="ew")
+                line.grid_columnconfigure(0, weight=1)
+                ctk.CTkLabel(line, text=label, anchor="w").grid(
+                    row=0, column=0, sticky="w"
+                )
+                ctk.CTkLabel(
+                    line, text=value, anchor="e", font=ctk.CTkFont(weight="bold")
+                ).grid(row=0, column=1, sticky="e", padx=(16, 0))
+                row += 1
+        for note in view.footnotes:
+            ctk.CTkLabel(
+                body,
+                text=note,
+                anchor="w",
+                justify="left",
+                text_color=_MUTED_TEXT,
+                font=ctk.CTkFont(size=12),
+                wraplength=600,
+            ).grid(row=row, column=0, sticky="w", pady=(8 if row else 0, 0))
+            row += 1
 
     def _statistics_request(self, operation, path=None):
         if getattr(self, "_closed", False) or self._statistics_token is not None:
@@ -1472,7 +1650,8 @@ class SettingsWindow:
                 if operation != "summary":
                     messagebox.showerror(_APP_DISPLAY_NAME, text, parent=self.root)
             elif operation == "summary":
-                self._statistics_status.configure(text=_statistics_text(result))
+                self._statistics_status.configure(text="")
+                self._render_statistics(_statistics_view(result))
             elif operation == "clear":
                 messagebox.showinfo(
                     _APP_DISPLAY_NAME, "Session history deleted.", parent=self.root

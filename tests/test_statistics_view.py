@@ -45,8 +45,8 @@ def window(monkeypatch):
     return window
 
 
-def test_summary_preserves_zero_unknown_and_separate_contexts():
-    text = gui._statistics_text(
+def test_view_preserves_zero_unknown_and_separate_contexts():
+    view = gui._statistics_view(
         {
             "sessions": 2,
             "enabled": False,
@@ -54,14 +54,19 @@ def test_summary_preserves_zero_unknown_and_separate_contexts():
             "storage_available": False,
             "captured_minutes": 0,
             "success_rate": None,
+            "delivered_words": None,
             "fallback_count": 0,
             "fallback_denominator": 1,
-            "fallback_rate": 0,
             "latency": {
                 "count": 1,
                 "median_seconds": 0,
-                "p95_seconds": 0,
+                "p95_seconds": None,
                 "small_sample": True,
+            },
+            "stages": {
+                "clipboard": {"attempts": 2, "success_count": 1, "failed_count": 1},
+                "ollama_cleanup": {"attempts": 2, "skipped_count": 2},
+                "preparation": {"attempts": 0},
             },
             "model_groups": [
                 {
@@ -69,27 +74,69 @@ def test_summary_preserves_zero_unknown_and_separate_contexts():
                     "whisper_device": "cpu",
                     "cleanup_enabled": True,
                     "cleanup_model": "model-a",
+                    "sessions": 1,
                 }
             ],
-            "cleanup_groups": [{"model": "model-a", "attempts": 2, "failed_count": 1}],
+            "cleanup_groups": [
+                {"model": "model-a", "attempts": 2, "failed_count": 1},
+                {"model": "model-b", "attempts": 1, "success_count": 1},
+                {"model": None, "attempts": 3, "skipped_count": 3},
+            ],
         }
     )
-    for expected in (
-        "disabled",
-        "Incomplete",
-        "Storage unavailable",
-        "0.00 min",
-        "no data",
-        "0/1 (0.0%)",
-        "n=1",
-        "small sample",
-        "small / cpu",
-        "cleanup model-a",
-        "device unknown",
-        "failed 1",
-    ):
-        assert expected in text
-    assert "No statistics history yet" in gui._statistics_text({"sessions": 0})
+    assert view.empty is None
+    assert any("Storage unavailable" in notice for notice in view.notices)
+    assert any("missing" in notice for notice in view.notices)
+    assert any("Collection is off" in notice for notice in view.notices)
+    assert view.tiles == (
+        ("2", "Sessions"),
+        ("n/a", "Success rate"),
+        ("0 ms", "Median wait"),
+        ("0", "Words delivered"),
+    )
+    rows = {label: value for _, section in view.sections for label, value in section}
+    assert rows["Recovered by transcription fallback"] == "0 of 1"
+    assert rows["Stop to clipboard (median / p95)"] == "0 ms / n/a"
+    assert rows["Total recorded"] == "0.0 min"
+    assert rows["Clipboard"] == "1 ok, 1 failed"
+    assert rows["Ollama cleanup"] == "2 skipped"
+    assert "Preparation" not in rows
+    assert "unknown cleanup" not in rows
+    assert rows["small · CPU + model-a cleanup"] == "1 session · n/a median"
+    assert rows["model-a cleanup"] == "1 failed"
+    assert rows["model-b cleanup"] == "1 ok"
+    assert "Fewer than 20 successful sessions so far (1)" in view.footnotes[0]
+
+
+def test_single_cleanup_model_is_not_repeated_under_models():
+    view = gui._statistics_view(
+        {"sessions": 1, "cleanup_groups": [{"model": "model-a", "success_count": 1}]}
+    )
+    labels = [label for _, section in view.sections for label, _ in section]
+    assert "model-a cleanup" not in labels
+
+
+@pytest.mark.parametrize(
+    ("seconds", "text"),
+    [
+        (None, "n/a"),
+        (0.0002, "<1 ms"),
+        (0.0035, "4 ms"),
+        (0.4, "0.40 s"),
+        (21.6, "21.6 s"),
+    ],
+)
+def test_durations_use_milliseconds_for_quick_steps(seconds, text):
+    assert gui._seconds(seconds) == text
+
+
+@pytest.mark.parametrize(
+    ("enabled", "title"), [(True, "No sessions yet"), (False, "Collection is off")]
+)
+def test_empty_history_shows_one_message_instead_of_zero_rows(enabled, title):
+    view = gui._statistics_view({"sessions": 0, "enabled": enabled})
+    assert view.empty[0] == title
+    assert view.tiles == view.sections == view.footnotes == ()
 
 
 def test_csv_has_stable_allowlist_and_formula_safe_values(tmp_path):
