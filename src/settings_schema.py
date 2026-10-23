@@ -14,6 +14,7 @@ TAB_ORDER = (
     "Transcription",
     "LLM Cleanup",
     "Data Privacy",
+    "Statistics",
 )
 
 ControlType = Literal["bool", "number", "select", "text", "microphone"]
@@ -43,6 +44,15 @@ class SettingMetadata:
 
 
 SETTINGS: tuple[SettingMetadata, ...] = (
+    SettingMetadata(
+        key="enable_statistics",
+        label="Collect local statistics",
+        tab="Statistics",
+        control="bool",
+        value_type="bool",
+        default=DEFAULT_CONFIG["enable_statistics"],
+        help_text="Save applies to future sessions. Existing history is retained.",
+    ),
     SettingMetadata(
         key="microphone",
         label="Microphone",
@@ -297,6 +307,8 @@ def normalize_value(value: Any, setting: SettingMetadata) -> Any:
         return text if text in setting.choices else setting.default
 
     if setting.value_type == "bool":
+        if setting.key == "enable_statistics":
+            return value is True
         return bool(value)
 
     if setting.value_type == "optional_str":

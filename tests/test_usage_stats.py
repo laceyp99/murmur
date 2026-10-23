@@ -1,0 +1,374 @@
+import json
+import sqlite3
+import subprocess
+import threading
+from dataclasses import fields
+
+import pytest
+
+from src.usage_stats import (
+    EXPORT_COLUMNS,
+    SessionMetadata,
+    SessionSnapshot,
+    StatisticsBusyError,
+    UsageStatsService,
+    _owner_dead,
+)
+
+
+@pytest.fixture
+def service(tmp_path):
+    stats = UsageStatsService(
+        tmp_path / "statistics.sqlite3",
+        enabled=True,
+        provenance={"app_version": "test", "git_commit": "a" * 40, "git_dirty": True},
+    )
+    stats.summary().result(timeout=5)
+    yield stats
+    assert stats.close(timeout=5)
+
+
+def barrier(stats):
+    return stats.summary().result(timeout=5)
+
+
+def test_empty_schema_and_private_contract(service):
+    summary = barrier(service)
+    assert summary["sessions"] == 0
+    assert summary["success_rate"] is None
+    assert summary["fallback_rate"] is None
+    assert summary["captured_minutes"] is None
+    assert summary["latency"]["median_seconds"] is None
+    forbidden = {"text", "audio", "prompt", "endpoint", "microphone", "error_message"}
+    assert forbidden.isdisjoint(
+        f.name for cls in (SessionSnapshot, SessionMetadata) for f in fields(cls)
+    )
+    collector = service.start_session()
+    with pytest.raises(ValueError, match="Unsupported"):
+        collector.update(text="private content")
+    with sqlite3.connect(service.path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_terminal_snapshot_is_idempotent_and_unknown_stays_null(service):
+    collector = service.start_session()
+    collector.update(whisper_model="small", whisper_device="cpu")
+    collector.stage("offline_whisper", "failed", seconds=2, code="whisper_failed")
+    collector.stage("offline_whisper", "success", seconds=3)
+    collector.issue("offline_whisper", "whisper_failed", recovered=True)
+    collector.issue("offline_whisper", "whisper_failed", recovered=True)
+    collector.finish("success", final_word_count=7, stop_to_clipboard_seconds=5)
+    collector.finish("failed", final_word_count=99)
+    collector.update(capture_seconds=99)
+    collector.stage("clipboard", "failed", seconds=88)
+    summary = barrier(service)
+    assert summary["counts"]["success"] == 1
+    assert summary["delivered_words"] == 7
+    assert summary["recording_count"] == 0
+    assert summary["recovered_failures"] == 3
+    assert summary["issues"] == {"whisper_failed": 3}
+    stage = summary["stages"]["offline_whisper"]
+    assert stage["attempts"] == 2
+    assert stage["success_count"] == stage["failed_count"] == 1
+    assert stage["mean_seconds"] == 3
+    assert stage["mean_failed_seconds"] == 2
+    row = service.export_rows().result(timeout=5)[0]
+    assert tuple(row) == EXPORT_COLUMNS
+    assert row["capture_seconds"] is None
+    assert row["app_version"] == "test"
+    assert row["git_commit"] == "a" * 40
+    assert row["git_dirty"] is True
+    assert row["stage_clipboard_seconds"] is None
+
+
+def test_exact_metrics_and_context_groups(service):
+    fixtures = [
+        ("success", 1, True, True, False),
+        ("success", 9, True, False, True),
+        ("failed", 100, True, True, False),
+        ("failed", 100, False, True, False),
+        ("no_speech", 100, True, False, False),
+        ("cancelled", 100, True, True, False),
+    ]
+    for outcome, wait, reached, fallback, cleanup in fixtures:
+        collector = service.start_session()
+        collector.update(
+            whisper_model="small",
+            whisper_device="cpu",
+            cleanup_enabled=cleanup,
+            cleanup_model="qwen" if cleanup else None,
+            capture_seconds=60,
+            reached_transcription=reached,
+            error_fallback=fallback,
+        )
+        collector.finish(outcome, stop_to_clipboard_seconds=wait, final_word_count=10)
+        barrier(service)
+    active = service.start_session()
+    assert active is not None
+    summary = barrier(service)
+    assert summary["counts"]["running"] == 1
+    assert summary["success_rate"] == 0.5
+    assert summary["fallback_count"] == 2
+    assert summary["fallback_denominator"] == 4
+    assert summary["fallback_rate"] == 0.5
+    assert summary["latency"] == {
+        "count": 2,
+        "median_seconds": 5,
+        "p95_seconds": 9,
+        "small_sample": True,
+    }
+    assert summary["captured_minutes"] == 6
+    assert summary["recording_count"] == 6
+    assert summary["delivered_words"] == 20
+    assert len(summary["model_groups"]) == 3  # Includes unknown active context.
+    assert sorted(g["latency"]["count"] for g in summary["model_groups"]) == [0, 1, 1]
+
+
+def test_toggle_applies_to_next_session(service):
+    current = service.start_session()
+    service.set_enabled(False)
+    assert service.start_session() is None
+    current.finish("success")
+    assert barrier(service)["counts"]["success"] == 1
+    service.set_enabled(True)
+    service.start_session().finish("cancelled")
+    assert barrier(service)["sessions"] == 2
+
+
+def test_cross_instance_generation_fences_every_old_snapshot(service):
+    other = UsageStatsService(service.path, enabled=True, provenance={})
+    try:
+        barrier(other)
+        old = other.start_session()
+        barrier(other)
+        service.clear().result(timeout=5)
+        old.update(capture_seconds=12)
+        old.stage("capture", "success", seconds=12)
+        old.issue("capture", "capture_failed")
+        old.finish("success")
+        assert barrier(other)["sessions"] == 0
+        assert service.export_rows().result(timeout=5) == []
+        other.start_session().finish("success")
+        assert barrier(other)["sessions"] == 1
+    finally:
+        assert other.close(timeout=5)
+
+
+def test_live_owner_preserved_then_abandoned_reconciled(service):
+    service.start_session()
+    barrier(service)
+    other = UsageStatsService(service.path, enabled=True, provenance={})
+    try:
+        assert barrier(other)["counts"]["running"] == 1
+    finally:
+        assert other.close(timeout=5)
+    assert service.close(timeout=5)
+    restarted = UsageStatsService(service.path, enabled=True, provenance={})
+    try:
+        summary = barrier(restarted)
+        assert summary["counts"]["interrupted"] == 1
+        row = restarted.export_rows().result(timeout=5)[0]
+        assert row["finished_at"] is None
+        assert row["capture_seconds"] is None
+    finally:
+        assert restarted.close(timeout=5)
+
+
+def test_uncertain_owner_preserves_active_history(service, monkeypatch):
+    service.start_session()
+    barrier(service)
+    assert service.close(timeout=5)
+    monkeypatch.setattr("src.usage_stats._owner_dead", lambda path: None)
+    other = UsageStatsService(service.path, enabled=True, provenance={})
+    try:
+        summary = barrier(other)
+        assert summary["counts"]["running"] == 1
+        assert summary["reconciliation_incomplete"] is True
+    finally:
+        assert other.close(timeout=5)
+
+
+def test_real_windows_lock_released_by_exiting_helper(tmp_path):
+    import sys
+
+    path = tmp_path / "owner.lock"
+    script = "from pathlib import Path; from src.usage_stats import _RunLock; lock=_RunLock(Path(__import__('sys').argv[1])); print('ready',flush=True); input()"
+    helper = subprocess.Popen(
+        [sys.executable, "-c", script, str(path)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert helper.stdout.readline().strip() == "ready"
+        assert _owner_dead(path) is False
+        helper.communicate("exit\n", timeout=5)
+        assert helper.returncode == 0
+        assert _owner_dead(path) is True
+    finally:
+        if helper.poll() is None:
+            helper.kill()
+            helper.wait(timeout=5)
+
+
+def test_busy_database_failure_recovers_without_replay(service):
+    with sqlite3.connect(service.path, timeout=0.1) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        service.start_session().finish("success")
+        with pytest.raises(RuntimeError, match="storage unavailable"):
+            service.clear().result(timeout=5)
+    # Failed snapshots are deliberately not replayed.
+    assert barrier(service)["sessions"] == 0
+    service.start_session().finish("success")
+    summary = barrier(service)
+    assert summary["sessions"] == 1
+    assert summary["incomplete"] is True
+    assert summary["storage_available"] is True
+    service.clear().result(timeout=5)
+    assert barrier(service)["incomplete"] is False
+
+
+def test_newer_schema_is_preserved(tmp_path):
+    path = tmp_path / "future.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE precious (value TEXT)")
+        connection.execute("INSERT INTO precious VALUES ('keep')")
+        connection.execute("PRAGMA user_version=99")
+    stats = UsageStatsService(path, enabled=True, provenance={})
+    try:
+        with pytest.raises(RuntimeError, match="storage unavailable"):
+            stats.summary().result(timeout=5)
+        assert stats.start_session() is None
+    finally:
+        assert stats.close(timeout=5)
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT value FROM precious").fetchone()[0] == "keep"
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 99
+
+
+def test_bounded_nonblocking_snapshots_and_controls(service, monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    original = service._write
+
+    def blocked_write(connection, snapshot):
+        entered.set()
+        assert release.wait(timeout=5)
+        original(connection, snapshot)
+
+    monkeypatch.setattr(service, "_write", blocked_write)
+    collector = service.start_session()
+    assert entered.wait(timeout=5)
+    try:
+        for _ in range(200):
+            collector.update(capture_seconds=1)
+        collector.finish("success")
+        first = service.summary()
+        duplicate = service.summary()
+        with pytest.raises(StatisticsBusyError):
+            duplicate.result(timeout=1)
+        exported = service.export_rows()
+        cleared = service.clear()
+        assert not first.done()
+    finally:
+        release.set()
+    assert first.result(timeout=5)["incomplete"] is True
+    assert exported.result(timeout=5)
+    cleared.result(timeout=5)
+    assert barrier(service)["sessions"] == 0
+
+
+def test_export_formula_protection_and_fixed_unknown_code(service):
+    collector = service.start_session()
+    collector.update(
+        whisper_model="=1+1", cleanup_model=" @bad", cleanup_used_model="-cmd"
+    )
+    collector.issue("capture", "raw secret exception")
+    collector.finish("failed")
+    row = service.export_rows().result(timeout=5)[0]
+    assert row["whisper_model"] == "'=1+1"
+    assert row["cleanup_model"] == "' @bad"
+    assert row["cleanup_used_model"] == "'-cmd"
+    assert json.loads(row["issues"])[0]["code"] == "unknown_error"
+    with sqlite3.connect(service.path) as connection:
+        payload = connection.execute("SELECT payload FROM sessions").fetchone()[0]
+        assert json.loads(payload)["metadata"]["whisper_model"] == "=1+1"
+    assert b"raw secret exception" not in service.path.read_bytes()
+
+
+def test_close_is_bounded_and_rejects_requests(service):
+    with pytest.raises(ValueError, match="finite"):
+        service.close(float("inf"))
+    assert service.close(timeout=5)
+    assert service.start_session() is None
+    with pytest.raises(StatisticsBusyError):
+        service.summary().result(timeout=1)
+
+
+def test_start_before_generation_is_nonblocking_and_marks_gap(tmp_path, monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    original = UsageStatsService._open
+
+    def delayed_open(self):
+        entered.set()
+        assert release.wait(timeout=5)
+        return original(self)
+
+    monkeypatch.setattr(UsageStatsService, "_open", delayed_open)
+    stats = UsageStatsService(tmp_path / "stats.sqlite3", enabled=True, provenance={})
+    try:
+        assert entered.wait(timeout=5)
+        assert stats.start_session() is None
+        stats.set_enabled(False)
+        release.set()
+        assert barrier(stats)["incomplete"] is True
+        assert stats.start_session() is None
+        stats.set_enabled(True)
+        stats.start_session().finish("success", capture_seconds=0, final_word_count=0)
+        summary = barrier(stats)
+        assert summary["captured_minutes"] == 0
+        assert summary["recording_count"] == 1
+        assert summary["delivered_words"] == 0
+        assert summary["delivered_word_sample_count"] == 1
+    finally:
+        release.set()
+        assert stats.close(timeout=5)
+
+
+def test_p95_uses_nearest_rank_and_successful_delivery_only(service):
+    for seconds in range(1, 21):
+        service.start_session().finish("success", stop_to_clipboard_seconds=seconds)
+        barrier(service)
+    service.start_session().finish("failed", stop_to_clipboard_seconds=1000)
+    latency = barrier(service)["latency"]
+    assert latency == {
+        "count": 20,
+        "median_seconds": 10.5,
+        "p95_seconds": 19,
+        "small_sample": False,
+    }
+
+
+def test_missed_terminal_is_not_rebound_after_clear(service):
+    active = service.start_session()
+    barrier(service)
+    service.clear().result(timeout=5)
+    active.finish("success")
+    assert barrier(service)["sessions"] == 0
+    service.start_session().finish("success")
+    assert barrier(service)["sessions"] == 1
+
+
+def test_failed_attempt_mean_does_not_average_session_totals(service):
+    collector = service.start_session()
+    collector.stage("live_whisper", "failed", seconds=1)
+    collector.stage("live_whisper", "failed", seconds=3)
+    collector.stage("live_whisper", "failed", seconds=None)
+    collector.stage("live_whisper", "success", seconds=7)
+    collector.finish("success")
+    stage = barrier(service)["stages"]["live_whisper"]
+    assert stage["failed_count"] == 3
+    assert stage["failed_seconds_count"] == 2
+    assert stage["mean_failed_seconds"] == 2
+    assert stage["mean_seconds"] == 7

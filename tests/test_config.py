@@ -412,3 +412,34 @@ def test_concurrent_updates_preserve_disjoint_keys(tmp_path, monkeypatch):
     persisted_config = json.loads(cfg.config_file.read_text(encoding="utf-8"))
     assert persisted_config["thread_a"] is True
     assert persisted_config["thread_b"] is True
+
+
+@pytest.mark.parametrize(
+    ("saved", "expected"),
+    [(True, True), (False, False), ("false", False), (None, False), (1, False)],
+)
+def test_statistics_saved_collection_flag(tmp_path, monkeypatch, saved, expected):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    config_dir = tmp_path / config_module.APP_DIR_NAME
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps({"enable_statistics": saved}), encoding="utf-8"
+    )
+    cfg = Config()
+    assert cfg.enable_statistics is expected
+    assert Config().enable_statistics is expected
+
+
+def test_statistics_missing_flag_defaults_on_and_uses_account_path(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    config_dir = tmp_path / config_module.APP_DIR_NAME
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text("{}", encoding="utf-8")
+    assert Config().enable_statistics is True
+    assert config_module.get_statistics_db_path() == config_dir / "statistics.sqlite3"
+    assert (
+        config_module.get_statistics_db_path().parent
+        == config_module.get_training_data_dir().parent
+    )
