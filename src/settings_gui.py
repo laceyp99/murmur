@@ -1403,7 +1403,7 @@ class SettingsWindow:
             (
                 ("Refresh", self._refresh_statistics),
                 ("Export CSV", self._export_statistics),
-                ("Delete Statistics", self._delete_statistics),
+                ("Delete Session History", self._delete_statistics),
             ),
             start=2,
         ):
@@ -1475,7 +1475,7 @@ class SettingsWindow:
                 self._statistics_status.configure(text=_statistics_text(result))
             elif operation == "clear":
                 messagebox.showinfo(
-                    _APP_DISPLAY_NAME, "Statistics deleted.", parent=self.root
+                    _APP_DISPLAY_NAME, "Session history deleted.", parent=self.root
                 )
                 self._refresh_statistics()
                 return
@@ -1513,10 +1513,12 @@ class SettingsWindow:
         if self._statistics_token is not None:
             return
         if messagebox.askyesno(
-            "Delete Statistics",
-            "Permanently delete all locally stored statistics? This cannot be undone. "
-            "Previously exported CSV files and training data are kept. "
-            "Active sessions will not restore deleted statistics.",
+            "Delete Session History",
+            "Permanently delete all dictation session history? This cannot be undone.\n\n"
+            "This removes every recorded session, timing, and issue count. Murmur "
+            "keeps a list of the app versions it has run (no times or session "
+            "details), exported CSV files, and training data.\n\n"
+            "Sessions still in progress will not bring deleted history back.",
             parent=self.root,
             icon="warning",
             default="no",

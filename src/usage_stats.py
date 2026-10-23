@@ -18,6 +18,7 @@ import threading
 import uuid
 from collections import Counter
 from concurrent.futures import Future
+from contextlib import suppress
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -509,6 +510,7 @@ class UsageStatsService:
                         else None,
                     ),
                 )
+            self._prune_locks(connection, lock_dir)
             self._generation = generation
             self._storage_error = None
             return connection, run_lock
@@ -517,6 +519,39 @@ class UsageStatsService:
                 connection.close()
             run_lock.close()
             raise
+
+    def _prune_locks(self, connection, lock_dir):
+        """Delete exited runs' lock files once no unfinished session needs them."""
+        # Leftover lock files are harmless; a later launch retries.
+        with suppress(Exception):
+            running = {
+                run_id
+                for (run_id,) in connection.execute(
+                    "SELECT DISTINCT run_id FROM sessions WHERE outcome='running'"
+                )
+            }
+            for path in lock_dir.glob("*.lock"):
+                if path.stem == self.run_id or path.stem in running:
+                    continue
+                if _owner_dead(path) is True:
+                    # Another instance may be probing the same file right now.
+                    with suppress(OSError):
+                        path.unlink()
+
+    def _release_lock(self, connection, run_lock):
+        """Close this run's lock, deleting it unless a session still needs it."""
+        try:
+            unfinished = connection.execute(
+                "SELECT 1 FROM sessions WHERE run_id=? AND outcome='running'",
+                (self.run_id,),
+            ).fetchone()
+        except Exception:
+            unfinished = True
+        path = Path(run_lock.handle.name)
+        run_lock.close()
+        if not unfinished:
+            with suppress(OSError):
+                path.unlink()
 
     def _work(self):
         connection = run_lock = None
@@ -596,10 +631,10 @@ class UsageStatsService:
                     else:
                         future.set_result(result)
         finally:
+            if run_lock is not None:
+                self._release_lock(connection, run_lock)
             if connection is not None:
                 connection.close()
-            if run_lock is not None:
-                run_lock.close()
 
     def _write(self, connection, snapshot):
         with connection:

@@ -48,7 +48,7 @@ flowchart LR
 | Transcription | Whisper model, device, language, maximum recording duration | Used by startup-created recorder/transcriber components; restart after changes. |
 | LLM Cleanup | Enablement, endpoint, model, timeout, preload, connection test | The final pass is optional; endpoint/model/preload changes require restart according to the UI notice. |
 | Data Privacy | Training-data logging and delete action | Logging enablement applies to subsequent finalizations; deletion is immediate after confirmation. |
-| Statistics | Local collection, refresh, CSV export, delete history | Collection changes apply to the next session. Existing sessions retain their start-time choice. History is shared across worktrees under the same Windows account. |
+| Statistics | Local collection, refresh, CSV export, delete session history | Collection changes apply to the next session. Existing sessions retain their start-time choice. History is shared across worktrees under the same Windows account. |
 
 Numeric controls have both a slider and an editable number field. Values are
 clamped to the configured bounds when displayed or saved. Non-numeric or
@@ -245,13 +245,20 @@ Training-data logging remains independently opt-in. A malformed statistics
 boolean repairs to off; whole-file config recovery restores defaults, including
 default-on statistics, and displays a repair notice.
 
-History is retained until explicitly deleted. **Delete Statistics** asks for
-confirmation and clears session history across instances. A database generation
-check rejects old pending writes, so an active session cannot restore deleted
-history. This does not delete training data or previously exported CSV files.
-Unfinished sessions are marked interrupted on a later launch only when the
-owning run's Windows file lock establishes that it exited; live or uncertain
-owners are preserved.
+History is retained until explicitly deleted. **Delete Session History** asks
+for confirmation and clears every session, stage timing, and issue count across
+instances. A database generation check rejects old pending writes, so an active
+session cannot restore deleted history. It keeps the list of app versions that
+have run (one row per launch with app version, Git commit, and uncommitted-change
+flag; no times or session details), training data, and previously exported CSV
+files.
+
+Each run holds a small lock file in `statistics.sqlite3.runs\`. Unfinished
+sessions are marked interrupted on a later launch only when the owning run's
+lock establishes that it exited; live or uncertain owners are preserved. A run
+deletes its own lock file on clean exit when none of its sessions are
+unfinished, and a later launch deletes lock files of exited runs once their
+sessions are reconciled.
 
 ### Reading the measurements
 
