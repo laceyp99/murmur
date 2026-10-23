@@ -19,6 +19,7 @@ from .audio import AudioData
 from .cancellation import check_cancelled
 from .config import get_config
 from .llm_postprocess import LLMPostProcessor, OllamaClient
+from .observations import emit_observation, failure_category
 from .user_vocab import load_user_vocab
 from .vad_audio import resample_audio
 
@@ -96,9 +97,12 @@ class Transcriber:
         model: whisper.Whisper | None = None,
         device: str | None = None,
         llm_post_processor: LLMPostProcessor | None = None,
+        *,
+        model_name: str | None = None,
     ):
         self.config = config or get_config()
         self._model: whisper.Whisper | None = model
+        self._model_name = model_name if model is not None else None
         self._device: str = device or self._get_device()
         self._llm_post_processor = llm_post_processor
 
@@ -118,7 +122,9 @@ class Transcriber:
             return
 
         print(f"Loading Whisper model '{self.config.model_name}' on {self._device}...")
-        self._model = whisper.load_model(self.config.model_name, device=self._device)
+        model_name = self.config.model_name
+        self._model = whisper.load_model(model_name, device=self._device)
+        self._model_name = model_name
         print("Model loaded successfully.")
 
     def transcribe(
@@ -138,19 +144,70 @@ class Transcriber:
     def finalize_text(self, text: str, *, cancel_event: Event | None = None) -> str:
         """Apply document-level cleanup to pre-transcribed text."""
         check_cancelled(cancel_event)
-        cleaned_text = self._post_process_document(text)
-        if not cleaned_text or not getattr(self.config, "ollama_enabled", False):
+        started = time.perf_counter()
+        try:
+            cleaned_text = self._post_process_document(text)
+        except Exception:
+            emit_observation(
+                stage="local_cleanup",
+                outcome="failed",
+                seconds=time.perf_counter() - started,
+                code="local_cleanup_failed",
+                category="error",
+            )
+            raise
+        emit_observation(
+            stage="local_cleanup",
+            outcome="success",
+            seconds=time.perf_counter() - started,
+            code="local_cleanup_completed",
+            category="success",
+        )
+        enabled = bool(getattr(self.config, "ollama_enabled", False))
+        if not cleaned_text or not enabled:
+            emit_observation(
+                stage="llm_cleanup",
+                outcome="skipped",
+                seconds=0.0,
+                code="cleanup_empty" if not cleaned_text else "cleanup_disabled",
+                category="skip",
+                cleanup_enabled=enabled,
+            )
             return cleaned_text
 
+        started = time.perf_counter()
         processor = self._get_llm_post_processor()
         check_cancelled(cancel_event)
         if processor is None:
+            emit_observation(
+                stage="llm_cleanup",
+                outcome="unavailable",
+                seconds=time.perf_counter() - started,
+                code="cleanup_unavailable",
+                category="unavailable",
+                cleanup_enabled=True,
+            )
             return cleaned_text
 
+        started = time.perf_counter()
         try:
             result = processor.process(cleaned_text)
-        except Exception:
+        except Exception as exc:
             check_cancelled(cancel_event)
+            category = failure_category(exc)
+            emit_observation(
+                stage="llm_cleanup",
+                outcome="failed",
+                seconds=time.perf_counter() - started,
+                code="cleanup_timeout"
+                if category == "timeout"
+                else "cleanup_request_failed",
+                category="error",
+                cleanup_enabled=True,
+                cleanup_model=getattr(
+                    getattr(processor, "client", None), "model_name", None
+                ),
+            )
             print("Ollama post-processing failed; using local transcript cleanup.")
             return cleaned_text
         check_cancelled(cancel_event)
@@ -179,8 +236,8 @@ class Transcriber:
                 ),
                 user_vocab=load_user_vocab(),
             )
-        except Exception as exc:
-            print(f"Warning: Ollama post-processor unavailable: {exc}")
+        except Exception:
+            print("Warning: Ollama post-processor unavailable.")
             self._llm_post_processor = None
 
         return self._llm_post_processor
@@ -260,11 +317,31 @@ class Transcriber:
         if prepared_audio.size == 0:
             return ""
 
-        result = self._model.transcribe(
-            prepared_audio,
-            language=self.config.language,
-            fp16=(self._device == "cuda"),
-            task="transcribe",
+        started = time.perf_counter()
+        try:
+            result = self._model.transcribe(
+                prepared_audio,
+                language=self.config.language,
+                fp16=(self._device == "cuda"),
+                task="transcribe",
+            )
+        except Exception:
+            emit_observation(
+                outcome="failed",
+                seconds=time.perf_counter() - started,
+                code="whisper_failed",
+                category="error",
+                whisper_model=self._model_name,
+                device=self._device,
+            )
+            raise
+        emit_observation(
+            outcome="success",
+            seconds=time.perf_counter() - started,
+            code="whisper_completed",
+            category="success",
+            whisper_model=self._model_name,
+            device=self._device,
         )
 
         raw_text = self._extract_accepted_whisper_text(result)
@@ -383,6 +460,7 @@ class Transcriber:
     def unload_model(self) -> None:
         """Unload the model to free memory."""
         self._model = None
+        self._model_name = None
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
