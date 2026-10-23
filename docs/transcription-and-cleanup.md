@@ -55,20 +55,13 @@ flowchart LR
 `TranscriptAccumulator` stores chunks by `segment_id` and returns them in sorted
 order. This makes the output stable even if callback timing changes.
 
-At stop time, the app calls `finalize_segment_texts()` once on the ordered live
-chunk texts. As a period-removal experiment, joining strips trailing periods
-from every nonfinal nonempty chunk, preserves supplied casing and other
-punctuation (including question and exclamation marks), and normalizes spacing.
-The offline path uses the same policy. Periods inside a chunk and at the end of
-the final nonempty chunk remain; document cleanup still supplies final punctuation
-when needed.
-
-This reduces sentence breaks caused by pauses but also removes real sentence
-breaks and abbreviation periods at nonfinal chunk endings. Supplied mid-sentence
-capitals remain, including both proper names and unwanted chunk-start capitals.
-Optional Ollama cleanup may make further changes. With Ollama disabled, compare
-the effort of adding intended sentence breaks against deleting unwanted ones
-before deciding whether to keep this policy.
+At stop time, `finalize_segment_texts()` joins the ordered live chunks and applies
+document cleanup. The offline path uses the same cleanup. Joining skips empty
+chunks, normalizes spacing, and removes trailing periods from nonfinal chunks
+to reduce breaks caused by pauses. Casing and other punctuation are preserved,
+as are periods inside chunks and at the end of the final chunk. Document cleanup
+adds final punctuation when needed. Real sentence breaks and abbreviation periods
+at nonfinal chunk endings are also removed; unwanted capitals can remain.
 
 ## Final Cleanup
 

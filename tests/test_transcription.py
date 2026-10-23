@@ -285,15 +285,11 @@ def test_transcribe_segments_returns_raw_segment_text_and_final_document_text():
     transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
     segments = [
         AudioData(
-            audio=np.array([0.25, -0.5], dtype=np.float32),
+            audio=np.array(samples, dtype=np.float32),
             sample_rate=16000,
             duration=0.1,
-        ),
-        AudioData(
-            audio=np.array([0.5, 0.25], dtype=np.float32),
-            sample_rate=16000,
-            duration=0.1,
-        ),
+        )
+        for samples in ([0.25, -0.5], [0.5, 0.25])
     ]
 
     result = transcriber.transcribe_segments(segments)
@@ -311,15 +307,11 @@ def test_transcribe_segments_strip_only_trailing_ellipses_from_segment_text():
     transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
     segments = [
         AudioData(
-            audio=np.array([0.25, -0.5], dtype=np.float32),
+            audio=np.array(samples, dtype=np.float32),
             sample_rate=16000,
             duration=0.1,
-        ),
-        AudioData(
-            audio=np.array([0.5, 0.25], dtype=np.float32),
-            sample_rate=16000,
-            duration=0.1,
-        ),
+        )
+        for samples in ([0.25, -0.5], [0.5, 0.25])
     ]
 
     result = transcriber.transcribe_segments(segments)
@@ -337,19 +329,21 @@ def test_transcribe_segments_strip_only_trailing_ellipses_from_segment_text():
             "The launch is ready Microsoft shipped the patch.",
         ),
         (
-            ["Is the build ready?", "NASA can test it."],
-            "Is the build ready? NASA can test it.",
-        ),
-        (["Stop!", "Patrick is speaking."], "Stop! Patrick is speaking."),
-        (
-            ["We should go.", "And bring the laptop."],
-            "We should go And bring the laptop.",
+            [
+                "we should ask",
+                "Microsoft about the patch.",
+                "NASA has notes.",
+                "I think",
+                "We should probably",
+                "Wait until tomorrow.",
+            ],
+            "We should ask Microsoft about the patch NASA has notes "
+            "I think We should probably Wait until tomorrow.",
         ),
         (
             ["We should go.", "and bring the laptop."],
             "We should go and bring the laptop.",
         ),
-        (["We should ask", "Microsoft for help."], "We should ask Microsoft for help."),
         (
             ["this keeps flowing", "without a break"],
             "This keeps flowing without a break.",
@@ -362,10 +356,9 @@ def test_transcribe_segments_strip_only_trailing_ellipses_from_segment_text():
             ["First sentence. Another thought.", "Microsoft agrees.", ""],
             "First sentence. Another thought Microsoft agrees.",
         ),
-        (["Is it ready?!", "Yes!", "I agree.", ""], "Is it ready?! Yes! I agree."),
         (
-            ["I think", "We should probably", "Wait until tomorrow."],
-            "I think We should probably Wait until tomorrow.",
+            ["Is it ready?", "Really?!", "Yes!", "I agree.", ""],
+            "Is it ready? Really?! Yes! I agree.",
         ),
         (["", "  "], ""),
     ],
@@ -419,15 +412,11 @@ def test_transcribe_segments_skips_filtered_no_speech_segments():
     transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
     segments = [
         AudioData(
-            audio=np.array([0.25, -0.5], dtype=np.float32),
+            audio=np.array(samples, dtype=np.float32),
             sample_rate=16000,
             duration=0.1,
-        ),
-        AudioData(
-            audio=np.array([0.5, 0.25], dtype=np.float32),
-            sample_rate=16000,
-            duration=0.1,
-        ),
+        )
+        for samples in ([0.25, -0.5], [0.5, 0.25])
     ]
 
     result = transcriber.transcribe_segments(segments)
@@ -479,20 +468,6 @@ def test_transcribe_segment_preserves_top_level_text_when_metadata_is_missing():
     )
 
     assert transcriber.transcribe_segment(audio_data) == "top level text"
-
-
-def test_finalize_segment_texts_preserves_boundary_acronyms_and_pronoun_i():
-    transcriber = Transcriber(config=FakeConfig(), model=FakeModel([]), device="cpu")
-
-    result = transcriber.finalize_segment_texts(
-        [
-            "we should compare options.",
-            "NASA has notes.",
-            "I can summarize them.",
-        ]
-    )
-
-    assert result == "We should compare options NASA has notes I can summarize them."
 
 
 def test_transcribe_single_clip_applies_final_document_cleanup_once():
