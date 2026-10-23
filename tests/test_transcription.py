@@ -285,15 +285,11 @@ def test_transcribe_segments_returns_raw_segment_text_and_final_document_text():
     transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
     segments = [
         AudioData(
-            audio=np.array([0.25, -0.5], dtype=np.float32),
+            audio=np.array(samples, dtype=np.float32),
             sample_rate=16000,
             duration=0.1,
-        ),
-        AudioData(
-            audio=np.array([0.5, 0.25], dtype=np.float32),
-            sample_rate=16000,
-            duration=0.1,
-        ),
+        )
+        for samples in ([0.25, -0.5], [0.5, 0.25])
     ]
 
     result = transcriber.transcribe_segments(segments)
@@ -311,15 +307,11 @@ def test_transcribe_segments_strip_only_trailing_ellipses_from_segment_text():
     transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
     segments = [
         AudioData(
-            audio=np.array([0.25, -0.5], dtype=np.float32),
+            audio=np.array(samples, dtype=np.float32),
             sample_rate=16000,
             duration=0.1,
-        ),
-        AudioData(
-            audio=np.array([0.5, 0.25], dtype=np.float32),
-            sample_rate=16000,
-            duration=0.1,
-        ),
+        )
+        for samples in ([0.25, -0.5], [0.5, 0.25])
     ]
 
     result = transcriber.transcribe_segments(segments)
@@ -328,44 +320,68 @@ def test_transcribe_segments_strip_only_trailing_ellipses_from_segment_text():
     assert result.text == "Hello world."
 
 
-def test_transcribe_segments_neutralizes_boundary_punctuation_and_casing():
-    fake_model = FakeModel(
-        [
-            "this is a thought.",
-            "And then the next chunk starts.",
-            "With another boundary.",
-        ]
-    )
+@pytest.mark.parametrize("entrypoint", ["offline", "live"])
+@pytest.mark.parametrize(
+    ("texts", "expected"),
+    [
+        (
+            ["The launch is ready.", "Microsoft shipped the patch."],
+            "The launch is ready Microsoft shipped the patch.",
+        ),
+        (
+            [
+                "we should ask",
+                "Microsoft about the patch.",
+                "NASA has notes.",
+                "I think",
+                "We should probably",
+                "Wait until tomorrow.",
+            ],
+            "We should ask Microsoft about the patch NASA has notes "
+            "I think We should probably Wait until tomorrow.",
+        ),
+        (
+            ["We should go.", "and bring the laptop."],
+            "We should go and bring the laptop.",
+        ),
+        (
+            ["this keeps flowing", "without a break"],
+            "This keeps flowing without a break.",
+        ),
+        (
+            ["", "  Hello   there . ", "  ", "Next sentence.", ""],
+            "Hello there Next sentence.",
+        ),
+        (
+            ["First sentence. Another thought.", "Microsoft agrees.", ""],
+            "First sentence. Another thought Microsoft agrees.",
+        ),
+        (
+            ["Is it ready?", "Really?!", "Yes!", "I agree.", ""],
+            "Is it ready? Really?! Yes! I agree.",
+        ),
+        (["", "  "], ""),
+    ],
+)
+def test_segment_finalization_removes_only_boundary_periods_without_ollama(
+    entrypoint, texts, expected
+):
+    fake_model = FakeModel(texts)
     transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
-    segments = [
-        AudioData(
-            audio=np.array([0.25, -0.5], dtype=np.float32),
-            sample_rate=16000,
-            duration=0.1,
-        ),
-        AudioData(
-            audio=np.array([0.5, 0.25], dtype=np.float32),
-            sample_rate=16000,
-            duration=0.1,
-        ),
-        AudioData(
-            audio=np.array([0.1, 0.35], dtype=np.float32),
-            sample_rate=16000,
-            duration=0.1,
-        ),
-    ]
+    if entrypoint == "live":
+        result = transcriber.finalize_segment_texts(texts)
+    else:
+        segments = [
+            AudioData(
+                audio=np.array([0.25, -0.5], dtype=np.float32),
+                sample_rate=16000,
+                duration=0.1,
+            )
+            for _ in texts
+        ]
+        result = transcriber.transcribe_segments(segments).text
 
-    result = transcriber.transcribe_segments(segments)
-
-    assert [segment.text for segment in result.segments] == [
-        "this is a thought.",
-        "And then the next chunk starts.",
-        "With another boundary.",
-    ]
-    assert (
-        result.text
-        == "This is a thought and then the next chunk starts with another boundary."
-    )
+    assert result == expected
 
 
 def test_transcribe_segments_skips_filtered_no_speech_segments():
@@ -396,15 +412,11 @@ def test_transcribe_segments_skips_filtered_no_speech_segments():
     transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
     segments = [
         AudioData(
-            audio=np.array([0.25, -0.5], dtype=np.float32),
+            audio=np.array(samples, dtype=np.float32),
             sample_rate=16000,
             duration=0.1,
-        ),
-        AudioData(
-            audio=np.array([0.5, 0.25], dtype=np.float32),
-            sample_rate=16000,
-            duration=0.1,
-        ),
+        )
+        for samples in ([0.25, -0.5], [0.5, 0.25])
     ]
 
     result = transcriber.transcribe_segments(segments)
@@ -458,20 +470,6 @@ def test_transcribe_segment_preserves_top_level_text_when_metadata_is_missing():
     assert transcriber.transcribe_segment(audio_data) == "top level text"
 
 
-def test_finalize_segment_texts_preserves_boundary_acronyms_and_pronoun_i():
-    transcriber = Transcriber(config=FakeConfig(), model=FakeModel([]), device="cpu")
-
-    result = transcriber.finalize_segment_texts(
-        [
-            "we should compare options.",
-            "NASA has notes.",
-            "I can summarize them.",
-        ]
-    )
-
-    assert result == "We should compare options NASA has notes I can summarize them."
-
-
 def test_transcribe_single_clip_applies_final_document_cleanup_once():
     fake_model = FakeModel(["multiple   spaces"])
     transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
@@ -512,7 +510,7 @@ def test_finalize_text_uses_llm_post_processor_when_enabled():
     assert fake_processor.calls == ["Hello world."]
 
 
-def test_finalize_segment_texts_sends_boundary_neutral_text_to_llm():
+def test_finalize_segment_texts_sends_period_light_text_to_llm():
     config = FakeConfig()
     config.ollama_enabled = True
     fake_processor = FakeLLMPostProcessor(response="Cleaned by LLM.")
@@ -529,7 +527,7 @@ def test_finalize_segment_texts_sends_boundary_neutral_text_to_llm():
 
     assert result == "Cleaned by LLM."
     assert fake_processor.calls == [
-        "This should keep flowing even after whisper split it."
+        "This should keep flowing Even after whisper split it."
     ]
 
 
