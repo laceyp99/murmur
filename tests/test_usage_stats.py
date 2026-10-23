@@ -188,7 +188,7 @@ def test_uncertain_owner_preserves_active_history(service, monkeypatch):
         assert other.close(timeout=5)
 
 
-def test_real_windows_lock_released_by_exiting_helper(tmp_path):
+def test_real_os_lock_released_by_exiting_helper(tmp_path):
     import sys
 
     path = tmp_path / "owner.lock"

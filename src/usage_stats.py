@@ -13,6 +13,7 @@ import math
 import queue
 import sqlite3
 import statistics
+import sys
 import threading
 import uuid
 from collections import Counter
@@ -264,11 +265,9 @@ class SessionCollector:
 
 
 class _RunLock:
-    """Hold a one-byte Windows lock; probe errors never establish owner death."""
+    """Hold a one-byte OS file lock; probe errors never establish owner death."""
 
     def __init__(self, path: Path):
-        import msvcrt
-
         self.handle = path.open("a+b")
         try:
             self.handle.seek(0, 2)
@@ -276,7 +275,14 @@ class _RunLock:
                 self.handle.write(b"\0")
                 self.handle.flush()
             self.handle.seek(0)
-            msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
+            if sys.platform == "win32":
+                import msvcrt
+
+                msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BaseException:
             self.handle.close()
             raise
