@@ -153,9 +153,14 @@ The current default values are:
   "ollama_endpoint": "http://localhost:11434",
   "ollama_model_name": "qwen3.5:4b",
   "ollama_timeout_seconds": 60,
-  "ollama_preload_model": true
+  "ollama_preload_model": true,
+  "speaker_names": ["Pat"]
 }
 ```
+
+`speaker_names` lists the names of the person dictating. It has no Settings
+control. After Ollama cleanup, murmur removes a greeting the model invented to
+one of these names, such as `Hi Pat,` on a self-introduction.
 
 **Show recording overlay** and **Enable notifications** are independent. The
 overlay is on by default; Windows toast notifications are off by default.

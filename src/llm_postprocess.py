@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from math import ceil
 from typing import Any
@@ -87,6 +87,58 @@ DISALLOWED_PREFIXES = (
     "sure",
     "of course",
 )
+
+_GREETING = r"(?:hi|hey|hello|dear|good[ \t]+(?:morning|afternoon|evening))"
+_BARE_GREETING_LINE = re.compile(
+    r"(?:hi|hey|hello|good[ \t]+(?:morning|afternoon|evening))(?:[ \t]+there)?"
+    r"[ \t]*[,.!]*[ \t]*\n\s*",
+    re.IGNORECASE,
+)
+# Includes common speech-to-text mishearings of a dictated greeting.
+_DICTATED_GREETING_WORDS = frozenset(
+    {"hi", "hey", "hello", "dear", "greetings", "good", "high", "him", "hay"}
+)
+
+
+def strip_invented_greeting(
+    dictation: str, output: str, speaker_names: Iterable[str]
+) -> str:
+    """Remove a greeting the model invented at the start of cleaned output.
+
+    Strips a greeting addressed to the speaker unless the dictation opens with
+    one, or a bare greeting line ("Hi,") when the dictation's first five words
+    contain no greeting word. Greetings to anyone else are left alone, and the
+    original output is returned if stripping would leave nothing.
+    """
+    names = {name.strip() for name in speaker_names if name.strip()}
+    if names:
+        # Longest first so "Pat Lacey" wins over "Pat" in the alternation.
+        name_pattern = "|".join(
+            re.escape(name) for name in sorted(names, key=len, reverse=True)
+        )
+        to_speaker = rf"{_GREETING}[ \t,]*(?:{name_pattern})\b"
+        # In the output the greeting must end at punctuation or a line break, so
+        # "Hi Pat Lacey," is never cut down to "Lacey,".
+        match = re.match(
+            rf"{to_speaker}[ \t]*(?:[,.!:]+|(?=\n)|$)\s*", output, re.IGNORECASE
+        )
+        if match:
+            if re.match(to_speaker, dictation.strip(), re.IGNORECASE):
+                return output
+            stripped = output[match.end() :]
+            if not stripped.strip():
+                return output
+            return stripped[0].upper() + stripped[1:]
+
+    match = _BARE_GREETING_LINE.match(output)
+    if match:
+        first_words = re.findall(r"[a-z']+", dictation.casefold())[:5]
+        if _DICTATED_GREETING_WORDS.isdisjoint(first_words):
+            stripped = output[match.end() :]
+            if stripped.strip():
+                return stripped
+
+    return output
 
 
 class OllamaClient:
@@ -282,9 +334,11 @@ class LLMPostProcessor:
         self,
         client: OllamaClient,
         user_vocab: Mapping[str, str] | None = None,
+        speaker_names: Iterable[str] = (),
     ):
         self.client = client
         self.user_vocab = dict(user_vocab or {})
+        self.speaker_names = tuple(speaker_names)
 
     def process(self, text: str) -> str:
         """Return cleaned transcript text, or the original text on failure."""
@@ -343,7 +397,9 @@ class LLMPostProcessor:
         if self._is_acceptable_output(normalized_result, cleaned_input):
             observe("success", "cleanup_applied", "success")
             print(f"LLM post-processing completed in {elapsed:.2f}s")
-            return normalized_result
+            return strip_invented_greeting(
+                cleaned_input, normalized_result, self.speaker_names
+            )
 
         observe("failed", "cleanup_output_rejected", "error")
         print(

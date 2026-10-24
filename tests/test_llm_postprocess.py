@@ -13,6 +13,7 @@ from src.llm_postprocess import (
     LLMPostProcessor,
     OllamaClient,
     check_ollama_connection,
+    strip_invented_greeting,
 )
 from src.observations import observe_transcription
 
@@ -102,6 +103,88 @@ def test_baseline_messages_match_evaluated_prompt_artifact_exactly():
     assert hashlib.sha256(serialized.encode()).hexdigest() == (
         "9782afe202a917cb0d19959dda24dffd223584a64704a8f2b8f462da9767779a"
     )
+
+
+@pytest.mark.parametrize(
+    ("dictation", "output", "expected"),
+    [
+        (
+            "My name is Jordan and I teach the evening class",
+            "Hi Pat,\n\nMy name is Jordan and I teach the evening class.",
+            "My name is Jordan and I teach the evening class.",
+        ),
+        (
+            "Hey Pat thanks for the notes",
+            "Hey Pat,\n\nThanks for the notes.",
+            "Hey Pat,\n\nThanks for the notes.",
+        ),
+        (
+            "I saw you handed in your work",
+            "Hi,\n\nI saw you handed in your work.",
+            "I saw you handed in your work.",
+        ),
+        (
+            "High trainees just following up",
+            "Hi trainees,\n\nJust following up.",
+            "Hi trainees,\n\nJust following up.",
+        ),
+        (
+            "Pete Salina just following up",
+            "Hey Selena,\n\nJust following up.",
+            "Hey Selena,\n\nJust following up.",
+        ),
+        (
+            "I think this is funny",
+            "Hi Pat, I think this is funny.",
+            "I think this is funny.",
+        ),
+        (
+            "My name is Pat Lacey",
+            "Hi Pat Lacey,\n\nMy name is Pat Lacey.",
+            "Hi Pat Lacey,\n\nMy name is Pat Lacey.",
+        ),
+        ("Hi pat", "Hi Pat,", "Hi Pat,"),
+        ("Thanks again", "Hi Pat,", "Hi Pat,"),
+        (
+            "Patricia thanks again",
+            "Hi Patricia,\n\nThanks again.",
+            "Hi Patricia,\n\nThanks again.",
+        ),
+    ],
+    ids=[
+        "self-intro",
+        "dictated",
+        "bare",
+        "misheard-greeting",
+        "other-name",
+        "inline",
+        "unlisted-full-name",
+        "only-greeting-dictated",
+        "only-greeting",
+        "longer-name",
+    ],
+)
+def test_strip_invented_greeting(dictation, output, expected):
+    assert strip_invented_greeting(dictation, output, ["Pat"]) == expected
+
+
+def test_llm_post_processor_strips_invented_greeting_to_speaker():
+    fake_client = FakeOllamaPackageClient({"response": "ignored"})
+    fake_client.chat_response = {
+        "message": {"content": "Hi Pat,\n\nMy name is Jordan."},
+        "done": True,
+        "done_reason": "stop",
+    }
+    processor = LLMPostProcessor(
+        client=OllamaClient(
+            endpoint="http://localhost:11434",
+            model_name=MODEL_NAME,
+            client=fake_client,
+        ),
+        speaker_names=["Pat"],
+    )
+
+    assert processor.process("my name is Jordan") == "My name is Jordan."
 
 
 class FakeOllamaPackageClient:

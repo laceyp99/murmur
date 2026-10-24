@@ -18,6 +18,7 @@ def test_settings_metadata_covers_gui_managed_config_without_sample_rate():
         "sample_rate",
         "logging_consent_updated_at",
         "logging_consent_source",
+        "speaker_names",
     }
 
     assert set(SETTINGS_BY_KEY) == expected_keys

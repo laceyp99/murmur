@@ -109,7 +109,8 @@ flowchart TB
     Content -->|no| ReturnLocal
     Completion -->|no| ReturnLocal
     Normalize --> Gate{"Acceptable output?"}
-    Gate -->|yes| ReturnLLM["Return LLM cleaned text"]
+    Gate -->|yes| Greeting["Strip invented greeting"]
+    Greeting --> ReturnLLM["Return LLM cleaned text"]
     Gate -->|no| ReturnLocal
     Ollama -->|exception| ReturnLocal
 ```
@@ -140,6 +141,22 @@ text. The gate rejects output when it is:
 This is intentionally conservative. The LLM pass should improve punctuation,
 capitalization, spacing, and obvious recognition mistakes, but it should not
 turn dictated text into an answer, a list, or a rewritten document.
+
+## Invented Greeting Guard
+
+Accepted output then passes through `strip_invented_greeting`. Small models
+sometimes open with a greeting the speaker never said, such as `Hi Pat,` on a
+self-introduction. The guard checks only the start of the output:
+
+- A greeting to a name in `speaker_names` is removed unless the dictation opens
+  with the same greeting. Both `Hi Pat,` on its own line and inline
+  `Hi Pat, I think...` are handled.
+- A bare greeting line such as `Hi,` or `Hi there,` is removed when none of the
+  dictation's first five words is a greeting word, including common mishearings
+  such as `high` or `hay`.
+- Greetings to anyone else are kept, because they are often repairs of a garbled
+  dictated greeting.
+- If stripping would leave nothing, the output is returned unchanged.
 
 ## Vocabulary Overrides
 
