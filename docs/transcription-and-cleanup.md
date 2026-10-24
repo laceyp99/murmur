@@ -153,9 +153,10 @@ self-introduction. The guard checks only the start of the output:
   `Hi Pat, I think...` are handled.
 - A bare greeting line such as `Hi,` or `Hi there,` is removed unless the
   dictation opens with a greeting.
-- When checking how the dictation opens, filler such as `um` or `okay` is
-  skipped and misheard greetings such as `High Pat` count. A lone `good` does
-  not count; `good morning` does.
+- When checking how the dictation opens, filler such as `um`, `uh`, `uhm`,
+  `hmm`, `yeah`, `like`, or `okay` is skipped and misheard greetings such as
+  `High Pat` count. A lone `good` does not count; `good morning` does.
+  This also means `High priority...` can preserve an invented bare greeting.
 - Greetings to anyone else are kept, because they are often repairs of a garbled
   dictated greeting.
 - If stripping would leave nothing, the output is returned unchanged.

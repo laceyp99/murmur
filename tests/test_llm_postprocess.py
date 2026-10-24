@@ -222,6 +222,15 @@ def test_strip_invented_greeting(dictation, output, expected):
     assert strip_invented_greeting(dictation, output, ["Pat"]) == expected
 
 
+@pytest.mark.parametrize("filler", ["hmm", "yeah", "like", "um", "uh", "uhm"])
+@pytest.mark.parametrize("greeting", ["Hey Pat", "Hi"])
+def test_strip_invented_greeting_preserves_greeting_after_filler(filler, greeting):
+    dictation = f"{filler}, {greeting} just checking in"
+    output = f"{greeting},\n\nJust checking in."
+
+    assert strip_invented_greeting(dictation, output, ["Pat"]) == output
+
+
 def test_strip_invented_greeting_non_latin_name_does_not_match_any_word():
     output = "Hi Pat,\n\nHi everyone, I am new."
 

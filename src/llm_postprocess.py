@@ -101,7 +101,22 @@ _SPOKEN_GREETING = (
 )
 # Spoken filler the model drops, so "Um hey Pat" still counts as a dictated greeting.
 _FILLER_WORDS = frozenset(
-    {"um", "uh", "uhm", "er", "ah", "oh", "okay", "ok", "so", "alright", "well"}
+    {
+        "um",
+        "uh",
+        "uhm",
+        "er",
+        "ah",
+        "oh",
+        "okay",
+        "ok",
+        "so",
+        "alright",
+        "well",
+        "hmm",
+        "yeah",
+        "like",
+    }
 )
 
 
