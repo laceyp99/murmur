@@ -212,11 +212,16 @@ can be evaluated against real dictation:
 | `cleanup_input` | Text sent to Ollama, after Whisper and local cleanup. |
 | `cleanup_status` | The same Ollama cleanup outcome shown in usage statistics: `success` when Ollama's output was used, `failed` for a request error or rejected output, `skipped` for empty or over-budget input, `unavailable` when the cleanup client could not start, or `off` when Ollama cleanup is disabled. Every status except `success` keeps `cleanup_input` as the final text. |
 | `cleanup_model` | Configured Ollama model, or `null` when cleanup is off. |
-| `cleanup_prompt_version` | Short hash of the built-in cleanup prompt and examples, or `null` when cleanup is off. User vocabulary is not included. |
+| `cleanup_version` | Readable cleanup label, such as `v1`, or `null` when cleanup is off. It is bumped whenever the prompt, examples, output normalization, or acceptance gate changes. |
+| `cleanup_prompt_hash` | Short hash of the built-in cleanup prompt and examples, or `null` when cleanup is off. User vocabulary is not included. |
 
 Rows with `cleanup_status: "success"` form `cleanup_input` to `transcription`
-pairs. Other rows keep `cleanup_input` as unlabeled evaluation input. Older
-records written before these fields existed omit them.
+pairs. Other rows keep `cleanup_input` as unlabeled evaluation input. Group or
+filter rows by `cleanup_version`; `git log -S 'CLEANUP_VERSION = "v1"'` finds
+the code behind a label. A test pins `cleanup_prompt_hash` to the current
+label, so editing the prompt fails until `CLEANUP_VERSION` in
+`src/llm_postprocess.py` is bumped. Older records written before these fields
+existed omit them.
 
 The **Delete Logged Data** action displays a file count and approximate size,
 asks for confirmation, then removes the logged WAV files and JSONL metadata.

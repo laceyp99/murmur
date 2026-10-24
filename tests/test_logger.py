@@ -4,7 +4,7 @@ import numpy as np
 
 import src.logger as logger_module
 from src.audio import AudioData
-from src.llm_postprocess import CLEANUP_PROMPT_VERSION
+from src.llm_postprocess import CLEANUP_PROMPT_HASH, CLEANUP_VERSION
 from src.logger import DataLogger
 from src.transcription_live import LiveSegmentMetrics
 
@@ -95,7 +95,8 @@ def test_data_logger_writes_ollama_cleanup_pair(monkeypatch, tmp_path):
     assert entry["cleanup_input"] == "hello world"
     assert entry["cleanup_status"] == "success"
     assert entry["cleanup_model"] == "cleanup-model"
-    assert entry["cleanup_prompt_version"] == CLEANUP_PROMPT_VERSION
+    assert entry["cleanup_version"] == CLEANUP_VERSION
+    assert entry["cleanup_prompt_hash"] == CLEANUP_PROMPT_HASH
 
 
 def test_data_logger_omits_cleanup_model_when_ollama_off(monkeypatch, tmp_path):
@@ -114,7 +115,8 @@ def test_data_logger_omits_cleanup_model_when_ollama_off(monkeypatch, tmp_path):
     assert entry["cleanup_input"] == "Hello world."
     assert entry["cleanup_status"] == "off"
     assert entry["cleanup_model"] is None
-    assert entry["cleanup_prompt_version"] is None
+    assert entry["cleanup_version"] is None
+    assert entry["cleanup_prompt_hash"] is None
 
 
 def test_storage_summary_counts_existing_logged_files_without_creating_dir(

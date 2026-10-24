@@ -14,7 +14,7 @@ import numpy as np
 
 from .audio import AudioData
 from .config import get_config, get_training_data_dir
-from .llm_postprocess import CLEANUP_PROMPT_VERSION, CleanupStatus
+from .llm_postprocess import CLEANUP_PROMPT_HASH, CLEANUP_VERSION, CleanupStatus
 from .transcription_live import LiveSegmentMetrics
 
 
@@ -34,7 +34,8 @@ class TranscriptionLog:
     cleanup_input: str
     cleanup_status: CleanupStatus
     cleanup_model: str | None
-    cleanup_prompt_version: str | None
+    cleanup_version: str | None
+    cleanup_prompt_hash: str | None
 
 
 @dataclass(frozen=True)
@@ -100,10 +101,12 @@ class DataLogger:
             live_segment_metrics = LiveSegmentMetrics.empty()
 
         cleanup_model = None
-        cleanup_prompt_version = None
+        cleanup_version = None
+        cleanup_prompt_hash = None
         if cleanup_status != "off":
             cleanup_model = self.config.get("ollama_model_name")
-            cleanup_prompt_version = CLEANUP_PROMPT_VERSION
+            cleanup_version = CLEANUP_VERSION
+            cleanup_prompt_hash = CLEANUP_PROMPT_HASH
 
         try:
             self.audio_dir.mkdir(parents=True, exist_ok=True)
@@ -134,7 +137,8 @@ class DataLogger:
                 cleanup_input=cleanup_input,
                 cleanup_status=cleanup_status,
                 cleanup_model=cleanup_model,
-                cleanup_prompt_version=cleanup_prompt_version,
+                cleanup_version=cleanup_version,
+                cleanup_prompt_hash=cleanup_prompt_hash,
             )
 
             # Append to JSONL file

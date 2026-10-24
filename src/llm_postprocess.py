@@ -77,9 +77,16 @@ FEW_SHOT_MESSAGES = [
     },
 ]
 
-# Short fingerprint of the built-in prompt so training data rows show which
-# instructions produced them. User vocabulary is intentionally excluded.
-CLEANUP_PROMPT_VERSION = hashlib.sha256(
+# Readable label recorded in training data so cleanup outputs can be grouped
+# and traced back to the code that produced them. Bump it whenever cleanup
+# behavior changes: prompt, few-shot examples, output normalization, or the
+# acceptance gate.
+CLEANUP_VERSION = "v1"
+
+# Short fingerprint of the built-in prompt and examples. Tests pin it to
+# CLEANUP_VERSION so prompt edits fail until the version is bumped. User
+# vocabulary is intentionally excluded.
+CLEANUP_PROMPT_HASH = hashlib.sha256(
     json.dumps([DEFAULT_SYSTEM_PROMPT, FEW_SHOT_MESSAGES]).encode("utf-8")
 ).hexdigest()[:12]
 
