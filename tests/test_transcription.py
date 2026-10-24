@@ -153,9 +153,21 @@ def test_finalize_observes_local_and_optional_cleanup_once(mode, monkeypatch):
             "applied": "cleanup_applied",
         }[mode]
     )
+    assert events[-1]["outcome"] == {"disabled": "off", "empty": "skipped"}.get(
+        mode, events[-1]["outcome"]
+    )
     if mode in {"failure", "applied"}:
         assert events[-1]["metadata"]["cleanup_model"] == "cached-model"
     assert "private" not in repr(events).lower()
+
+
+def test_disabled_cleanup_reports_off_even_for_empty_text():
+    config = FakeConfig()
+    config.ollama_enabled = False
+    events = []
+    with observe_transcription(events.append):
+        Transcriber(config=config, device="cpu").finalize_text("")
+    assert (events[-1]["outcome"], events[-1]["code"]) == ("off", "cleanup_disabled")
 
 
 def test_transcription_continues_when_observer_raises():

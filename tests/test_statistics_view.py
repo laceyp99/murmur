@@ -65,7 +65,7 @@ def test_view_preserves_zero_unknown_and_separate_contexts():
             },
             "stages": {
                 "clipboard": {"attempts": 2, "success_count": 1, "failed_count": 1},
-                "ollama_cleanup": {"attempts": 2, "skipped_count": 2},
+                "ollama_cleanup": {"attempts": 5, "off_count": 3, "skipped_count": 2},
                 "preparation": {"attempts": 0},
             },
             "model_groups": [
@@ -99,7 +99,7 @@ def test_view_preserves_zero_unknown_and_separate_contexts():
     assert rows["Stop to clipboard (median / p95)"] == "0 ms / n/a"
     assert rows["Total recorded"] == "0.0 min"
     assert rows["Clipboard"] == "1 ok, 1 failed"
-    assert rows["Ollama cleanup"] == "2 skipped"
+    assert rows["Ollama cleanup"] == "3 off, 2 skipped"
     assert "Preparation" not in rows
     assert "unknown cleanup" not in rows
     assert rows["small · CPU + model-a cleanup"] == "1 session · n/a median"

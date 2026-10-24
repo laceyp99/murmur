@@ -2750,6 +2750,27 @@ def test_statistics_counts_one_whisper_failure_once(
     assert summary["issues"] == {"whisper_failed": 1}
 
 
+def test_statistics_disabled_cleanup_is_off_without_an_issue(usage_service):
+    app = make_app(None, FakeTranscriber())
+    collector = usage_service.start_session()
+    app._stats_session = collector
+    app._stats_observer()(
+        {
+            "stage": "llm_cleanup",
+            "outcome": "off",
+            "seconds": 0.0,
+            "code": "cleanup_disabled",
+            "category": "skip",
+            "metadata": {"cleanup_model": None, "cleanup_enabled": False},
+        }
+    )
+    collector.finish("success")
+    summary = usage_service.summary().result(timeout=3)
+    stage = summary["stages"]["ollama_cleanup"]
+    assert (stage["off_count"], stage["skipped_count"]) == (1, 0)
+    assert summary["issues"] == {}
+
+
 def test_statistics_observer_classifies_recovered_cleanup_and_uses_fixed_collector(
     usage_service,
 ):

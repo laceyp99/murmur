@@ -111,6 +111,7 @@ def _stage_value(value):
         for key, word in (
             ("success_count", "ok"),
             ("failed_count", "failed"),
+            ("off_count", "off"),
             ("skipped_count", "skipped"),
         )
         if value.get(key)
@@ -187,7 +188,7 @@ def _statistics_view(summary) -> StatisticsView:
             _stage_value(value),
         )
         for name, value in summary.get("stages", {}).items()
-        if _stage_ran(value) or value.get("skipped_count")
+        if _stage_ran(value) or value.get("skipped_count") or value.get("off_count")
     )
     if stages:
         sections.append(("Stages", stages))

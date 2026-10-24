@@ -164,12 +164,12 @@ class Transcriber:
             category="success",
         )
         enabled = bool(getattr(self.config, "ollama_enabled", False))
-        if not cleaned_text or not enabled:
+        if not enabled or not cleaned_text:
             emit_observation(
                 stage="llm_cleanup",
-                outcome="skipped",
+                outcome="off" if not enabled else "skipped",
                 seconds=0.0,
-                code="cleanup_empty" if not cleaned_text else "cleanup_disabled",
+                code="cleanup_disabled" if not enabled else "cleanup_empty",
                 category="skip",
                 cleanup_enabled=enabled,
             )

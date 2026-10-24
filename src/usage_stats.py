@@ -36,9 +36,10 @@ STAGES = (
 )
 # Issues may also name finalization, for failures the handler cannot place.
 ISSUE_STAGES = (*STAGES, "finalization")
-StageOutcome = Literal["running", "success", "failed", "skipped", "cancelled"]
+# "off" means the feature was disabled; "skipped" means enabled but not needed.
+StageOutcome = Literal["running", "success", "failed", "skipped", "off", "cancelled"]
 SessionOutcome = Literal["success", "failed", "no_speech", "cancelled", "interrupted"]
-STAGE_OUTCOMES = {"running", "success", "failed", "skipped", "cancelled"}
+STAGE_OUTCOMES = {"running", "success", "failed", "skipped", "off", "cancelled"}
 TERMINAL_OUTCOMES = {"success", "failed", "no_speech", "cancelled", "interrupted"}
 ISSUE_CODES = frozenset(
     {
@@ -58,7 +59,6 @@ ISSUE_CODES = frozenset(
         "cleanup_request_failed",
         "cleanup_context_skip",
         "cleanup_output_rejected",
-        "cleanup_disabled",
         "cleanup_empty",
         "clipboard_failed",
     }
@@ -120,6 +120,7 @@ class StageSnapshot:
     failed_count: int = 0
     skipped_count: int = 0
     failed_timed_attempts: int = 0
+    off_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -207,6 +208,7 @@ class SessionCollector:
                 old.skipped_count + (attempts if outcome == "skipped" else 0),
                 old.failed_timed_attempts
                 + (attempts if outcome == "failed" and seconds is not None else 0),
+                off_count=old.off_count + (attempts if outcome == "off" else 0),
             )
             self._snapshot = replace(self._snapshot, stages=tuple(stages.values()))
             if code is not None:
@@ -900,6 +902,8 @@ def _stage_summary(rows):
             "success_count": sum(s["success_count"] for s in stages),
             "failed_count": sum(s["failed_count"] for s in stages),
             "skipped_count": sum(s["skipped_count"] for s in stages),
+            # Rows written before "off" existed have no off_count.
+            "off_count": sum(s.get("off_count", 0) for s in stages),
             "seconds_count": len(success),
             "mean_seconds": _mean(success),
             "failed_seconds_count": failed_attempts,

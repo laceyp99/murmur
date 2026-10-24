@@ -97,6 +97,20 @@ def test_export_rounds_durations_to_milliseconds(service):
     assert len(EXPORT_COLUMNS) == len(set(EXPORT_COLUMNS))
 
 
+def test_stage_rows_written_before_off_outcome_still_summarize(service):
+    collector = service.start_session()
+    collector.stage("ollama_cleanup", "off", seconds=0)
+    collector.finish("success")
+    barrier(service)
+    with sqlite3.connect(service.path) as connection:
+        payload = json.loads(
+            connection.execute("SELECT payload FROM stages").fetchone()[0]
+        )
+        del payload["off_count"]
+        connection.execute("UPDATE stages SET payload=?", (json.dumps(payload),))
+    assert barrier(service)["stages"]["ollama_cleanup"]["off_count"] == 0
+
+
 def test_exact_metrics_and_context_groups(service):
     fixtures = [
         ("success", 1, True, True, False),

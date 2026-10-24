@@ -278,6 +278,10 @@ sessions are reconciled.
 - Recording length and inference work differ. Live work overlaps recording;
   stage durations must not be added to infer the user's total wait. Failed
   stage durations are reported separately from successful stage averages.
+- A stage reads **off** when its feature is disabled, such as Ollama cleanup
+  switched off, and **skipped** when it was enabled but not needed, such as
+  empty text or text too long for the model's context. Neither counts as a
+  failure, and a disabled feature is not recorded as an issue.
 - Missing measurements remain unavailable, not zero. Small samples are flagged.
   Model comparisons include recording length and cleanup context; they measure
   observed performance, not transcription accuracy or causal improvement.

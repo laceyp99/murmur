@@ -177,7 +177,8 @@ class MurmurApp:
                     outcome,
                     event["seconds"],
                 )
-                if outcome not in {"success", "cancelled"}:
+                # A disabled feature is not an issue; the stage outcome says "off".
+                if outcome not in {"success", "cancelled", "off"}:
                     category = "skip" if outcome == "skipped" else event["category"]
                     collector.issue(
                         stage,
