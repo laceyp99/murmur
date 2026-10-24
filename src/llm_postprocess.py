@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from math import ceil
-from typing import Any
+from typing import Any, Literal
 
 from .observations import emit_observation, failure_category
 
@@ -74,6 +76,12 @@ FEW_SHOT_MESSAGES = [
         "content": "The report is ready. Please review it tomorrow.",
     },
 ]
+
+# Short fingerprint of the built-in prompt so training data rows show which
+# instructions produced them. User vocabulary is intentionally excluded.
+CLEANUP_PROMPT_VERSION = hashlib.sha256(
+    json.dumps([DEFAULT_SYSTEM_PROMPT, FEW_SHOT_MESSAGES]).encode("utf-8")
+).hexdigest()[:12]
 
 CONTEXT_SIZE = 4096
 CONTEXT_HEADROOM = 0.10
@@ -329,6 +337,18 @@ class OllamaClient:
         return model_names
 
 
+# Same outcome names as the llm_cleanup usage statistics stage.
+CleanupStatus = Literal["success", "failed", "skipped", "off", "unavailable"]
+
+
+@dataclass(frozen=True)
+class CleanupResult:
+    """Ollama cleanup output and whether the model's text was actually used."""
+
+    text: str
+    status: CleanupStatus
+
+
 @dataclass(frozen=True)
 class OllamaConnectionCheck:
     """Result of a lightweight Ollama endpoint/model availability check."""
@@ -379,8 +399,8 @@ class LLMPostProcessor:
         self.user_vocab = dict(user_vocab or {})
         self.speaker_names = tuple(speaker_names)
 
-    def process(self, text: str) -> str:
-        """Return cleaned transcript text, or the original text on failure."""
+    def process(self, text: str) -> CleanupResult:
+        """Return cleaned text and the cleanup outcome, keeping input on failure."""
         started = time.perf_counter()
 
         def observe(outcome: str, code: str, category: str) -> None:
@@ -397,7 +417,7 @@ class LLMPostProcessor:
         cleaned_input = text.strip()
         if not cleaned_input:
             observe("skipped", "cleanup_empty", "skip")
-            return cleaned_input
+            return CleanupResult(cleaned_input, "skipped")
 
         messages = self.build_messages(cleaned_input)
         max_tokens = max(
@@ -410,7 +430,7 @@ class LLMPostProcessor:
             print(
                 "Ollama cleanup skipped because the estimated request exceeded the context budget."
             )
-            return cleaned_input
+            return CleanupResult(cleaned_input, "skipped")
 
         start_time = time.time()
         try:
@@ -429,22 +449,25 @@ class LLMPostProcessor:
                 "error",
             )
             print("Ollama post-processing failed; using original transcript.")
-            return cleaned_input
+            return CleanupResult(cleaned_input, "failed")
 
         elapsed = time.time() - start_time
         normalized_result = self._normalize_output(result)
         if self._is_acceptable_output(normalized_result, cleaned_input):
             observe("success", "cleanup_applied", "success")
             print(f"LLM post-processing completed in {elapsed:.2f}s")
-            return strip_invented_greeting(
-                cleaned_input, normalized_result, self.speaker_names
+            return CleanupResult(
+                strip_invented_greeting(
+                    cleaned_input, normalized_result, self.speaker_names
+                ),
+                "success",
             )
 
         observe("failed", "cleanup_output_rejected", "error")
         print(
             "Warning: Ollama post-processing returned invalid output; using original transcript."
         )
-        return cleaned_input
+        return CleanupResult(cleaned_input, "failed")
 
     def _normalize_output(self, text: str) -> str:
         """Strip common wrapper formatting from model output before validation."""

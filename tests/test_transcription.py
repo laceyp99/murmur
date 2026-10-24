@@ -9,11 +9,12 @@ pytest.importorskip("whisper")
 from src.audio import AudioData
 from src.cancellation import TranscriptionCancelledError
 from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
-from src.llm_postprocess import LLMPostProcessor, OllamaClient
+from src.llm_postprocess import CleanupResult, LLMPostProcessor, OllamaClient
 from src.observations import observe_transcription
 from src.transcription import (
     LOGPROB_THRESHOLD,
     NO_SPEECH_THRESHOLD,
+    FinalTranscript,
     Transcriber,
     _should_accept_whisper_segment,
 )
@@ -62,7 +63,7 @@ class FakeLLMPostProcessor:
         self.calls.append(text)
         if self.error is not None:
             raise self.error
-        return self.response
+        return CleanupResult(self.response, "success")
 
     def warm(self):
         if self.error is not None:
@@ -142,7 +143,10 @@ def test_finalize_observes_local_and_optional_cleanup_once(mode, monkeypatch):
     events = []
     text = "" if mode == "empty" else "Private dictated sentence."
     with observe_transcription(events.append):
-        assert transcriber.finalize_text(text) == text
+        result = transcriber.finalize_text(text)
+    assert result.text == text
+    # Training data and usage statistics must agree on the cleanup outcome.
+    assert result.cleanup_status == events[-1]["outcome"]
     assert [event["stage"] for event in events] == ["local_cleanup", "llm_cleanup"]
     assert (
         events[-1]["code"]
@@ -177,7 +181,10 @@ def test_transcription_continues_when_observer_raises():
 
     transcriber = Transcriber(config=FakeConfig(), model=FakeModel(["hello"]))
     with observe_transcription(broken):
-        assert transcriber.transcribe(AudioData(np.ones(160), 16000, 0.01)) == "Hello."
+        assert (
+            transcriber.transcribe(AudioData(np.ones(160), 16000, 0.01)).text
+            == "Hello."
+        )
 
 
 @pytest.mark.parametrize(
@@ -194,10 +201,10 @@ def test_transcription_preserves_waveform_duration_and_pitch(sample_rate, entryp
     clip = AudioData(audio=audio, sample_rate=sample_rate, duration=1.0)
 
     if entrypoint == "transcribe":
-        assert transcriber.transcribe(clip) == "Hello."
+        assert transcriber.transcribe(clip).text == "Hello."
     elif entrypoint == "transcribe_segments":
         result = transcriber.transcribe_segments([clip])
-        assert result.text == "Hello."
+        assert result.final.text == "Hello."
         assert result.segments[0].duration == 1.0
     else:
         segment = LiveSpeechSegment(
@@ -266,7 +273,7 @@ def test_transcribe_empty_audio_skips_whisper(sample_rate):
     transcriber = Transcriber(config=FakeConfig(), model=model, device="cpu")
     clip = AudioData(np.array([], dtype=np.float32), sample_rate, 0.0)
 
-    assert transcriber.transcribe(clip) == ""
+    assert transcriber.transcribe(clip).text == ""
     assert model.calls == []
 
 
@@ -317,7 +324,7 @@ def test_cancel_during_llm_discards_return_and_suppresses_fallback(raises):
             cancelled.set()
             if raises:
                 raise RuntimeError("failed after cancellation")
-            return "late cleanup"
+            return CleanupResult("late cleanup", "success")
 
     config = FakeConfig()
     config.ollama_enabled = True
@@ -407,7 +414,7 @@ def test_transcribe_segments_returns_raw_segment_text_and_final_document_text():
     result = transcriber.transcribe_segments(segments)
 
     assert [segment.text for segment in result.segments] == ["hello", "world"]
-    assert result.text == "Hello world."
+    assert result.final.text == "Hello world."
     assert len(fake_model.calls) == 2
     assert all(call["task"] == "transcribe" for call in fake_model.calls)
     assert all(call["fp16"] is False for call in fake_model.calls)
@@ -429,7 +436,7 @@ def test_transcribe_segments_strip_only_trailing_ellipses_from_segment_text():
     result = transcriber.transcribe_segments(segments)
 
     assert [segment.text for segment in result.segments] == ["hello", "world."]
-    assert result.text == "Hello world."
+    assert result.final.text == "Hello world."
 
 
 @pytest.mark.parametrize("entrypoint", ["offline", "live"])
@@ -481,7 +488,7 @@ def test_segment_finalization_removes_only_boundary_periods_without_ollama(
     fake_model = FakeModel(texts)
     transcriber = Transcriber(config=FakeConfig(), model=fake_model, device="cpu")
     if entrypoint == "live":
-        result = transcriber.finalize_segment_texts(texts)
+        result = transcriber.finalize_segment_texts(texts).text
     else:
         segments = [
             AudioData(
@@ -491,7 +498,7 @@ def test_segment_finalization_removes_only_boundary_periods_without_ollama(
             )
             for _ in texts
         ]
-        result = transcriber.transcribe_segments(segments).text
+        result = transcriber.transcribe_segments(segments).final.text
 
     assert result == expected
 
@@ -535,7 +542,7 @@ def test_transcribe_segments_skips_filtered_no_speech_segments():
 
     assert [segment.text for segment in result.segments] == ["actual speech"]
     assert result.segments[0].index == 1
-    assert result.text == "Actual speech."
+    assert result.final.text == "Actual speech."
 
 
 def test_transcribe_segment_keeps_high_confidence_no_speech_override():
@@ -593,7 +600,7 @@ def test_transcribe_single_clip_applies_final_document_cleanup_once():
 
     result = transcriber.transcribe(audio_data)
 
-    assert result == "Multiple spaces."
+    assert result.text == "Multiple spaces."
     assert len(fake_model.calls) == 1
 
 
@@ -602,7 +609,7 @@ def test_finalize_text_does_not_force_mid_sentence_capitalization():
 
     result = transcriber.finalize_text("hello. there is more")
 
-    assert result == "Hello. there is more."
+    assert result.text == "Hello. there is more."
 
 
 def test_finalize_text_uses_llm_post_processor_when_enabled():
@@ -618,7 +625,7 @@ def test_finalize_text_uses_llm_post_processor_when_enabled():
 
     result = transcriber.finalize_text("hello world")
 
-    assert result == "Hello, world!"
+    assert result == FinalTranscript("Hello, world!", "Hello world.", "success")
     assert fake_processor.calls == ["Hello world."]
 
 
@@ -637,7 +644,7 @@ def test_finalize_segment_texts_sends_period_light_text_to_llm():
         ["this should keep flowing.", "Even after whisper split it."]
     )
 
-    assert result == "Cleaned by LLM."
+    assert result.text == "Cleaned by LLM."
     assert fake_processor.calls == [
         "This should keep flowing Even after whisper split it."
     ]
@@ -669,7 +676,9 @@ def test_transcribe_preserves_whisper_text_when_ollama_content_is_null(capsys):
         audio=np.ones(16000, dtype=np.float32), sample_rate=16000, duration=1.0
     )
 
-    assert transcriber.transcribe(audio) == "Invoice is $100, due May 5."
+    assert transcriber.transcribe(audio) == FinalTranscript(
+        "Invoice is $100, due May 5.", "Invoice is $100, due May 5.", "failed"
+    )
     assert "Invoice" not in capsys.readouterr().out
 
 
@@ -686,7 +695,7 @@ def test_finalize_text_falls_back_when_llm_post_processor_fails():
 
     result = transcriber.finalize_text("multiple   spaces")
 
-    assert result == "Multiple spaces."
+    assert result == FinalTranscript("Multiple spaces.", "Multiple spaces.", "failed")
     assert fake_processor.calls == ["Multiple spaces."]
 
 

@@ -18,7 +18,7 @@ from whisper.audio import SAMPLE_RATE as WHISPER_SAMPLE_RATE
 from .audio import AudioData
 from .cancellation import check_cancelled
 from .config import get_config
-from .llm_postprocess import LLMPostProcessor, OllamaClient
+from .llm_postprocess import CleanupStatus, LLMPostProcessor, OllamaClient
 from .observations import emit_observation, failure_category
 from .user_vocab import load_user_vocab
 from .vad_audio import resample_audio
@@ -77,10 +77,19 @@ class SegmentTranscription:
 
 
 @dataclass(frozen=True)
-class TranscriptionResult:
-    """Combined segment outputs and the final cleaned document text."""
+class FinalTranscript:
+    """Final document text plus the Ollama cleanup input and outcome."""
 
     text: str
+    cleanup_input: str = ""
+    cleanup_status: CleanupStatus = "off"
+
+
+@dataclass(frozen=True)
+class TranscriptionResult:
+    """Combined segment outputs and the final cleaned document."""
+
+    final: FinalTranscript
     segments: list[SegmentTranscription]
 
 
@@ -129,7 +138,7 @@ class Transcriber:
 
     def transcribe(
         self, audio_data: AudioData, *, cancel_event: Event | None = None
-    ) -> str:
+    ) -> FinalTranscript:
         """
         Transcribe audio to text.
 
@@ -137,11 +146,13 @@ class Transcriber:
             audio_data: AudioData containing the recorded audio.
 
         Returns:
-            Transcribed text string.
+            Final transcript with its cleanup details.
         """
-        return self.transcribe_segments([audio_data], cancel_event=cancel_event).text
+        return self.transcribe_segments([audio_data], cancel_event=cancel_event).final
 
-    def finalize_text(self, text: str, *, cancel_event: Event | None = None) -> str:
+    def finalize_text(
+        self, text: str, *, cancel_event: Event | None = None
+    ) -> FinalTranscript:
         """Apply document-level cleanup to pre-transcribed text."""
         check_cancelled(cancel_event)
         started = time.perf_counter()
@@ -165,15 +176,16 @@ class Transcriber:
         )
         enabled = bool(getattr(self.config, "ollama_enabled", False))
         if not enabled or not cleaned_text:
+            outcome = "off" if not enabled else "skipped"
             emit_observation(
                 stage="llm_cleanup",
-                outcome="off" if not enabled else "skipped",
+                outcome=outcome,
                 seconds=0.0,
                 code="cleanup_disabled" if not enabled else "cleanup_empty",
                 category="skip",
                 cleanup_enabled=enabled,
             )
-            return cleaned_text
+            return FinalTranscript(cleaned_text, cleaned_text, outcome)
 
         started = time.perf_counter()
         processor = self._get_llm_post_processor()
@@ -187,7 +199,7 @@ class Transcriber:
                 category="unavailable",
                 cleanup_enabled=True,
             )
-            return cleaned_text
+            return FinalTranscript(cleaned_text, cleaned_text, "unavailable")
 
         started = time.perf_counter()
         try:
@@ -209,13 +221,13 @@ class Transcriber:
                 ),
             )
             print("Ollama post-processing failed; using local transcript cleanup.")
-            return cleaned_text
+            return FinalTranscript(cleaned_text, cleaned_text, "failed")
         check_cancelled(cancel_event)
-        return result
+        return FinalTranscript(result.text, cleaned_text, result.status)
 
     def finalize_segment_texts(
         self, segment_texts: Sequence[str], *, cancel_event: Event | None = None
-    ) -> str:
+    ) -> FinalTranscript:
         """Join segments with fewer boundary periods, then clean the document."""
         check_cancelled(cancel_event)
         return self.finalize_text(
@@ -299,11 +311,11 @@ class Transcriber:
                     f"transcribed in {segment_result.processing_time:.2f}s"
                 )
 
-        final_text = self.finalize_segment_texts(
+        final = self.finalize_segment_texts(
             [segment.text for segment in segment_results], cancel_event=cancel_event
         )
 
-        return TranscriptionResult(text=final_text, segments=segment_results)
+        return TranscriptionResult(final=final, segments=segment_results)
 
     def transcribe_segment(self, segment: AudioSegmentLike) -> str:
         """Transcribe one segment without document-level cleanup."""

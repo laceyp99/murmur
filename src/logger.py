@@ -14,6 +14,7 @@ import numpy as np
 
 from .audio import AudioData
 from .config import get_config, get_training_data_dir
+from .llm_postprocess import CLEANUP_PROMPT_VERSION, CleanupStatus
 from .transcription_live import LiveSegmentMetrics
 
 
@@ -30,6 +31,10 @@ class TranscriptionLog:
     live_segment_count: int
     live_segment_latency_avg_seconds: float | None
     live_segment_latency_max_seconds: float | None
+    cleanup_input: str
+    cleanup_status: CleanupStatus
+    cleanup_model: str | None
+    cleanup_prompt_version: str | None
 
 
 @dataclass(frozen=True)
@@ -67,15 +72,20 @@ class DataLogger:
         transcription: str,
         processing_time: float,
         live_segment_metrics: LiveSegmentMetrics | None = None,
+        *,
+        cleanup_input: str = "",
+        cleanup_status: CleanupStatus = "off",
     ) -> TranscriptionLog | None:
         """
         Log an audio recording and its transcription.
 
         Args:
             audio_data: The recorded audio data
-            transcription: The transcription text
+            transcription: The final transcription text
             processing_time: Finalization latency after recording stops, in seconds
             live_segment_metrics: Runtime metrics for live chunks that contributed text
+            cleanup_input: The text sent to Ollama cleanup, after local cleanup
+            cleanup_status: The llm_cleanup outcome, using usage statistics names
 
         Returns:
             TranscriptionLog entry if successful, None otherwise
@@ -88,6 +98,12 @@ class DataLogger:
 
         if live_segment_metrics is None:
             live_segment_metrics = LiveSegmentMetrics.empty()
+
+        cleanup_model = None
+        cleanup_prompt_version = None
+        if cleanup_status != "off":
+            cleanup_model = self.config.get("ollama_model_name")
+            cleanup_prompt_version = CLEANUP_PROMPT_VERSION
 
         try:
             self.audio_dir.mkdir(parents=True, exist_ok=True)
@@ -115,6 +131,10 @@ class DataLogger:
                 live_segment_latency_max_seconds=(
                     live_segment_metrics.latency_max_seconds
                 ),
+                cleanup_input=cleanup_input,
+                cleanup_status=cleanup_status,
+                cleanup_model=cleanup_model,
+                cleanup_prompt_version=cleanup_prompt_version,
             )
 
             # Append to JSONL file

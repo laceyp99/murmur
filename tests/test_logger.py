@@ -4,6 +4,7 @@ import numpy as np
 
 import src.logger as logger_module
 from src.audio import AudioData
+from src.llm_postprocess import CLEANUP_PROMPT_VERSION
 from src.logger import DataLogger
 from src.transcription_live import LiveSegmentMetrics
 
@@ -14,6 +15,8 @@ class FakeConfig:
     def get(self, key, default=None):
         if key == "model":
             return "small"
+        if key == "ollama_model_name":
+            return "cleanup-model"
         return default
 
 
@@ -66,6 +69,52 @@ def test_data_logger_writes_empty_live_segment_metrics_by_default(
     assert entry["live_segment_count"] == 0
     assert entry["live_segment_latency_avg_seconds"] is None
     assert entry["live_segment_latency_max_seconds"] is None
+
+
+def read_single_entry(log_dir):
+    [entry_line] = (
+        (log_dir / "transcriptions.jsonl").read_text(encoding="utf-8").splitlines()
+    )
+    return json.loads(entry_line)
+
+
+def test_data_logger_writes_ollama_cleanup_pair(monkeypatch, tmp_path):
+    monkeypatch.setattr(logger_module, "get_config", lambda: FakeConfig())
+    data_logger = DataLogger(log_dir=tmp_path)
+
+    data_logger.log(
+        make_audio_data(),
+        "Hello, world.",
+        1.25,
+        cleanup_input="hello world",
+        cleanup_status="success",
+    )
+
+    entry = read_single_entry(tmp_path)
+    assert entry["transcription"] == "Hello, world."
+    assert entry["cleanup_input"] == "hello world"
+    assert entry["cleanup_status"] == "success"
+    assert entry["cleanup_model"] == "cleanup-model"
+    assert entry["cleanup_prompt_version"] == CLEANUP_PROMPT_VERSION
+
+
+def test_data_logger_omits_cleanup_model_when_ollama_off(monkeypatch, tmp_path):
+    monkeypatch.setattr(logger_module, "get_config", lambda: FakeConfig())
+    data_logger = DataLogger(log_dir=tmp_path)
+
+    data_logger.log(
+        make_audio_data(),
+        "Hello world.",
+        1.25,
+        cleanup_input="Hello world.",
+        cleanup_status="off",
+    )
+
+    entry = read_single_entry(tmp_path)
+    assert entry["cleanup_input"] == "Hello world."
+    assert entry["cleanup_status"] == "off"
+    assert entry["cleanup_model"] is None
+    assert entry["cleanup_prompt_version"] is None
 
 
 def test_storage_summary_counts_existing_logged_files_without_creating_dir(
