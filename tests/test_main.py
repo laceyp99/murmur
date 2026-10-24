@@ -809,7 +809,11 @@ def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeyp
     assert logged_audio is audio_data
     assert logged_text == "FINAL:hello world again"
     assert app.logger.cleanup_details == [
-        {"cleanup_input": "hello world again", "cleanup_status": "success"}
+        {
+            "cleanup_input": "hello world again",
+            "cleanup_status": "success",
+            "cleanup_model": None,
+        }
     ]
     assert elapsed == 1.25
     assert live_segment_metrics.segment_count == 2

@@ -147,6 +147,9 @@ def test_finalize_observes_local_and_optional_cleanup_once(mode, monkeypatch):
     assert result.text == text
     # Training data and usage statistics must agree on the cleanup outcome.
     assert result.cleanup_status == events[-1]["outcome"]
+    assert result.cleanup_model == (
+        "cached-model" if mode in {"failure", "applied"} else None
+    )
     assert [event["stage"] for event in events] == ["local_cleanup", "llm_cleanup"]
     assert (
         events[-1]["code"]
@@ -677,7 +680,10 @@ def test_transcribe_preserves_whisper_text_when_ollama_content_is_null(capsys):
     )
 
     assert transcriber.transcribe(audio) == FinalTranscript(
-        "Invoice is $100, due May 5.", "Invoice is $100, due May 5.", "failed"
+        "Invoice is $100, due May 5.",
+        "Invoice is $100, due May 5.",
+        "failed",
+        config.ollama_model_name,
     )
     assert "Invoice" not in capsys.readouterr().out
 

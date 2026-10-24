@@ -961,6 +961,7 @@ class MurmurApp:
             live_segment_metrics,
             cleanup_input=transcript.cleanup_input,
             cleanup_status=transcript.cleanup_status,
+            cleanup_model=transcript.cleanup_model,
         )
         if self._shutdown_event.is_set():
             return

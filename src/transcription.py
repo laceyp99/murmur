@@ -83,6 +83,7 @@ class FinalTranscript:
     text: str
     cleanup_input: str = ""
     cleanup_status: CleanupStatus = "off"
+    cleanup_model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -201,6 +202,8 @@ class Transcriber:
             )
             return FinalTranscript(cleaned_text, cleaned_text, "unavailable")
 
+        # The cached client's model, which can differ from config until restart.
+        cleanup_model = getattr(getattr(processor, "client", None), "model_name", None)
         started = time.perf_counter()
         try:
             result = processor.process(cleaned_text)
@@ -216,14 +219,12 @@ class Transcriber:
                 else "cleanup_request_failed",
                 category="error",
                 cleanup_enabled=True,
-                cleanup_model=getattr(
-                    getattr(processor, "client", None), "model_name", None
-                ),
+                cleanup_model=cleanup_model,
             )
             print("Ollama post-processing failed; using local transcript cleanup.")
-            return FinalTranscript(cleaned_text, cleaned_text, "failed")
+            return FinalTranscript(cleaned_text, cleaned_text, "failed", cleanup_model)
         check_cancelled(cancel_event)
-        return FinalTranscript(result.text, cleaned_text, result.status)
+        return FinalTranscript(result.text, cleaned_text, result.status, cleanup_model)
 
     def finalize_segment_texts(
         self, segment_texts: Sequence[str], *, cancel_event: Event | None = None

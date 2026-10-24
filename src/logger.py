@@ -76,6 +76,7 @@ class DataLogger:
         *,
         cleanup_input: str = "",
         cleanup_status: CleanupStatus = "off",
+        cleanup_model: str | None = None,
     ) -> TranscriptionLog | None:
         """
         Log an audio recording and its transcription.
@@ -85,8 +86,9 @@ class DataLogger:
             transcription: The final transcription text
             processing_time: Finalization latency after recording stops, in seconds
             live_segment_metrics: Runtime metrics for live chunks that contributed text
-            cleanup_input: The text sent to Ollama cleanup, after local cleanup
+            cleanup_input: Text after local cleanup; Ollama's input when it ran
             cleanup_status: The llm_cleanup outcome, using usage statistics names
+            cleanup_model: Model of the Ollama client that handled cleanup, if any
 
         Returns:
             TranscriptionLog entry if successful, None otherwise
@@ -100,11 +102,9 @@ class DataLogger:
         if live_segment_metrics is None:
             live_segment_metrics = LiveSegmentMetrics.empty()
 
-        cleanup_model = None
         cleanup_version = None
         cleanup_prompt_hash = None
         if cleanup_status != "off":
-            cleanup_model = self.config.get("ollama_model_name")
             cleanup_version = CLEANUP_VERSION
             cleanup_prompt_hash = CLEANUP_PROMPT_HASH
 

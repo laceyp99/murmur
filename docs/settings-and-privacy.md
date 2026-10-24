@@ -209,9 +209,9 @@ can be evaluated against real dictation:
 | Field | Meaning |
 | --- | --- |
 | `transcription` | Final text sent to the clipboard. |
-| `cleanup_input` | Text sent to Ollama, after Whisper and local cleanup. |
+| `cleanup_input` | Text after Whisper and local cleanup, which is the input given to Ollama when it ran. |
 | `cleanup_status` | The same Ollama cleanup outcome shown in usage statistics: `success` when Ollama's output was used, `failed` for a request error or rejected output, `skipped` for empty or over-budget input, `unavailable` when the cleanup client could not start, or `off` when Ollama cleanup is disabled. Every status except `success` keeps `cleanup_input` as the final text. |
-| `cleanup_model` | Configured Ollama model, or `null` when cleanup is off. |
+| `cleanup_model` | Model of the Ollama client that handled cleanup, or `null` when no client ran (off, unavailable, or empty input). A model changed in settings is recorded only after restart, matching when it takes effect. |
 | `cleanup_version` | Readable cleanup label, such as `v1`, or `null` when cleanup is off. It is bumped whenever the prompt, examples, output normalization, or acceptance gate changes. |
 | `cleanup_prompt_hash` | Short hash of the built-in cleanup prompt and examples, or `null` when cleanup is off. User vocabulary is not included. |
 

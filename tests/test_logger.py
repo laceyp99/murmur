@@ -15,8 +15,6 @@ class FakeConfig:
     def get(self, key, default=None):
         if key == "model":
             return "small"
-        if key == "ollama_model_name":
-            return "cleanup-model"
         return default
 
 
@@ -88,6 +86,7 @@ def test_data_logger_writes_ollama_cleanup_pair(monkeypatch, tmp_path):
         1.25,
         cleanup_input="hello world",
         cleanup_status="success",
+        cleanup_model="cleanup-model",
     )
 
     entry = read_single_entry(tmp_path)
