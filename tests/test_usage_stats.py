@@ -376,6 +376,8 @@ def test_newer_schema_is_preserved(tmp_path):
 
 
 def test_bounded_nonblocking_snapshots_and_controls(service, monkeypatch):
+    # Exercise overflow without making correctness depend on 128 disk commits.
+    monkeypatch.setattr(service, "_snapshot_slots", threading.BoundedSemaphore(2))
     entered = threading.Event()
     release = threading.Event()
     original = service._write
@@ -389,8 +391,8 @@ def test_bounded_nonblocking_snapshots_and_controls(service, monkeypatch):
     collector = service.start_session()
     assert entered.wait(timeout=5)
     try:
-        # Only distinct sessions consume queue slots; 200 exceed the 128 limit.
-        for _ in range(200):
+        # Distinct sessions exceed the test's two slots while writes are blocked.
+        for _ in range(3):
             service.start_session()
         collector.finish("success")
         first = service.summary()
