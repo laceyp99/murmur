@@ -33,6 +33,7 @@ def test_tabs_have_expected_order_and_settings():
         "Transcription",
         "LLM Cleanup",
         "Data Privacy",
+        "Statistics",
     )
     assert [setting.key for setting in settings_for_tab("General")] == [
         "microphone",
@@ -43,6 +44,16 @@ def test_tabs_have_expected_order_and_settings():
         "pause_media_while_recording",
         "keep_microphone_ready",
     ]
+
+
+def test_statistics_defaults_on_without_restart_and_invalid_values_opt_out():
+    setting = SETTINGS_BY_KEY["enable_statistics"]
+    assert setting.default is True
+    assert setting.restart_required is False
+    assert settings_for_tab("Statistics") == (setting,)
+    assert normalize_value(True, setting) is True
+    for value in (False, None, "true", "false", 1):
+        assert normalize_value(value, setting) is False
 
 
 def test_microphone_preference_normalizes_without_persisting_device_index():

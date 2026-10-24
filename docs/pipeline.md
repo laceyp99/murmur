@@ -76,9 +76,21 @@ flowchart LR
     ClaimDelivery -->|no| Discard
     Clipboard --> Notify["Notify user, print metrics, optionally log"]
     Clipboard --> OverlayResult["Optional overlay: copied or short error"]
+    AppStart -.-> Stats["Content free session statistics"]
+    Clipboard -.-> Stats
+    Stats --> StatsQueue["Bounded background SQLite writer"]
 ```
 
 ## Main Concepts
+
+Local usage statistics observe the session lifecycle without owning dictation.
+The session collector records numeric metadata, major stage outcomes, routes,
+and fixed issue codes. Source text/audio never enter its snapshots. Clipboard
+success finalizes the record before training-data logging, and cancellation
+uses the existing delivery claim so late work cannot overwrite the outcome.
+Live inference observations are aggregated per session rather than retained as
+segment history. See [Local statistics](settings-and-privacy.md#local-statistics)
+for retention, controls, code provenance, and measurement definitions.
 
 ### Hotkey
 

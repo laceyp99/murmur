@@ -1,7 +1,9 @@
-"""Generate deterministic icon and version inputs for the Windows build."""
+"""Generate icon, version, and checkout identity inputs for the Windows build."""
 
 import argparse
+import json
 import re
+import sys
 import tomllib
 from pathlib import Path
 
@@ -77,6 +79,8 @@ def _write_version_info(destination: Path, version: str) -> None:
 
 def prepare_build(repo_root: Path, output_dir: Path) -> None:
     """Create the generated resources consumed by the PyInstaller spec."""
+    from src.build_info import _read_git_info
+
     logo_path = repo_root / "src" / "resources" / "icon.png"
     pyproject_path = repo_root / "pyproject.toml"
     for required_path in (logo_path, pyproject_path):
@@ -87,9 +91,14 @@ def prepare_build(repo_root: Path, output_dir: Path) -> None:
     version = _read_project_version(pyproject_path)
     _write_icon(logo_path, output_dir / "murmur.ico")
     _write_version_info(output_dir / "version_info.txt", version)
+    metadata = {"app_version": version, **_read_git_info(repo_root)}
+    (output_dir / "_build_info.json").write_text(
+        json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def main() -> None:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)

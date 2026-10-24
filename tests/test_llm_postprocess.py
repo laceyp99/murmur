@@ -14,9 +14,84 @@ from src.llm_postprocess import (
     OllamaClient,
     check_ollama_connection,
 )
+from src.observations import observe_transcription
 
 MODEL_NAME = DEFAULT_OLLAMA_MODEL_NAME
 TIMEOUT_SECONDS = float(DEFAULT_OLLAMA_TIMEOUT_SECONDS)
+
+
+@pytest.mark.parametrize(
+    ("response", "text", "expected_code"),
+    [
+        ("Private sentence.", "Private sentence.", "cleanup_applied"),
+        ("", "Private sentence.", "cleanup_output_rejected"),
+        (
+            RuntimeError("Private sentence."),
+            "Private sentence.",
+            "cleanup_request_failed",
+        ),
+        (TimeoutError("Private sentence."), "Private sentence.", "cleanup_timeout"),
+        ("unused", " ", "cleanup_empty"),
+        ("unused", "private " * 20000, "cleanup_context_skip"),
+    ],
+    ids=["unchanged", "rejected", "failed", "timeout", "empty", "context"],
+)
+def test_cleanup_observes_source_outcomes_without_content(
+    response, text, expected_code
+):
+    class Client:
+        model_name = "actual-model"
+
+        def chat(self, *args, **kwargs):
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+    processor = LLMPostProcessor(Client())
+    events = []
+    with observe_transcription(events.append):
+        result = processor.process(text)
+    assert result == text.strip()
+    assert len(events) == 1
+    event = events[0]
+    assert event["code"] == expected_code
+    assert event["stage"] == "llm_cleanup"
+    assert event["seconds"] >= 0
+    assert event["metadata"] == {
+        "cleanup_model": "actual-model",
+        "cleanup_enabled": True,
+    }
+    assert "private" not in repr(event).lower()
+
+
+def test_cleanup_transport_timeout_is_classified_without_exception_message():
+    from httpx import ReadTimeout
+
+    class Client:
+        def chat(self, *args, **kwargs):
+            raise ReadTimeout("secret text")
+
+    events = []
+    with observe_transcription(events.append):
+        assert LLMPostProcessor(Client()).process("Secret text.") == "Secret text."
+    assert events[0]["category"] == "error"
+    assert events[0]["code"] == "cleanup_timeout"
+    assert "secret" not in repr(events).lower()
+
+
+def test_cleanup_observer_failure_preserves_accepted_output():
+    class Client:
+        def chat(self, *args, **kwargs):
+            return "Edited sentence."
+
+    def broken(event):
+        raise RuntimeError("observer failure")
+
+    with observe_transcription(broken):
+        assert (
+            LLMPostProcessor(Client()).process("Original sentence.")
+            == "Edited sentence."
+        )
 
 
 def test_baseline_messages_match_evaluated_prompt_artifact_exactly():

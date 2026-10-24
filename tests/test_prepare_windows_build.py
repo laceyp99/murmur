@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,12 @@ def test_windows_version_rejects_unsupported_versions(version):
         prepare_windows_build._windows_version(version)
 
 
-def test_prepare_build_generates_icon_and_version_info(tmp_path):
+@pytest.mark.parametrize("git_available", [False, True])
+def test_prepare_build_generates_icon_version_and_metadata(
+    tmp_path, monkeypatch, git_available
+):
+    from src import build_info
+
     repo_root = tmp_path / "repo"
     output_dir = repo_root / "build" / "windows"
     repo_root.mkdir()
@@ -44,9 +50,27 @@ def test_prepare_build_generates_icon_and_version_info(tmp_path):
         repo_root / "src" / "resources" / "icon.png"
     )
 
+    def git(root, *args):
+        assert root == repo_root
+        if not git_available:
+            raise FileNotFoundError("git")
+        if args[-1] == "--show-toplevel":
+            return str(repo_root)
+        if args[-1] == "HEAD":
+            return "a" * 40
+        return " M private-filename"
+
+    monkeypatch.setattr(build_info, "_git", git)
+    monkeypatch.chdir(tmp_path)
+
     prepare_windows_build.prepare_build(repo_root, output_dir)
 
     assert (output_dir / "murmur.ico").is_file()
     version_info = (output_dir / "version_info.txt").read_text(encoding="utf-8")
     assert "filevers=(1, 2, 3, 0)" in version_info
     assert "StringStruct(u'ProductName', u'murmur')" in version_info
+    assert json.loads((output_dir / "_build_info.json").read_text("utf-8")) == {
+        "app_version": "1.2.3",
+        "git_commit": "a" * 40 if git_available else None,
+        "git_dirty": True if git_available else None,
+    }

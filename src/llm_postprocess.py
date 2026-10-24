@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from math import ceil
 from typing import Any
 
+from .observations import emit_observation, failure_category
+
 try:
     from ollama import Client as OllamaPackageClient
 except ImportError:  # pragma: no cover - exercised indirectly via runtime error path
@@ -286,8 +288,22 @@ class LLMPostProcessor:
 
     def process(self, text: str) -> str:
         """Return cleaned transcript text, or the original text on failure."""
+        started = time.perf_counter()
+
+        def observe(outcome: str, code: str, category: str) -> None:
+            emit_observation(
+                stage="llm_cleanup",
+                outcome=outcome,
+                seconds=time.perf_counter() - started,
+                code=code,
+                category=category,
+                cleanup_enabled=True,
+                cleanup_model=getattr(self.client, "model_name", None),
+            )
+
         cleaned_input = text.strip()
         if not cleaned_input:
+            observe("skipped", "cleanup_empty", "skip")
             return cleaned_input
 
         messages = self.build_messages(cleaned_input)
@@ -297,6 +313,7 @@ class LLMPostProcessor:
             64,
         )
         if not self._fits_context(messages, max_tokens):
+            observe("skipped", "cleanup_context_skip", "skip")
             print(
                 "Ollama cleanup skipped because the estimated request exceeded the context budget."
             )
@@ -309,16 +326,26 @@ class LLMPostProcessor:
                 max_tokens=max_tokens,
                 temperature=0.0,
             )
-        except Exception:
+        except Exception as exc:
+            category = failure_category(exc)
+            observe(
+                "failed",
+                "cleanup_timeout"
+                if category == "timeout"
+                else "cleanup_request_failed",
+                "error",
+            )
             print("Ollama post-processing failed; using original transcript.")
             return cleaned_input
 
         elapsed = time.time() - start_time
         normalized_result = self._normalize_output(result)
         if self._is_acceptable_output(normalized_result, cleaned_input):
+            observe("success", "cleanup_applied", "success")
             print(f"LLM post-processing completed in {elapsed:.2f}s")
             return normalized_result
 
+        observe("failed", "cleanup_output_rejected", "error")
         print(
             "Warning: Ollama post-processing returned invalid output; using original transcript."
         )

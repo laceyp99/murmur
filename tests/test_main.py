@@ -1,6 +1,7 @@
 import _thread
 import importlib.metadata
 import io
+import json
 import runpy
 import sys
 import threading
@@ -22,6 +23,8 @@ VADSettings = main_module.VADSettings
 def overlay_calls(monkeypatch):
     """Capture overlay requests so tests never start the real Tk UI thread."""
     settings_gui = pytest.importorskip("src.settings_gui")
+    monkeypatch.setattr(main_module, "get_usage_stats", lambda: None)
+    monkeypatch.setattr(main_module, "capture_build_info_in_background", lambda: None)
     calls = []
     monkeypatch.setattr(
         settings_gui,
@@ -1414,7 +1417,7 @@ def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch
     monkeypatch.setattr(
         main_module, "copy_to_clipboard", lambda text: copied_text.append(text) or True
     )
-    perf_counter_values = iter([20.0, 20.75])
+    perf_counter_values = iter([20.0, 20.5, 20.75, 20.75])
     monkeypatch.setattr(
         main_module.time, "perf_counter", lambda: next(perf_counter_values)
     )
@@ -2636,3 +2639,231 @@ def test_stop_app_closes_overlay(overlay_calls):
 
     assert overlay_calls == ["close"]
     assert app.recorder.close_calls == 1
+
+
+@pytest.fixture
+def usage_service(tmp_path):
+    from src.usage_stats import UsageStatsService
+
+    service = UsageStatsService(
+        tmp_path / "statistics.sqlite3", enabled=True, provenance={}
+    )
+    service.summary().result(timeout=3)
+    yield service
+    assert service.close()
+
+
+@pytest.mark.parametrize("copied", [False, True])
+def test_statistics_clipboard_outcome_has_counts_without_text(
+    usage_service, monkeypatch, copied
+):
+    app = make_app(None, FakeTranscriber())
+    app._stats_session = usage_service.start_session()
+    app.logger = FakeLogger(enabled=False)
+    app.notifications = FakeNotifications()
+    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda _: copied)
+    app._complete_transcription(
+        make_audio_data(),
+        "synthetic private marker",
+        finalization_started_at=main_module.time.perf_counter(),
+        live_segment_metrics=main_module.LiveSegmentMetrics.empty(),
+    )
+    rows = usage_service.export_rows().result(timeout=3)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["outcome"] == ("success" if copied else "failed")
+    assert row["final_word_count"] == 3
+    assert (row["stop_to_clipboard_seconds"] is not None) is copied
+    assert "synthetic private marker" not in str(rows)
+    assert row["stage_clipboard_outcome"] == ("success" if copied else "failed")
+
+
+@pytest.mark.parametrize("segmentation_error", [False, True])
+def test_statistics_separates_normal_routing_from_error_fallback(
+    usage_service, monkeypatch, segmentation_error
+):
+    segmenter = FakeSegmenter(
+        error=RuntimeError("private raw exception") if segmentation_error else None
+    )
+    app = make_app(segmenter, FakeTranscriber())
+    app._stats_session = usage_service.start_session()
+    app.logger = FakeLogger(enabled=False)
+    app.notifications = FakeNotifications()
+    app.hotkey_manager = FakeHotkeyManager()
+    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda _: True)
+    app._process_audio(
+        make_audio_data(), finalization_started_at=main_module.time.perf_counter()
+    )
+    summary = usage_service.summary().result(timeout=3)
+    assert summary["counts"]["success"] == 1
+    assert summary["fallback_denominator"] == 1
+    assert summary["fallback_count"] == int(segmentation_error)
+    rows = usage_service.export_rows().result(timeout=3)
+    assert "private raw exception" not in str(rows)
+    assert rows[0]["transcription_route"] == "full_clip"
+
+
+def test_statistics_files_unexpected_finalize_error_under_finalization(
+    usage_service, monkeypatch
+):
+    app = make_app(None, FakeTranscriber())
+    app.tray = FakeTray()
+    app.hotkey_manager = FakeHotkeyManager()
+    app._stats_session = usage_service.start_session()
+
+    def fail_finalize():
+        raise RuntimeError("cleanup bug")
+
+    monkeypatch.setattr(app, "_stop_and_finalize_session", fail_finalize)
+    with pytest.raises(RuntimeError):
+        app._finish_recording_stop()
+    row = usage_service.export_rows().result(timeout=3)[0]
+    assert row["outcome"] == "failed"
+    issues = json.loads(row["issues"])
+    assert [(i["stage"], i["code"]) for i in issues] == [
+        ("finalization", "unknown_error")
+    ]
+
+
+@pytest.mark.parametrize("capture_error", [False, True])
+def test_statistics_capture_stage_fails_after_mid_recording_mic_error(
+    usage_service, monkeypatch, capture_error
+):
+    app = make_app(None, FakeTranscriber())
+    app.recorder = FakeRecorder(make_audio_data())
+    app.tray = FakeTray()
+    app._stats_session = usage_service.start_session()
+    app._stats_capture_error = capture_error
+    for name in (
+        "_show_overlay",
+        "_resume_owned_media",
+        "_stop_live_segmentation",
+        "_stop_live_transcription",
+        "_finalize_recording",
+    ):
+        monkeypatch.setattr(app, name, lambda *a, **k: None)
+    app._stop_and_finalize_session()
+    app._stats_session.finish("success")
+    row = usage_service.export_rows().result(timeout=3)[0]
+    assert row["stage_capture_outcome"] == ("failed" if capture_error else "success")
+
+
+@pytest.mark.parametrize(
+    ("observed", "expected"),
+    [
+        (None, {"whisper_failed": 1}),
+        (("offline_whisper", "whisper_failed"), {"whisper_failed": 1}),
+        (("local_cleanup", "local_cleanup_failed"), {"local_cleanup_failed": 1}),
+    ],
+)
+def test_statistics_counts_one_transcription_failure_once(
+    usage_service, monkeypatch, observed, expected
+):
+    from src.observations import emit_observation
+
+    app = make_app(None, FakeTranscriber())
+    app._stats_session = usage_service.start_session()
+    app.notifications = FakeNotifications()
+    app.hotkey_manager = FakeHotkeyManager()
+
+    def fail_transcription(audio_data):
+        if observed:
+            stage, code = observed
+            emit_observation(
+                stage=None if stage == "offline_whisper" else stage,
+                outcome="failed",
+                seconds=0.1,
+                code=code,
+                category="error",
+            )
+        raise RuntimeError("model unavailable")
+
+    monkeypatch.setattr(app, "_transcribe_audio", fail_transcription)
+    app._process_audio(make_audio_data(), finalization_started_at=10.0)
+    summary = usage_service.summary().result(timeout=3)
+    assert summary["counts"]["failed"] == 1
+    assert summary["issues"] == expected
+
+
+def test_statistics_disabled_cleanup_is_off_without_an_issue(usage_service):
+    app = make_app(None, FakeTranscriber())
+    collector = usage_service.start_session()
+    app._stats_session = collector
+    app._stats_observer()(
+        {
+            "stage": "llm_cleanup",
+            "outcome": "off",
+            "seconds": 0.0,
+            "code": "cleanup_disabled",
+            "category": "skip",
+            "metadata": {"cleanup_model": None, "cleanup_enabled": False},
+        }
+    )
+    collector.finish("success")
+    summary = usage_service.summary().result(timeout=3)
+    stage = summary["stages"]["ollama_cleanup"]
+    assert (stage["off_count"], stage["skipped_count"]) == (1, 0)
+    assert summary["issues"] == {}
+
+
+def test_statistics_observer_classifies_recovered_cleanup_and_uses_fixed_collector(
+    usage_service,
+):
+    app = make_app(None, FakeTranscriber())
+    first = usage_service.start_session()
+    app._stats_session = first
+    observer = app._stats_observer()
+    observer(
+        {
+            "stage": "llm_cleanup",
+            "outcome": "failed",
+            "seconds": 0.3,
+            "code": "cleanup_timeout",
+            "category": "timeout",
+            "metadata": {"cleanup_model": "actual-model", "cleanup_enabled": True},
+        }
+    )
+    first.finish("success")
+    app._stats_session = usage_service.start_session()
+    observer(
+        {
+            "stage": "whisper_live",
+            "outcome": "success",
+            "seconds": 9.0,
+            "code": "whisper_completed",
+            "category": "success",
+            "metadata": {"whisper_model": "old-model", "device": "cpu"},
+        }
+    )
+    summary = usage_service.summary().result(timeout=3)
+    assert summary["recovered_failures"] == 1
+    assert summary["stages"]["live_whisper"]["count"] == 0
+    rows = usage_service.export_rows().result(timeout=3)
+    completed = next(row for row in rows if row["outcome"] == "success")
+    assert completed["cleanup_model"] == "actual-model"
+    assert completed["stage_ollama_cleanup_failed_count"] == 1
+
+
+def test_statistics_failure_does_not_prevent_clipboard_delivery(monkeypatch):
+    class BrokenCollector:
+        def stage(self, *args, **kwargs):
+            raise OSError("synthetic private marker")
+
+        issue = finish = stage
+
+    app = make_app(None, FakeTranscriber())
+    app._stats_session = BrokenCollector()
+    app.logger = FakeLogger(enabled=False)
+    app.notifications = FakeNotifications()
+    deliveries = []
+    monkeypatch.setattr(
+        main_module, "copy_to_clipboard", lambda text: deliveries.append(text) or True
+    )
+    app._complete_transcription(
+        make_audio_data(),
+        "delivered",
+        finalization_started_at=main_module.time.perf_counter(),
+        live_segment_metrics=main_module.LiveSegmentMetrics.empty(),
+    )
+    assert deliveries == ["delivered"]
+    assert app.notifications.copied_to_clipboard == 1

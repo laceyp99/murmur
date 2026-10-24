@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.observations import emit_observation, observe_transcription
 from src.transcription_live import LiveTranscriptionWorker, TranscriptAccumulator
 
 
@@ -25,6 +26,68 @@ def make_segment(segment_id, duration=0.5):
     return SimpleNamespace(
         segment_id=segment_id, audio=[], sample_rate=16000, duration=duration
     )
+
+
+def test_worker_installs_observer_in_thread_for_each_retry():
+    class ObservedTranscriber:
+        attempts = 0
+
+        def transcribe_segment(self, segment):
+            self.attempts += 1
+            failed = self.attempts == 1
+            emit_observation(
+                outcome="failed" if failed else "success",
+                seconds=0.25,
+                code="whisper_failed" if failed else "whisper_completed",
+                category="error" if failed else "success",
+            )
+            if failed:
+                raise RuntimeError("private dictated sentence")
+            return "private dictated sentence"
+
+    events, outer = [], []
+    accumulator = TranscriptAccumulator()
+    worker = LiveTranscriptionWorker(
+        ObservedTranscriber(), accumulator, observer=events.append
+    )
+    with observe_transcription(outer.append):
+        worker.start()
+        worker.submit_segment(make_segment(0))
+        worker.stop()
+    assert accumulator.get_text() == "private dictated sentence"
+    assert [event["outcome"] for event in events] == ["failed", "success"]
+    assert all(event["stage"] == "whisper_live" for event in events)
+    assert "private" not in repr(events)
+    assert outer == []
+    assert not worker.has_failures
+
+
+def test_worker_observer_failure_does_not_cause_retry():
+    class ObservedTranscriber:
+        calls = 0
+
+        def transcribe_segment(self, segment):
+            self.calls += 1
+            emit_observation(
+                outcome="success",
+                seconds=0.1,
+                code="whisper_completed",
+                category="success",
+            )
+            return "hello"
+
+    def broken(event):
+        raise RuntimeError("observer failure")
+
+    transcriber = ObservedTranscriber()
+    accumulator = TranscriptAccumulator()
+    worker = LiveTranscriptionWorker(transcriber, accumulator, observer=broken)
+    worker.start()
+    worker.submit_segment(make_segment(0))
+    worker.stop()
+    assert transcriber.calls == 1
+    assert accumulator.get_text() == "hello"
+    assert not worker.has_failures
 
 
 @pytest.mark.parametrize("raises", [False, True])

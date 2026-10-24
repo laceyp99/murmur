@@ -102,11 +102,33 @@ flowchart LR
     Clipboard -->|yes| NotifyCopied["Notify copied"]
     Clipboard -->|no| NotifyCopyFailed["Notify copy failed"]
     Clipboard --> Logging{"Training data logging enabled?"}
+    Clipboard -.-> Stats["Content free delivery outcome"]
+    Stats --> Worker["Optional statistics worker"]
     Logging -->|yes| SaveLog["Save WAV and JSONL metadata"]
     Logging -->|no| SkipLog["Do not persist transcript or audio"]
 ```
 
 ## Content Safety In Logs
+
+Statistics storage failures are contained independently of transcription and
+clipboard delivery. Locked, incompatible, or unavailable SQLite storage leaves
+dictation running, flags incomplete history, and allows a later session to
+retry collection. It never persists transcript/audio as a recovery mechanism.
+A final session snapshot that encounters a SQLite lock is retried once after
+0.5 seconds on the background worker. Intermediate snapshots and other storage
+errors are not retried this way. Persistent failure still flags incomplete
+history; neither the wait nor the retry blocks dictation or clipboard delivery.
+CSV export and Settings reads also use the statistics worker, with file writing
+outside its database transaction.
+
+An optional cleanup timeout or rejected result can return the local transcript
+and still produce a successful clipboard delivery. Typed observations at the
+cleanup source preserve that recovered failure; comparing returned strings
+cannot identify it. Normal empty-live/no-segment routing is reported separately
+from error-driven recovery. Failed microphone startup or unrecoverable capture
+counts as a failed session; a no-frame stop without a capture error is no-speech.
+Abruptly abandoned sessions are interrupted, while intentional cancellation is
+cancelled. These outcomes follow the existing session and delivery ownership.
 
 Runtime logs should avoid printing dictated transcript contents. The live path
 currently logs operational details such as segment IDs, durations, latency, and

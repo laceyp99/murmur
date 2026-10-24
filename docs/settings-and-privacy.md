@@ -32,7 +32,7 @@ flowchart LR
     Action -->|Save| Validate["Validate hotkey, language, numeric values, and Ollama fields"]
     Validate -->|invalid| Edit
     Validate -->|valid| Write["Atomically write config.json"]
-    Write --> Runtime["Update logger and Windows autostart"]
+    Write --> Runtime["Update logger statistics eligibility and Windows autostart"]
     Runtime --> Restart{"Restart-required values changed?"}
     Restart -->|yes| Notice["Save and show restart notice"]
     Restart -->|no| Close["Save and close"]
@@ -48,6 +48,7 @@ flowchart LR
 | Transcription | Whisper model, device, language, maximum recording duration | Used by startup-created recorder/transcriber components; restart after changes. |
 | LLM Cleanup | Enablement, endpoint, model, timeout, preload, connection test | The final pass is optional; endpoint/model/preload changes require restart according to the UI notice. |
 | Data Privacy | Training-data logging and delete action | Logging enablement applies to subsequent finalizations; deletion is immediate after confirmation. |
+| Statistics | Local collection, refresh, CSV export, delete session history | Collection changes apply to the next session. Existing sessions retain their start-time choice. History is shared across worktrees under the same Windows account. |
 
 Numeric controls have both a slider and an editable number field. Values are
 clamped to the configured bounds when displayed or saved. Non-numeric or
@@ -141,6 +142,7 @@ The current default values are:
   "vad_silence_duration_ms": 400,
   "max_recording_duration": 300,
   "enable_logging": false,
+  "enable_statistics": true,
   "enable_notifications": false,
   "show_recording_overlay": true,
   "start_with_windows": true,
@@ -203,6 +205,95 @@ the latency fields are `null`.
 The **Delete Logged Data** action displays a file count and approximate size,
 asks for confirmation, then removes the logged WAV files and JSONL metadata.
 Disabling logging stops future writes; it does not delete existing records.
+
+## Local statistics
+
+Statistics collection is enabled by default and stays on this computer. Open
+**Settings > Statistics** to view all retained history, refresh it, export CSV,
+or delete it. The view reports usage, delivery success, error-recovery fallback
+rates, stage timings, and model/device comparisons with sample counts.
+
+The database is `%APPDATA%\murmur\statistics.sqlite3`. Worktrees and installed
+copies under the same Windows account share it. Normally one instance uses it;
+an occasional second instance can write through SQLite's serialized transactions.
+Each process owns one background database worker. A database error never blocks
+microphone capture or clipboard delivery; a notice flags incomplete history.
+Unsaved statistics may be lost. Collection retries on later sessions without a
+durable replay queue.
+
+Records include session/run IDs, timestamps, recording duration, final word
+count, actual Whisper model and CPU/CUDA device, cleanup model and outcomes,
+stage durations/attempt counts, categorized issue codes, recovery outcomes, and
+code provenance. They do **not** contain audio, transcript text, prompts,
+endpoints, microphone names, or raw error messages. Word count is computed in
+memory by splitting the final text on whitespace; it is not an accuracy metric.
+Individual audio segment records are not retained.
+
+App version, full Git commit, and whether uncommitted changes were present
+identify each run. Source identity is frozen at startup, using the running
+package's repository rather than the current shell directory. Restart after
+editing or changing commits for useful comparisons. Windows builds embed their
+identity during build preparation. Plain wheels without embedded metadata and
+unavailable Git information report unknown values rather than guessing.
+
+**Save** applies a collection toggle to the next session. A session already
+collecting finishes normally; enabling does not enroll an active session midway.
+Disabling retains existing history. A run that starts with collection disabled
+creates no statistics database. Another running instance needs a restart to
+observe the saved toggle because configuration is held in each process.
+Training-data logging remains independently opt-in. A malformed statistics
+boolean repairs to off; whole-file config recovery restores defaults, including
+default-on statistics, and displays a repair notice.
+
+History is retained until explicitly deleted. **Delete Session History** asks
+for confirmation and clears every session, stage timing, and issue count across
+instances. A database generation check rejects old pending writes, so an active
+session cannot restore deleted history. It keeps the list of app versions that
+have run (one row per launch that recorded a session, with app version, Git commit, and uncommitted-change
+flag; no times or session details), training data, and previously exported CSV
+files.
+
+A run creates a small lock file in `statistics.sqlite3.runs\` and its run record when it records its first session; launches that never record one leave neither. Unfinished
+sessions are marked interrupted on a later launch only when the owning run's
+lock establishes that it exited; live or uncertain owners are preserved. A run
+deletes its own lock file on clean exit when none of its sessions are
+unfinished, and a later launch deletes lock files of exited runs once their
+sessions are reconciled.
+
+### Reading the measurements
+
+- Success means non-empty text reached the clipboard. The success rate is
+  successes divided by successes plus failures. Cancelled, no-speech,
+  interrupted, and active sessions are shown separately and excluded.
+- No captured frames without a capture error counts as no-speech. A startup or
+  capture error with no usable audio counts as failed.
+- Error-recovery fallback rate counts completed transcription attempts that
+  entered an alternate transcription route because of an error or unavailable
+  component. Empty-live and no-segment routes alone are normal routing counts.
+  Cleanup recovery is shown separately. Clipboard success after recovery is
+  still a successful session.
+- Median and nearest-rank p95 use successful stop-to-clipboard waits. Timing
+  begins before recorder stop and live worker draining, ends after clipboard
+  delivery, and excludes later training-data logging and notifications.
+- Recording length and inference work differ. Live work overlaps recording;
+  stage durations must not be added to infer the user's total wait. Failed
+  stage durations are reported separately from successful stage averages.
+- A stage reads **off** when its feature is disabled, such as Ollama cleanup
+  switched off, and **skipped** when it was enabled but not needed, such as
+  empty text or text too long for the model's context. Neither counts as a
+  failure, and a disabled feature is not recorded as an issue.
+- Missing measurements remain unavailable, not zero. Small samples are flagged.
+  Model comparisons include recording length and cleanup context; they measure
+  observed performance, not transcription accuracy or causal improvement.
+
+CSV export has one row per session, fixed headers, run provenance, and counted
+issue codes encoded as deterministic JSON. Each pipeline stage has four
+columns: `stage_<name>_outcome`, `stage_<name>_seconds` (total across
+attempts), `stage_<name>_attempts`, and `stage_<name>_failed_count`. Durations
+are rounded to milliseconds. Missing values become empty cells. Text values that
+resemble spreadsheet formulas are escaped in the CSV file only, never in the
+database. File formatting/writing occurs outside the database transaction and UI
+thread. An empty history export writes no file.
 
 ## Vocabulary and network boundary
 

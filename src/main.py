@@ -10,6 +10,7 @@ import time
 
 from .audio import AudioData, AudioRecorder
 from .autostart import set_autostart
+from .build_info import capture_build_info_in_background
 from .cancellation import TranscriptionCancelledError, check_cancelled
 from .clipboard import copy_to_clipboard
 from .config import DEFAULT_CONFIG, ConfigError, get_config
@@ -17,6 +18,7 @@ from .hotkey import HotkeyManager, HotkeyState, RecordingRequest, is_hotkey_vali
 from .logger import get_logger
 from .media_control import get_media_controller
 from .notifications import get_notification_manager
+from .observations import observe_transcription
 from .recording_overlay import (
     CANCELLED,
     CANCELLED_DONE,
@@ -34,6 +36,7 @@ from .transcription_live import (
     TranscriptChunk,
 )
 from .tray import TrayManager
+from .usage_stats import get_usage_stats
 from .vad import (
     LiveSpeechSegment,
     LiveVADSegmentationWorker,
@@ -87,6 +90,12 @@ class MurmurApp:
         self.hotkey_manager = HotkeyManager()
         self.notifications = get_notification_manager()
         self.logger = get_logger()
+        try:
+            self._usage_stats = get_usage_stats()
+        except Exception:
+            self._usage_stats = None
+            print("Warning: Usage statistics are unavailable.")
+        self._stats_session = None
         self.tray = TrayManager(
             on_exit_callback=self.stop,
             on_cancel_callback=self._on_recording_cancel,
@@ -133,6 +142,56 @@ class MurmurApp:
         setter = getattr(self.recorder, "set_recording_limit_callback", None)
         if setter is not None:
             setter(self._on_recording_limit_reached)
+
+    def _stats(self, method, *args, **kwargs):
+        """Keep optional metadata collection outside dictation's failure path."""
+        collector = getattr(self, "_stats_session", None)
+        if collector is not None:
+            try:
+                getattr(collector, method)(*args, **kwargs)
+            except Exception:
+                print("Warning: Could not record usage statistics.")
+
+    def _stats_observer(self):
+        """Capture this collector so late observations cannot target a new session."""
+        collector = getattr(self, "_stats_session", None)
+        if collector is None:
+            return None
+
+        def observe(event):
+            stage = {
+                "whisper_live": "live_whisper",
+                "whisper_offline": "offline_whisper",
+                "llm_cleanup": "ollama_cleanup",
+            }.get(event["stage"], event["stage"])
+            try:
+                metadata = dict(event["metadata"])
+                if "device" in metadata:
+                    metadata["whisper_device"] = metadata.pop("device")
+                collector.update(**metadata)
+                outcome = (
+                    "failed" if event["outcome"] == "unavailable" else event["outcome"]
+                )
+                collector.stage(
+                    stage,
+                    outcome,
+                    event["seconds"],
+                )
+                # A disabled feature is not an issue; the stage outcome says "off".
+                if outcome not in {"success", "cancelled", "off"}:
+                    category = "skip" if outcome == "skipped" else event["category"]
+                    collector.issue(
+                        stage,
+                        event["code"],
+                        category=category
+                        if category in {"error", "unavailable", "routing", "skip"}
+                        else "error",
+                        recovered=stage == "ollama_cleanup" and outcome == "failed",
+                    )
+            except Exception:
+                print("Warning: Could not record stage statistics.")
+
+        return observe
 
     def start(self) -> None:
         """Start the application and begin listening for hotkeys."""
@@ -292,6 +351,10 @@ class MurmurApp:
                 self._resume_owned_media()
 
         print("\nmurmur stopped.")
+        service = getattr(self, "_usage_stats", None)
+        if service is not None:
+            with contextlib.suppress(Exception):
+                service.close()
 
     def _on_recording_start(self, request: RecordingRequest) -> None:
         """Handle recording start."""
@@ -315,6 +378,15 @@ class MurmurApp:
             self._cancel_event = request.cancelled
             self._session_active = True
             self._delivery_started = False
+        self._stats_session = None
+        service = getattr(self, "_usage_stats", None)
+        if service is not None:
+            try:
+                self._stats_session = service.start_session()
+            except Exception:
+                print("Warning: Could not begin usage statistics.")
+        self._stats_capture_error = False
+        preparation_started = time.perf_counter()
         self._live_pipeline_degraded = False
         self._live_pipeline_degraded_reason = None
         self._recording_limit_stop_started = False
@@ -333,6 +405,12 @@ class MurmurApp:
                 return
             # Capture first. Optional preparation must not delay the microphone.
             self.recorder.start_recording()
+            self._stats(
+                "stage",
+                "preparation",
+                "success",
+                time.perf_counter() - preparation_started,
+            )
             # The atomic commit is the boundary; a stop that won it gets no capture.
             if self._shutdown_event.is_set() or not request.commit_capture():
                 with contextlib.suppress(Exception):
@@ -340,6 +418,10 @@ class MurmurApp:
                 self._abort_startup()
                 return
         except Exception as e:
+            self._stats("issue", "preparation", "capture_start_failed")
+            self._stats(
+                "finish", "cancelled" if self._startup_abandoned(request) else "failed"
+            )
             self._resume_owned_media()
             self._stop_live_transcription()
             self._stop_live_segmentation()
@@ -424,6 +506,7 @@ class MurmurApp:
         self._stop_live_transcription()
         self._stop_live_segmentation()
         self._session_active = False
+        self._stats("finish", "cancelled")
 
     def _resume_owned_media(self) -> None:
         """Resume playback once when this attempt successfully paused it."""
@@ -535,8 +618,15 @@ class MurmurApp:
             try:
                 self._stop_and_finalize_session()
             except TranscriptionCancelledError:
-                pass
+                self._stats("finish", "cancelled")
+            except Exception:
+                # Any step of finalization may have raised; don't blame capture.
+                self._stats("issue", "finalization", "unknown_error")
+                self._stats("finish", "failed")
+                raise
             finally:
+                if self._cancel_event.is_set():
+                    self._stats("finish", "cancelled")
                 # All worker/model work is done before another session is allowed.
                 self.live_transcript_accumulator = None
                 with self._recording_stop_lock:
@@ -564,6 +654,17 @@ class MurmurApp:
 
         try:
             audio_data = self.recorder.stop_recording()
+            if audio_data is not None:
+                self._stats("update", capture_seconds=audio_data.duration)
+                # Audio can come back after a mid-recording mic error; keep that visible.
+                self._stats(
+                    "stage",
+                    "capture",
+                    "failed"
+                    if getattr(self, "_stats_capture_error", False)
+                    else "success",
+                    audio_data.duration,
+                )
             if audio_data is not None and not self._cancel_event.is_set():
                 self._show_overlay(PROCESSING)
             # Resume media if it was playing before recording.
@@ -583,6 +684,13 @@ class MurmurApp:
                 finalization_started_at=finalization_started_at,
             )
         else:
+            self._stats("issue", "capture", "no_audio", category="routing")
+            self._stats(
+                "finish",
+                "failed"
+                if getattr(self, "_stats_capture_error", False)
+                else "no_speech",
+            )
             print("Warning: No audio data captured.")
             self._show_overlay(ERROR, OVERLAY_NO_AUDIO)
 
@@ -624,6 +732,8 @@ class MurmurApp:
         """Finalize buffered audio after a microphone stream stops unexpectedly."""
         if not self._claim_recording_stop(session=session):
             return
+        self._stats_capture_error = True
+        self._stats("issue", "capture", "capture_failed")
         self.notifications.notify_error(
             f"{message}. Recording ended early; finalizing captured audio."
         )
@@ -644,7 +754,10 @@ class MurmurApp:
                 "Warning: Microphone input overflow; some audio was lost. "
                 "Finalizing captured audio; transcript may be incomplete."
             )
+        self._stats("update", reached_transcription=True, transcription_route="live")
         if self._live_pipeline_degraded:
+            self._stats("update", error_fallback=True)
+            self._stats("issue", "live_whisper", "live_degraded")
             reason = (
                 self._live_pipeline_degraded_reason or "Live transcription degraded"
             )
@@ -657,8 +770,10 @@ class MurmurApp:
             )
             return
 
-        live_text = self._get_live_transcript_text()
+        with observe_transcription(self._stats_observer()):
+            live_text = self._get_live_transcript_text()
         if not live_text:
+            self._stats("issue", "live_whisper", "live_empty", category="routing")
             self._process_audio(
                 audio_data,
                 finalization_started_at=finalization_started_at,
@@ -690,7 +805,9 @@ class MurmurApp:
         print(f"Processing {audio_data.duration:.1f}s of audio...")
 
         try:
-            text = self._transcribe_audio(audio_data)
+            self._stats("update", reached_transcription=True)
+            with observe_transcription(self._stats_observer()):
+                text = self._transcribe_audio(audio_data)
             self._complete_transcription(
                 audio_data,
                 text,
@@ -702,6 +819,14 @@ class MurmurApp:
             raise
         except Exception:
             check_cancelled(self._cancel_event)
+            # The transcriber already recorded failures it re-raises; don't double-count.
+            self._stats(
+                "issue_once",
+                "offline_whisper",
+                "whisper_failed",
+                covered_by=("local_cleanup_failed",),
+            )
+            self._stats("finish", "failed")
             print("Transcription failed.")
             self.notifications.notify_error("Transcription failed.")
             self._show_overlay(ERROR, OVERLAY_TRANSCRIPTION_FAILED)
@@ -711,15 +836,26 @@ class MurmurApp:
         check_cancelled(self._cancel_event)
         segmenter = self._get_segmenter(audio_data.sample_rate)
         if segmenter is None:
+            self._stats("update", transcription_route="full_clip", error_fallback=True)
+            self._stats("issue", "offline_segmentation", "vad_unavailable")
             reason = self._vad_disabled_reason or "VAD unavailable"
             print(f"Warning: {reason}. Falling back to full clip.")
             return self.transcriber.transcribe(
                 audio_data, cancel_event=self._cancel_event
             )
 
+        segmentation_started = time.perf_counter()
         try:
             segments = segmenter.segment_audio(audio_data.audio)
         except Exception as exc:
+            self._stats(
+                "stage",
+                "offline_segmentation",
+                "failed",
+                time.perf_counter() - segmentation_started,
+            )
+            self._stats("issue", "offline_segmentation", "vad_error")
+            self._stats("update", transcription_route="full_clip", error_fallback=True)
             print(
                 f"Warning: VAD segmentation failed: {exc}. Falling back to full clip."
             )
@@ -730,7 +866,18 @@ class MurmurApp:
 
         check_cancelled(self._cancel_event)
 
+        self._stats(
+            "stage",
+            "offline_segmentation",
+            "success",
+            time.perf_counter() - segmentation_started,
+        )
+
         if not segments:
+            self._stats("update", transcription_route="full_clip")
+            self._stats(
+                "issue", "offline_segmentation", "vad_no_segments", category="routing"
+            )
             print(
                 "Warning: No VAD speech segments detected. Falling back to full clip."
             )
@@ -739,6 +886,7 @@ class MurmurApp:
             )
 
         print(f"Detected {len(segments)} speech segment(s).")
+        self._stats("update", transcription_route="offline_segmented")
         for index, segment in enumerate(segments):
             print(f"  Segment {index}: {segment.duration:.2f}s")
 
@@ -781,14 +929,30 @@ class MurmurApp:
                 return
             self._delivery_started = True
         if not text:
+            self._stats("finish", "no_speech")
             print("Warning: No speech detected.")
             if not self._shutdown_event.is_set():
                 self.notifications.notify("murmur", "No speech detected.")
                 self._show_overlay(ERROR, OVERLAY_NO_SPEECH)
             return
 
+        clipboard_started = time.perf_counter()
         copied = copy_to_clipboard(text)
         runtime = time.perf_counter() - finalization_started_at
+        self._stats(
+            "stage",
+            "clipboard",
+            "success" if copied else "failed",
+            time.perf_counter() - clipboard_started,
+        )
+        if not copied:
+            self._stats("issue", "clipboard", "clipboard_failed")
+        self._stats(
+            "finish",
+            "success" if copied else "failed",
+            final_word_count=len(text.split()),
+            stop_to_clipboard_seconds=runtime if copied else None,
+        )
         log_entry = self.logger.log(audio_data, text, runtime, live_segment_metrics)
         if self._shutdown_event.is_set():
             return
@@ -940,6 +1104,7 @@ class MurmurApp:
             on_segment_transcribed=self._on_live_segment_transcribed,
             on_chunk_appended=self._on_live_chunk_appended,
             on_worker_degraded=self._on_live_pipeline_degraded,
+            observer=self._stats_observer(),
         )
         worker.start()
         self.live_transcription_worker = worker
@@ -1040,6 +1205,8 @@ class MurmurApp:
 
 def main():
     """Main entry point for the application."""
+    # The console script enters here directly; run.py has usually started this.
+    capture_build_info_in_background()
     print("Starting murmur...")
     app = None
     tray_thread = None

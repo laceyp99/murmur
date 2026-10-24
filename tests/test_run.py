@@ -2,8 +2,10 @@ import hashlib
 import io
 import os
 import runpy
+import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -120,3 +122,53 @@ def test_packaging_self_check_records_failure(monkeypatch, tmp_path: Path):
     assert "RuntimeError: dependency unavailable" in error_log.read_text(
         encoding="utf-8"
     )
+
+
+def test_startup_freezes_identity_before_desktop_runtime(monkeypatch):
+    from src import build_info
+
+    events = []
+    monkeypatch.setattr(
+        build_info,
+        "capture_build_info_in_background",
+        lambda: events.append("identity"),
+    )
+    monkeypatch.setitem(
+        sys.modules, "src.main", SimpleNamespace(main=lambda: events.append("runtime"))
+    )
+    run._run_app()
+    assert events == ["identity", "runtime"]
+
+
+def test_packaging_self_check_commits_sqlite_transaction(monkeypatch, tmp_path):
+    connect = sqlite3.connect
+    connections = []
+    database_path = tmp_path / "packaging.sqlite3"
+
+    def open_database(database):
+        assert database == ":memory:"
+        # A second connection can only see the inserted row after it commits.
+        connection = connect(database_path)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", open_database)
+    # Stop after the SQLite check, before any model or desktop imports.
+    monkeypatch.setitem(sys.modules, "numpy", None)
+    with pytest.raises(ModuleNotFoundError, match="numpy"):
+        run._run_packaging_self_check()
+    with closing(connect(database_path)) as reader:
+        assert reader.execute("SELECT * FROM packaging_check").fetchall() == [(1,)]
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connections[0].execute("SELECT 1")
+
+
+def test_packaging_self_check_reports_sqlite_failure(monkeypatch, tmp_path):
+    def fail(database):
+        raise sqlite3.OperationalError("SQLite unavailable")
+
+    error_log = tmp_path / "error.txt"
+    monkeypatch.setattr(sqlite3, "connect", fail)
+    monkeypatch.setenv("MURMUR_PACKAGING_SELF_CHECK_LOG", str(error_log))
+    assert run._packaging_self_check_exit_code() == 1
+    assert "SQLite unavailable" in error_log.read_text("utf-8")

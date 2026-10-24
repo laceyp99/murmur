@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from queue import Empty, Queue
 from typing import Protocol
 
+from .observations import ObservationCallback, observe_transcription
+
 
 class LiveSegmentLike(Protocol):
     """Structural type for live segments accepted by the worker."""
@@ -104,6 +106,7 @@ class LiveTranscriptionWorker:
         on_worker_degraded: Callable[[str], None] | None = None,
         queue_timeout_seconds: float = 0.1,
         max_segment_retries: int = 1,
+        observer: ObservationCallback | None = None,
     ):
         self.transcriber = transcriber
         self.accumulator = accumulator
@@ -114,6 +117,7 @@ class LiveTranscriptionWorker:
         self.on_worker_degraded = on_worker_degraded
         self.queue_timeout_seconds = queue_timeout_seconds
         self.max_segment_retries = max_segment_retries
+        self.observer = observer
         self._queue: Queue[LiveSegmentLike | None] = Queue()
         self._thread: threading.Thread | None = None
         self._running = False
@@ -206,7 +210,8 @@ class LiveTranscriptionWorker:
                 return None
             start_time = time.time()
             try:
-                text = self.transcriber.transcribe_segment(segment)
+                with observe_transcription(self.observer, stage="whisper_live"):
+                    text = self.transcriber.transcribe_segment(segment)
             except Exception as exc:
                 if self._cancelled.is_set():
                     return None

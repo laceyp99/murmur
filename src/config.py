@@ -31,6 +31,7 @@ DEFAULT_CONFIG = {
     "vad_silence_duration_ms": 400,
     "max_recording_duration": 300,
     "enable_logging": False,
+    "enable_statistics": True,
     "enable_notifications": False,
     "show_recording_overlay": True,
     "start_with_windows": True,
@@ -47,6 +48,7 @@ DEFAULT_CONFIG = {
 }
 
 _BOOLEAN_KEYS = {
+    "enable_statistics",
     "enable_logging",
     "enable_notifications",
     "show_recording_overlay",
@@ -122,6 +124,11 @@ def get_app_data_dir() -> Path:
 def get_training_data_dir() -> Path:
     """Get the canonical training data directory."""
     return get_app_data_dir() / "training_data"
+
+
+def get_statistics_db_path() -> Path:
+    """Get the account-wide statistics database, independent of training data."""
+    return get_app_data_dir() / "statistics.sqlite3"
 
 
 class Config:
@@ -223,6 +230,8 @@ class Config:
                     self._config[key] = value
             if "ollama_enabled" in invalid_keys:
                 self._config["ollama_enabled"] = False
+            if "enable_statistics" in invalid_keys:
+                self._config["enable_statistics"] = False
             self._save_config(self._config)
             self._startup_notice = self._describe_repaired_settings(invalid_keys)
             return
@@ -365,6 +374,11 @@ class Config:
     def enable_logging(self) -> bool:
         """Get the training-data logging setting."""
         return self.get("enable_logging", False) is True
+
+    @property
+    def enable_statistics(self) -> bool:
+        """Collection eligibility for newly started dictation sessions."""
+        return self.get("enable_statistics", True) is True
 
     @property
     def ollama_enabled(self) -> bool:

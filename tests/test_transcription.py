@@ -10,6 +10,7 @@ from src.audio import AudioData
 from src.cancellation import TranscriptionCancelledError
 from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
 from src.llm_postprocess import LLMPostProcessor, OllamaClient
+from src.observations import observe_transcription
 from src.transcription import (
     LOGPROB_THRESHOLD,
     NO_SPEECH_THRESHOLD,
@@ -66,6 +67,116 @@ class FakeLLMPostProcessor:
         if self.error is not None:
             raise self.error
         return True
+
+
+def test_inference_observation_times_only_model_call_and_preserves_loaded_identity(
+    monkeypatch,
+):
+    clock = [0.0]
+
+    class Model:
+        def transcribe(self, *args, **kwargs):
+            clock[0] += 2.0
+            return {"text": "private dictated sentence"}
+
+    config = FakeConfig()
+    monkeypatch.setattr("src.transcription.whisper.load_model", lambda *a, **k: Model())
+    monkeypatch.setattr("src.transcription.time.perf_counter", lambda: clock[0])
+    transcriber = Transcriber(config=config, device="cpu")
+    transcriber.load_model()
+    config.model_name = "pending-model"
+
+    def prepare(audio, sample_rate):
+        clock[0] += 10.0
+        return audio
+
+    monkeypatch.setattr(transcriber, "_prepare_audio", prepare)
+    events = []
+    with observe_transcription(events.append):
+        assert transcriber.transcribe_segment(AudioData(np.ones(160), 16000, 0.01))
+    assert len(events) == 1
+    assert events[0]["seconds"] == 2.0
+    assert events[0]["metadata"] == {"whisper_model": "tiny", "device": "cpu"}
+    assert "private" not in repr(events)
+
+
+def test_failed_inference_observation_preserves_exception_and_unknown_identity():
+    error = RuntimeError("private dictated sentence")
+
+    class Model:
+        def transcribe(self, *args, **kwargs):
+            raise error
+
+    events = []
+    transcriber = Transcriber(config=FakeConfig(), model=Model(), device="cpu")
+    with observe_transcription(events.append), pytest.raises(RuntimeError) as raised:
+        transcriber.transcribe_segment(AudioData(np.ones(160), 16000, 0.01))
+    assert raised.value is error
+    assert len(events) == 1
+    assert events[0]["code"] == "whisper_failed"
+    assert events[0]["metadata"]["whisper_model"] is None
+    assert "private" not in repr(events)
+
+
+@pytest.mark.parametrize(
+    "mode", ["disabled", "empty", "unavailable", "failure", "applied"]
+)
+def test_finalize_observes_local_and_optional_cleanup_once(mode, monkeypatch):
+    config = FakeConfig()
+    config.ollama_enabled = mode != "disabled"
+
+    class Client:
+        model_name = "cached-model"
+
+        def chat(self, *args, **kwargs):
+            if mode == "failure":
+                raise RuntimeError("private dictated sentence")
+            return "Private dictated sentence."
+
+    transcriber = Transcriber(
+        config=config, llm_post_processor=LLMPostProcessor(Client()), device="cpu"
+    )
+    if mode == "unavailable":
+        monkeypatch.setattr(transcriber, "_get_llm_post_processor", lambda: None)
+    events = []
+    text = "" if mode == "empty" else "Private dictated sentence."
+    with observe_transcription(events.append):
+        assert transcriber.finalize_text(text) == text
+    assert [event["stage"] for event in events] == ["local_cleanup", "llm_cleanup"]
+    assert (
+        events[-1]["code"]
+        == {
+            "disabled": "cleanup_disabled",
+            "empty": "cleanup_empty",
+            "unavailable": "cleanup_unavailable",
+            "failure": "cleanup_request_failed",
+            "applied": "cleanup_applied",
+        }[mode]
+    )
+    assert events[-1]["outcome"] == {"disabled": "off", "empty": "skipped"}.get(
+        mode, events[-1]["outcome"]
+    )
+    if mode in {"failure", "applied"}:
+        assert events[-1]["metadata"]["cleanup_model"] == "cached-model"
+    assert "private" not in repr(events).lower()
+
+
+def test_disabled_cleanup_reports_off_even_for_empty_text():
+    config = FakeConfig()
+    config.ollama_enabled = False
+    events = []
+    with observe_transcription(events.append):
+        Transcriber(config=config, device="cpu").finalize_text("")
+    assert (events[-1]["outcome"], events[-1]["code"]) == ("off", "cleanup_disabled")
+
+
+def test_transcription_continues_when_observer_raises():
+    def broken(event):
+        raise RuntimeError("observer failure")
+
+    transcriber = Transcriber(config=FakeConfig(), model=FakeModel(["hello"]))
+    with observe_transcription(broken):
+        assert transcriber.transcribe(AudioData(np.ones(160), 16000, 0.01)) == "Hello."
 
 
 @pytest.mark.parametrize(

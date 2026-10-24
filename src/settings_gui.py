@@ -1,6 +1,7 @@
 """Settings GUI for murmur using customtkinter."""
 
 import contextlib
+import csv
 import ctypes
 import math
 import queue
@@ -9,8 +10,10 @@ import threading
 import tkinter as tk
 import weakref
 from ctypes import wintypes
+from dataclasses import dataclass
 from datetime import datetime
-from tkinter import messagebox
+from pathlib import Path
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 from PIL import Image
@@ -37,9 +40,192 @@ from .settings_schema import (
     parse_numeric_text,
     settings_for_tab,
 )
+from .usage_stats import EXPORT_COLUMNS, StatisticsBusyError, get_usage_stats
 from .windows_identity import (
     configure_windows_app_identity as _configure_windows_app_identity,
 )
+
+
+def _write_statistics_csv(path, rows):
+    """Write the service's flattened, content-free export outside its transaction."""
+    with Path(path).open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=EXPORT_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            values = {key: row.get(key) for key in EXPORT_COLUMNS}
+            for key, value in values.items():
+                if isinstance(value, str) and (
+                    value.startswith(("\t", "\r", "\n"))
+                    or value.lstrip().startswith(("=", "+", "-", "@"))
+                ):
+                    values[key] = "'" + value
+            writer.writerow(values)
+
+
+Row = tuple[str, str]
+
+
+@dataclass(frozen=True)
+class StatisticsView:
+    """Display-ready statistics; the Statistics tab renders this without math."""
+
+    notices: tuple[str, ...]
+    empty: tuple[str, str] | None
+    tiles: tuple[Row, ...]
+    sections: tuple[tuple[str, tuple[Row, ...]], ...]
+    footnotes: tuple[str, ...]
+
+
+_STAGE_LABELS = {
+    "capture": "Recording",
+    "preparation": "Preparation",
+    "live_whisper": "Live Whisper",
+    "offline_segmentation": "Offline segmentation",
+    "offline_whisper": "Offline Whisper",
+    "local_cleanup": "Text cleanup",
+    "ollama_cleanup": "Ollama cleanup",
+    "clipboard": "Clipboard",
+}
+
+
+def _seconds(value):
+    if value is None:
+        return "n/a"
+    if value < 0.1:
+        # Quick steps read as zero in seconds; milliseconds show they ran.
+        return "<1 ms" if 0 < value < 0.0005 else f"{value * 1000:.0f} ms"
+    return f"{value:.2f} s" if value < 1 else f"{value:.1f} s"
+
+
+def _percent(value):
+    return "n/a" if value is None else f"{value:.0%}"
+
+
+def _stage_ran(value):
+    return bool(value.get("success_count") or value.get("failed_count"))
+
+
+def _stage_value(value):
+    counts = [
+        f"{value[key]} {word}"
+        for key, word in (
+            ("success_count", "ok"),
+            ("failed_count", "failed"),
+            ("off_count", "off"),
+            ("skipped_count", "skipped"),
+        )
+        if value.get(key)
+    ]
+    text = ", ".join(counts) or "no attempts"
+    if value.get("mean_seconds") is not None:
+        text += f" · {_seconds(value['mean_seconds'])} avg"
+    return text
+
+
+def _statistics_view(summary) -> StatisticsView:
+    """Turn service aggregates into labelled values without recalculating them."""
+    notices = []
+    if not summary.get("storage_available", True):
+        notices.append("Storage unavailable. History may be incomplete; try Refresh.")
+    if summary.get("incomplete") or summary.get("reconciliation_incomplete"):
+        notices.append("Some sessions or measurements may be missing.")
+    if not summary.get("sessions", 0):
+        empty = (
+            ("No sessions yet", "Dictate something, then press Refresh.")
+            if summary.get("enabled", True)
+            else ("Collection is off", "Turn it on and press Save to start.")
+        )
+        return StatisticsView(tuple(notices), empty, (), (), ())
+    if not summary.get("enabled", True):
+        notices.append("Collection is off. Existing history is still shown.")
+
+    counts = summary.get("counts", {})
+    latency = summary.get("latency", {})
+    routing = summary.get("normal_routing_counts", {})
+    tiles = (
+        (str(summary.get("sessions", 0)), "Sessions"),
+        (_percent(summary.get("success_rate")), "Success rate"),
+        (_seconds(latency.get("median_seconds")), "Median wait"),
+        (str(summary.get("delivered_words") or 0), "Words delivered"),
+    )
+    reliability = [
+        (
+            "Succeeded / failed",
+            f"{counts.get('success', 0)} / {counts.get('failed', 0)}",
+        ),
+        (
+            "Cancelled / no speech / interrupted",
+            f"{counts.get('cancelled', 0)} / {counts.get('no_speech', 0)} / "
+            f"{counts.get('interrupted', 0)}",
+        ),
+        (
+            "Needed transcription fallback",
+            f"{summary.get('fallback_count', 0)} of "
+            f"{summary.get('fallback_denominator', 0)}",
+        ),
+        ("Problems recovered automatically", str(summary.get("recovered_failures", 0))),
+        (
+            "Routed offline (empty live text / no speech found)",
+            f"{routing.get('live_empty', 0)} / {routing.get('vad_no_segments', 0)}",
+        ),
+    ]
+    if summary.get("active_sessions"):
+        reliability.append(("In progress", str(summary["active_sessions"])))
+    minutes = summary.get("captured_minutes")
+    speed = (
+        (
+            "Stop to clipboard (median / p95)",
+            f"{_seconds(latency.get('median_seconds'))} / "
+            f"{_seconds(latency.get('p95_seconds'))}",
+        ),
+        ("Average recording", _seconds(summary.get("mean_capture_seconds"))),
+        ("Total recorded", "n/a" if minutes is None else f"{minutes:.1f} min"),
+    )
+    sections = [("Reliability", tuple(reliability)), ("Speed", speed)]
+    stages = tuple(
+        (
+            _STAGE_LABELS.get(name, name.replace("_", " ").capitalize()),
+            _stage_value(value),
+        )
+        for name, value in summary.get("stages", {}).items()
+        if _stage_ran(value) or value.get("skipped_count") or value.get("off_count")
+    )
+    if stages:
+        sections.append(("Stages", stages))
+    models = []
+    for group in summary.get("model_groups", []):
+        label = (
+            f"{group.get('whisper_model') or 'unknown'} · "
+            f"{(group.get('whisper_device') or 'unknown').upper()}"
+        )
+        if group.get("cleanup_enabled"):
+            cleanup = group.get("cleanup_model")
+            label += f" + {cleanup or 'unknown'} cleanup"
+        sessions = group.get("sessions", 0)
+        median = _seconds(group.get("latency", {}).get("median_seconds"))
+        models.append(
+            (label, f"{sessions} session{'s' * (sessions != 1)} · {median} median")
+        )
+    cleanup_groups = [g for g in summary.get("cleanup_groups", []) if _stage_ran(g)]
+    # One cleanup model is already covered by the Ollama cleanup stage row.
+    if len(cleanup_groups) > 1:
+        models.extend(
+            (f"{group.get('model') or 'unknown'} cleanup", _stage_value(group))
+            for group in cleanup_groups
+        )
+    if models:
+        sections.append(("Models", tuple(models)))
+
+    footnotes = ["Stage times overlap, so they don't add up to the wait."]
+    if latency.get("small_sample"):
+        footnotes.insert(
+            0,
+            f"Fewer than 20 successful sessions so far ({latency.get('count', 0)}), "
+            "so speed numbers may swing.",
+        )
+    return StatisticsView(
+        tuple(notices), None, tiles, tuple(sections), tuple(footnotes)
+    )
 
 
 def _format_bytes(size_bytes):
@@ -50,6 +236,21 @@ def _format_bytes(size_bytes):
     return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 
+_MUTED_TEXT = ("gray35", "gray70")
+_OUTLINE_BUTTON = {
+    "fg_color": "transparent",
+    "border_width": 1,
+    "border_color": ("gray55", "gray40"),
+    "text_color": ("gray10", "gray90"),
+    "hover_color": ("gray78", "gray25"),
+}
+# Destructive actions: outlined in red so they stand apart from normal buttons.
+_DANGER_BUTTON = {
+    **_OUTLINE_BUTTON,
+    "border_color": ("#C0392B", "#C94B4B"),
+    "text_color": ("#B03A2E", "#FF8A80"),
+    "hover_color": ("#F6D5D1", "#4A2323"),
+}
 _INVALID_RESTART_COMPARE_VALUE = object()
 _APP_DISPLAY_NAME = "murmur"
 _SETTINGS_TITLE = "murmur settings"
@@ -591,6 +792,8 @@ class SettingsWindow:
         self._ollama_test_button = None
         self._ollama_test_in_progress = False
         self._ollama_test_token = None
+        self._statistics_results = queue.Queue()
+        self._statistics_token = None
 
         self._window_icon = _apply_window_icon(self.root)
 
@@ -691,6 +894,9 @@ class SettingsWindow:
         self.ollama_preload_model_var = tk.BooleanVar(
             master=self.root, value=self.config.ollama_preload_model
         )
+        self.statistics_var = tk.BooleanVar(
+            master=self.root, value=self.config.enable_statistics
+        )
         self.setting_vars.update(
             {
                 "hotkey": self.hotkey_var,
@@ -700,6 +906,7 @@ class SettingsWindow:
                 "enable_notifications": self.notify_var,
                 "show_recording_overlay": self.overlay_var,
                 "enable_logging": self.logging_var,
+                "enable_statistics": self.statistics_var,
                 "start_with_windows": self.autostart_var,
                 "pause_media_while_recording": self.pause_media_var,
                 "keep_microphone_ready": self.keep_microphone_ready_var,
@@ -816,7 +1023,10 @@ class SettingsWindow:
             privacy,
             text="Delete Logged Data",
             command=self._purge_training_data,
+            **_DANGER_BUTTON,
         ).grid(row=2, column=0, sticky="w", padx=16, pady=(4, 10))
+
+        self._setup_statistics(tab_contents["Statistics"])
 
         for tab_name in TAB_ORDER:
             self._add_tab_reset_button(tab_contents[tab_name], tab_name)
@@ -1268,6 +1478,238 @@ class SettingsWindow:
 
         threading.Thread(target=run, daemon=True).start()
 
+    def _setup_statistics(self, parent):
+        self._add_switch(
+            parent,
+            0,
+            "Collect local statistics",
+            self.statistics_var,
+            "Counts and timings only, stored on this PC. No audio or dictated text.",
+        )
+        actions = ctk.CTkFrame(parent, fg_color="transparent")
+        actions.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 4))
+        actions.grid_columnconfigure(2, weight=1)
+        refresh = ctk.CTkButton(
+            actions, text="Refresh", width=96, command=self._refresh_statistics
+        )
+        refresh.grid(row=0, column=0, padx=(0, 8))
+        export = ctk.CTkButton(
+            actions,
+            text="Export CSV",
+            width=96,
+            command=self._export_statistics,
+            **_OUTLINE_BUTTON,
+        )
+        export.grid(row=0, column=1)
+        delete = ctk.CTkButton(
+            actions,
+            text="Delete Session History",
+            command=self._delete_statistics,
+            **_DANGER_BUTTON,
+        )
+        delete.grid(row=0, column=2, sticky="e")
+        self._statistics_buttons = [refresh, export, delete]
+        self._statistics_status = ctk.CTkLabel(
+            parent,
+            text="",
+            anchor="w",
+            justify="left",
+            text_color=_MUTED_TEXT,
+            wraplength=620,
+        )
+        self._statistics_status.grid(row=2, column=0, sticky="ew", padx=16)
+        self._statistics_body = ctk.CTkFrame(parent, fg_color="transparent")
+        self._statistics_body.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 8))
+        self._statistics_body.grid_columnconfigure(0, weight=1)
+        self.root.after(0, self._refresh_statistics)
+
+    def _render_statistics(self, view: StatisticsView):
+        """Rebuild the Statistics body from a display-ready view."""
+        body = self._statistics_body
+        for child in body.winfo_children():
+            child.destroy()
+        row = 0
+        for notice in view.notices:
+            ctk.CTkLabel(
+                body,
+                text=notice,
+                anchor="w",
+                justify="left",
+                fg_color=("#FFF4D6", "#3A2C13"),
+                text_color=("#704400", "#FFD27F"),
+                corner_radius=6,
+                wraplength=600,
+            ).grid(row=row, column=0, sticky="ew", pady=(0, 6), ipadx=8, ipady=4)
+            row += 1
+        if view.empty is not None:
+            title, hint = view.empty
+            ctk.CTkLabel(
+                body, text=title, font=ctk.CTkFont(size=18, weight="bold")
+            ).grid(row=row, column=0, pady=(32, 4))
+            ctk.CTkLabel(body, text=hint, text_color=_MUTED_TEXT).grid(
+                row=row + 1, column=0, pady=(0, 32)
+            )
+            return
+
+        tiles = ctk.CTkFrame(body, fg_color="transparent")
+        tiles.grid(row=row, column=0, sticky="ew", pady=(8, 4))
+        for column, (value, label) in enumerate(view.tiles):
+            tiles.grid_columnconfigure(column, weight=1, uniform="tile")
+            tile = ctk.CTkFrame(tiles, fg_color=("gray80", "gray22"), corner_radius=8)
+            tile.grid(
+                row=0, column=column, sticky="ew", padx=(0 if column == 0 else 8, 0)
+            )
+            ctk.CTkLabel(
+                tile, text=value, anchor="w", font=ctk.CTkFont(size=22, weight="bold")
+            ).grid(row=0, column=0, sticky="w", padx=12, pady=(10, 0))
+            ctk.CTkLabel(tile, text=label, anchor="w", text_color=_MUTED_TEXT).grid(
+                row=1, column=0, sticky="w", padx=12, pady=(0, 10)
+            )
+        row += 1
+
+        for title, rows in view.sections:
+            ctk.CTkLabel(
+                body,
+                text=title.upper(),
+                anchor="w",
+                text_color=_MUTED_TEXT,
+                font=ctk.CTkFont(size=12, weight="bold"),
+            ).grid(row=row, column=0, sticky="w", pady=(14, 2))
+            row += 1
+            for label, value in rows:
+                line = ctk.CTkFrame(body, fg_color="transparent")
+                line.grid(row=row, column=0, sticky="ew")
+                line.grid_columnconfigure(0, weight=1)
+                ctk.CTkLabel(line, text=label, anchor="w").grid(
+                    row=0, column=0, sticky="w"
+                )
+                ctk.CTkLabel(
+                    line, text=value, anchor="e", font=ctk.CTkFont(weight="bold")
+                ).grid(row=0, column=1, sticky="e", padx=(16, 0))
+                row += 1
+        for note in view.footnotes:
+            ctk.CTkLabel(
+                body,
+                text=note,
+                anchor="w",
+                justify="left",
+                text_color=_MUTED_TEXT,
+                font=ctk.CTkFont(size=12),
+                wraplength=600,
+            ).grid(row=row, column=0, sticky="w", pady=(8 if row else 0, 0))
+            row += 1
+
+    def _statistics_request(self, operation, path=None):
+        if getattr(self, "_closed", False) or self._statistics_token is not None:
+            return
+        token = threading.Event()
+        self._statistics_token = token
+        results = self._statistics_results
+        self._statistics_status.configure(text="Statistics busy. Working...")
+        for button in self._statistics_buttons:
+            button.configure(state="disabled")
+
+        def work():
+            try:
+                service = get_usage_stats()
+                if operation == "summary":
+                    result = service.summary().result()
+                elif operation == "clear":
+                    result = service.clear().result()
+                else:
+                    rows = service.export_rows().result()
+                    result = len(rows)
+                    if rows and not token.is_set():
+                        _write_statistics_csv(path, rows)
+                results.put((token, operation, result, None))
+            except Exception as exc:
+                results.put((token, operation, None, exc))
+
+        threading.Thread(target=work, daemon=True).start()
+        self.root.after(100, self._poll_statistics_result)
+
+    def _poll_statistics_result(self):
+        if getattr(self, "_closed", False):
+            return
+        while True:
+            try:
+                token, operation, result, error = self._statistics_results.get_nowait()
+            except queue.Empty:
+                break
+            if token is not self._statistics_token or token.is_set():
+                continue
+            self._statistics_token = None
+            for button in self._statistics_buttons:
+                button.configure(state="normal")
+            if error is not None:
+                text = (
+                    "Statistics busy. Try again."
+                    if isinstance(error, StatisticsBusyError)
+                    else "Statistics storage unavailable or operation failed. Try again."
+                )
+                self._statistics_status.configure(text=text)
+                if operation != "summary":
+                    messagebox.showerror(_APP_DISPLAY_NAME, text, parent=self.root)
+            elif operation == "summary":
+                self._statistics_status.configure(text="")
+                self._render_statistics(_statistics_view(result))
+            elif operation == "clear":
+                messagebox.showinfo(
+                    _APP_DISPLAY_NAME, "Session history deleted.", parent=self.root
+                )
+                self._refresh_statistics()
+                return
+            else:
+                self._statistics_status.configure(
+                    text="Export finished. Refresh to view history."
+                )
+                messagebox.showinfo(
+                    _APP_DISPLAY_NAME,
+                    f"Exported {result} session(s)."
+                    if result
+                    else "No statistics history to export. No file was written.",
+                    parent=self.root,
+                )
+        if self._statistics_token is not None:
+            self.root.after(100, self._poll_statistics_result)
+
+    def _refresh_statistics(self):
+        self._statistics_request("summary")
+
+    def _export_statistics(self):
+        if self._statistics_token is not None:
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Export Statistics",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv")],
+            initialfile="murmur-statistics.csv",
+        )
+        if path:
+            self._statistics_request("export", path)
+
+    def _delete_statistics(self):
+        if self._statistics_token is not None:
+            return
+        if messagebox.askyesno(
+            "Delete Session History",
+            "Permanently delete all dictation session history?\n"
+            "This cannot be undone.\n\n"
+            "Removes:\n"
+            "  •  Every recorded session\n"
+            "  •  Stage timings and issue counts\n\n"
+            "Keeps:\n"
+            "  •  App versions Murmur has run (no times or session details)\n"
+            "  •  Exported CSV files\n"
+            "  •  Training data\n\n"
+            "Sessions still in progress will not bring deleted history back.",
+            parent=self.root,
+            icon="warning",
+            default="no",
+        ):
+            self._statistics_request("clear")
+
     def _purge_training_data(self):
         summary = self.logger.get_storage_summary()
         if summary.file_count == 0:
@@ -1394,6 +1836,9 @@ class SettingsWindow:
             "ollama_preload_model": self.ollama_preload_model_var.get(),
         }
         updated_values.update(numeric_values)
+        statistics_var = getattr(self, "statistics_var", None)
+        if statistics_var is not None:
+            updated_values["enable_statistics"] = statistics_var.get()
 
         restart_settings = self._changed_restart_settings(updated_values)
 
@@ -1412,6 +1857,17 @@ class SettingsWindow:
                 parent=self.root,
             )
             return
+
+        if statistics_var is not None:
+            try:
+                get_usage_stats().set_enabled(updated_values["enable_statistics"])
+            except Exception:
+                messagebox.showwarning(
+                    _APP_DISPLAY_NAME,
+                    "Settings saved, but statistics collection could not be updated. "
+                    "Restart murmur to apply this setting.",
+                    parent=self.root,
+                )
 
         if old_overlay_enabled and not self.overlay_var.get():
             close_overlay()
@@ -1456,6 +1912,10 @@ class SettingsWindow:
             return
 
         self._closed = True
+        statistics_token = getattr(self, "_statistics_token", None)
+        if statistics_token is not None:
+            statistics_token.set()
+        self._statistics_token = None
         window_icon = getattr(self, "_window_icon", None)
         try:
             if window_icon is not None:
