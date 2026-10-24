@@ -17,9 +17,9 @@ from src.launch import ensure_output_streams as _ensure_output_streams
 
 def _run_app() -> None:
     """Import and start the desktop runtime after handling build-only commands."""
-    from src.build_info import get_build_info
+    from src.build_info import capture_build_info_in_background
 
-    get_build_info()
+    capture_build_info_in_background()
     from src.main import main
 
     main()

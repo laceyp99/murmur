@@ -127,7 +127,11 @@ def test_startup_freezes_identity_before_desktop_runtime(monkeypatch):
     from src import build_info
 
     events = []
-    monkeypatch.setattr(build_info, "get_build_info", lambda: events.append("identity"))
+    monkeypatch.setattr(
+        build_info,
+        "capture_build_info_in_background",
+        lambda: events.append("identity"),
+    )
     monkeypatch.setitem(
         sys.modules, "src.main", SimpleNamespace(main=lambda: events.append("runtime"))
     )

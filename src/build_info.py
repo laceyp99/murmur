@@ -87,10 +87,18 @@ def _read_embedded_info(package_dir: Path) -> dict:
     }
 
 
+def capture_build_info_in_background() -> None:
+    """Freeze launch identity without making startup wait on Git probes.
+
+    Callers that need identity later block on the same lock until capture ends.
+    """
+    threading.Thread(target=get_build_info, name="build-info", daemon=True).start()
+
+
 def get_build_info() -> dict:
     """Freeze identity on first call; callers receive an independent snapshot.
 
-    Call at startup before starting capture or the statistics worker. Subsequent
+    Startup triggers this through capture_build_info_in_background(). Subsequent
     calls perform no file or Git I/O, even when initial identity was unknown.
     """
     global _build_info

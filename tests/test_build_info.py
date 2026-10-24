@@ -96,6 +96,26 @@ def test_identity_is_cached_and_callers_cannot_mutate_it(source_package, monkeyp
     assert calls == [source_package.parent]
 
 
+def test_background_capture_freezes_launch_identity_without_blocking(
+    source_package, monkeypatch
+):
+    import threading
+
+    release = threading.Event()
+
+    def slow_read(root):
+        release.wait(5)
+        return {"git_commit": COMMIT, "git_dirty": False}
+
+    monkeypatch.setattr(build_info, "_read_git_info", slow_read)
+    build_info.capture_build_info_in_background()
+    # Startup continues while Git is still running.
+    assert build_info._build_info is None
+    release.set()
+    # Later callers wait on the same capture instead of probing again.
+    assert build_info.get_build_info()["git_commit"] == COMMIT
+
+
 @pytest.mark.parametrize("frozen", [False, True])
 @pytest.mark.parametrize("embedded", [False, True])
 def test_installed_and_frozen_never_query_checkout(

@@ -23,7 +23,7 @@ def overlay_calls(monkeypatch):
     """Capture overlay requests so tests never start the real Tk UI thread."""
     settings_gui = pytest.importorskip("src.settings_gui")
     monkeypatch.setattr(main_module, "get_usage_stats", lambda: None)
-    monkeypatch.setattr(main_module, "get_build_info", dict)
+    monkeypatch.setattr(main_module, "capture_build_info_in_background", lambda: None)
     calls = []
     monkeypatch.setattr(
         settings_gui,

@@ -10,7 +10,7 @@ import time
 
 from .audio import AudioData, AudioRecorder
 from .autostart import set_autostart
-from .build_info import get_build_info
+from .build_info import capture_build_info_in_background
 from .cancellation import TranscriptionCancelledError, check_cancelled
 from .clipboard import copy_to_clipboard
 from .config import DEFAULT_CONFIG, ConfigError, get_config
@@ -1189,7 +1189,7 @@ class MurmurApp:
 
 def main():
     """Main entry point for the application."""
-    get_build_info()
+    capture_build_info_in_background()
     print("Starting murmur...")
     app = None
     tray_thread = None
