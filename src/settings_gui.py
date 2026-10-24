@@ -158,7 +158,7 @@ def _statistics_view(summary) -> StatisticsView:
             f"{counts.get('interrupted', 0)}",
         ),
         (
-            "Recovered by transcription fallback",
+            "Needed transcription fallback",
             f"{summary.get('fallback_count', 0)} of "
             f"{summary.get('fallback_denominator', 0)}",
         ),

@@ -95,7 +95,7 @@ def test_view_preserves_zero_unknown_and_separate_contexts():
         ("0", "Words delivered"),
     )
     rows = {label: value for _, section in view.sections for label, value in section}
-    assert rows["Recovered by transcription fallback"] == "0 of 1"
+    assert rows["Needed transcription fallback"] == "0 of 1"
     assert rows["Stop to clipboard (median / p95)"] == "0 ms / n/a"
     assert rows["Total recorded"] == "0.0 min"
     assert rows["Clipboard"] == "1 ok, 1 failed"
