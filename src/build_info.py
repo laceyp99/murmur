@@ -18,6 +18,9 @@ _BUILD_INFO_FILENAME = "_build_info.json"
 _GIT_TIMEOUT_SECONDS = 2
 _build_info: dict | None = None
 _build_info_lock = threading.Lock()
+_capture_started = False
+# Separate from _build_info_lock, which is held while Git runs.
+_capture_lock = threading.Lock()
 
 
 def _git(repo_root: Path, *args: str) -> str:
@@ -91,7 +94,13 @@ def capture_build_info_in_background() -> None:
     """Freeze launch identity without making startup wait on Git probes.
 
     Callers that need identity later block on the same lock until capture ends.
+    Repeat calls are no-ops, so each entry point can request capture safely.
     """
+    global _capture_started
+    with _capture_lock:
+        if _capture_started:
+            return
+        _capture_started = True
     threading.Thread(target=get_build_info, name="build-info", daemon=True).start()
 
 

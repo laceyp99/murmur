@@ -14,6 +14,7 @@ COMMIT = "a" * 40
 @pytest.fixture(autouse=True)
 def reset_build_info(monkeypatch):
     monkeypatch.setattr(build_info, "_build_info", None)
+    monkeypatch.setattr(build_info, "_capture_started", False)
 
 
 @pytest.fixture
@@ -102,18 +103,27 @@ def test_background_capture_freezes_launch_identity_without_blocking(
     import threading
 
     release = threading.Event()
+    probes = []
 
     def slow_read(root):
+        probes.append(root)
         release.wait(5)
         return {"git_commit": COMMIT, "git_dirty": False}
 
     monkeypatch.setattr(build_info, "_read_git_info", slow_read)
     build_info.capture_build_info_in_background()
+    # A second entry point (run.py, then main) returns at once mid-probe.
+    finished = threading.Event()
+    threading.Thread(
+        target=lambda: (build_info.capture_build_info_in_background(), finished.set())
+    ).start()
+    assert finished.wait(1)
     # Startup continues while Git is still running.
     assert build_info._build_info is None
     release.set()
     # Later callers wait on the same capture instead of probing again.
     assert build_info.get_build_info()["git_commit"] == COMMIT
+    assert len(probes) == 1
 
 
 @pytest.mark.parametrize("frozen", [False, True])
