@@ -1695,9 +1695,13 @@ class SettingsWindow:
             "Delete Session History",
             "Permanently delete all dictation session history?\n"
             "This cannot be undone.\n\n"
-            "Removes: every recorded session, timing, and issue count.\n\n"
-            "Keeps: a list of the app versions Murmur has run (no times or "
-            "session details), exported CSV files, and training data.\n\n"
+            "Removes:\n"
+            "  •  Every recorded session\n"
+            "  •  Stage timings and issue counts\n\n"
+            "Keeps:\n"
+            "  •  App versions Murmur has run (no times or session details)\n"
+            "  •  Exported CSV files\n"
+            "  •  Training data\n\n"
             "Sessions still in progress will not bring deleted history back.",
             parent=self.root,
             icon="warning",
