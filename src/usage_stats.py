@@ -356,6 +356,7 @@ class UsageStatsService:
         self._snapshot_slots = threading.BoundedSemaphore(128)
         self._control_slots = threading.BoundedSemaphore(8)
         self._pending = set()
+        self._latest = {}
         self._admission_lock = threading.Lock()
         self._thread = threading.Thread(
             target=self._work, name="usage-statistics", daemon=True
@@ -387,11 +388,19 @@ class UsageStatsService:
         return collector
 
     def _submit(self, snapshot):
+        """Queue at most one write per session; it always carries the newest state."""
         with self._state_lock:
-            if self._closed or not self._snapshot_slots.acquire(blocking=False):
+            if self._closed:
                 self._incomplete = True
                 return
-            self._queue.put(("snapshot", snapshot, None))
+            if snapshot.session_id in self._latest:
+                self._latest[snapshot.session_id] = snapshot
+                return
+            if not self._snapshot_slots.acquire(blocking=False):
+                self._incomplete = True
+                return
+            self._latest[snapshot.session_id] = snapshot
+            self._queue.put(("snapshot", snapshot.session_id, None))
 
     def _request(self, kind):
         future = Future()
@@ -572,9 +581,13 @@ class UsageStatsService:
                     self._storage_error = "storage_unavailable"
                     self._incomplete = True
             while True:
-                kind, snapshot, future = self._queue.get()
+                kind, session_id, future = self._queue.get()
                 if kind == "close":
                     break
+                snapshot = None
+                if kind == "snapshot":
+                    with self._state_lock:
+                        snapshot = self._latest.pop(session_id)
                 result = failure = None
                 if future is not None:
                     future.set_running_or_notify_cancel()

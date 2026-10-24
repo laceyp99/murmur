@@ -374,8 +374,9 @@ def test_bounded_nonblocking_snapshots_and_controls(service, monkeypatch):
     collector = service.start_session()
     assert entered.wait(timeout=5)
     try:
+        # Only distinct sessions consume queue slots; 200 exceed the 128 limit.
         for _ in range(200):
-            collector.update(capture_seconds=1)
+            service.start_session()
         collector.finish("success")
         first = service.summary()
         duplicate = service.summary()
@@ -390,6 +391,36 @@ def test_bounded_nonblocking_snapshots_and_controls(service, monkeypatch):
     assert exported.result(timeout=5)
     cleared.result(timeout=5)
     assert barrier(service)["sessions"] == 0
+
+
+def test_long_session_updates_collapse_to_newest_write(service, monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    writes = []
+    original = service._write
+
+    def counted_write(connection, snapshot):
+        writes.append(snapshot)
+        entered.set()
+        assert release.wait(timeout=5)
+        original(connection, snapshot)
+
+    monkeypatch.setattr(service, "_write", counted_write)
+    collector = service.start_session()
+    assert entered.wait(timeout=5)
+    try:
+        # A slow disk while a long dictation sends hundreds of updates.
+        for index in range(300):
+            collector.stage("live_whisper", "success", seconds=0.01)
+            collector.update(capture_seconds=index)
+        collector.finish("success", final_word_count=5)
+    finally:
+        release.set()
+    summary = barrier(service)
+    assert summary["incomplete"] is False
+    assert summary["stages"]["live_whisper"]["success_count"] == 300
+    assert summary["delivered_words"] == 5
+    assert len(writes) == 2  # First snapshot, then one write with the newest state.
 
 
 def test_export_rows_stay_raw_and_unknown_codes_are_fixed(service):
