@@ -158,6 +158,21 @@ def test_baseline_messages_match_evaluated_prompt_artifact_exactly():
             "Hey Pat,\n\nI'm Pat and I run the Tuesday group.",
             "I'm Pat and I run the Tuesday group.",
         ),
+        (
+            "High Pat quick note",
+            "Hi Pat,\n\nQuick note.",
+            "Hi Pat,\n\nQuick note.",
+        ),
+        (
+            "Good morning Pat quick note",
+            "Good morning Pat,\n\nQuick note.",
+            "Good morning Pat,\n\nQuick note.",
+        ),
+        (
+            "Good, Pat here, just confirming Tuesday",
+            "Hi Pat,\n\nGood, Pat here, just confirming Tuesday.",
+            "Good, Pat here, just confirming Tuesday.",
+        ),
         ("Hi pat", "Hi Pat,", "Hi Pat,"),
         ("Thanks again", "Hi Pat,", "Hi Pat,"),
         (
@@ -177,6 +192,9 @@ def test_baseline_messages_match_evaluated_prompt_artifact_exactly():
         "dictated-after-filler",
         "dictated-filler-before-name",
         "assistant-kickoff",
+        "dictated-misheard",
+        "dictated-good-morning",
+        "lone-good-is-not-a-greeting",
         "only-greeting-dictated",
         "only-greeting",
         "longer-name",
@@ -184,6 +202,14 @@ def test_baseline_messages_match_evaluated_prompt_artifact_exactly():
 )
 def test_strip_invented_greeting(dictation, output, expected):
     assert strip_invented_greeting(dictation, output, ["Pat"]) == expected
+
+
+def test_strip_invented_greeting_non_latin_name_does_not_match_any_word():
+    output = "Hi Pat,\n\nHi everyone, I am new."
+
+    assert strip_invented_greeting("Hi everyone I am new", output, ["Pat", "张伟"]) == (
+        "Hi everyone, I am new."
+    )
 
 
 def test_llm_post_processor_strips_invented_greeting_to_speaker():

@@ -256,6 +256,8 @@ class Config:
                 value = "on" if value else "off"
             elif value is None:
                 value = "not set"
+            elif isinstance(value, list):
+                value = ", ".join(value) or "none"
             elif key == "sample_rate":
                 value = f"{value:,} Hz"
             elif key.endswith("_ms"):

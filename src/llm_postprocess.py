@@ -105,17 +105,21 @@ _FILLER_WORDS = frozenset(
 
 
 def _words(text: str) -> list[str]:
-    return re.findall(r"[a-z']+", text.casefold())
+    return re.findall(r"[\w']+", text.casefold())
 
 
 def _dictation_greets_speaker(dictation: str, names: Iterable[str]) -> bool:
     """Whether the dictation opens with a greeting to a speaker, ignoring filler."""
+    spoken_names = [" ".join(_words(name)) for name in names]
+    name_pattern = "|".join(re.escape(name) for name in spoken_names if name)
+    if not name_pattern:
+        return False
     spoken = " ".join(word for word in _words(dictation) if word not in _FILLER_WORDS)
-    greetings = "|".join(sorted(_DICTATED_GREETING_WORDS))
-    name_pattern = "|".join(re.escape(" ".join(_words(name))) for name in names)
+    # A lone "good" is not a greeting ("Good, Pat here..."), only "good morning" is.
+    greetings = "|".join(sorted(_DICTATED_GREETING_WORDS - {"good"}))
     return bool(
         re.match(
-            rf"(?:{greetings})(?: morning| afternoon| evening)? (?:{name_pattern})\b",
+            rf"(?:{greetings}|good (?:morning|afternoon|evening)) (?:{name_pattern})\b",
             spoken,
         )
     )
