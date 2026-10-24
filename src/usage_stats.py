@@ -15,6 +15,7 @@ import sqlite3
 import statistics
 import sys
 import threading
+import time
 import uuid
 from collections import Counter
 from concurrent.futures import Future
@@ -65,6 +66,8 @@ ISSUE_CODES = frozenset(
 )
 CATEGORIES = {"error", "unavailable", "routing", "skip"}
 SCHEMA_VERSION = 1
+# Pause before retrying a final snapshot when another instance holds the lock.
+_FINAL_WRITE_RETRY_SECONDS = 0.5
 
 
 def _utc() -> str:
@@ -180,7 +183,8 @@ class SessionCollector:
             )
             self._publish()
 
-    def stage(self, name, outcome, seconds=None, code=None, category=None, attempts=1):
+    def stage(self, name, outcome, seconds=None):
+        """Count one attempt of a stage; record problems separately with issue()."""
         if name not in STAGES or outcome not in STAGE_OUTCOMES:
             raise ValueError("Invalid statistics stage/outcome")
         if seconds is not None and (
@@ -189,8 +193,6 @@ class SessionCollector:
             or seconds < 0
         ):
             raise ValueError("Invalid stage duration")
-        if type(attempts) is not int or attempts < 0:
-            raise ValueError("Invalid attempt count")
         with self._lock:
             if self._snapshot.outcome != "running":
                 return
@@ -202,17 +204,15 @@ class SessionCollector:
                 _add(old.seconds, seconds),
                 _add(old.success_seconds, seconds if outcome == "success" else None),
                 _add(old.failed_seconds, seconds if outcome == "failed" else None),
-                old.attempts + attempts,
-                old.success_count + (attempts if outcome == "success" else 0),
-                old.failed_count + (attempts if outcome == "failed" else 0),
-                old.skipped_count + (attempts if outcome == "skipped" else 0),
+                old.attempts + 1,
+                old.success_count + (outcome == "success"),
+                old.failed_count + (outcome == "failed"),
+                old.skipped_count + (outcome == "skipped"),
                 old.failed_timed_attempts
-                + (attempts if outcome == "failed" and seconds is not None else 0),
-                off_count=old.off_count + (attempts if outcome == "off" else 0),
+                + (outcome == "failed" and seconds is not None),
+                off_count=old.off_count + (outcome == "off"),
             )
             self._snapshot = replace(self._snapshot, stages=tuple(stages.values()))
-            if code is not None:
-                self._issue(name, code, category or "error", False)
             self._publish()
 
     def _issue(self, stage, code, category, recovered):
@@ -238,12 +238,15 @@ class SessionCollector:
             self._issue(stage, code, category, recovered)
             self._publish()
 
-    def issue_once(self, stage, code, category="error"):
-        """Record a terminal issue unless an observer already counted it."""
+    def issue_once(self, stage, code, category="error", covered_by=()):
+        """Record a terminal issue unless an observer already counted the cause.
+
+        covered_by lists other codes that already explain the same failure.
+        """
+        covering = {code, *covered_by}
         with self._lock:
             if self._snapshot.outcome != "running" or any(
-                issue.stage == stage and issue.code == code
-                for issue in self._snapshot.issues
+                issue.code in covering for issue in self._snapshot.issues
             ):
                 return
             self._issue(stage, code, category, False)
@@ -601,7 +604,7 @@ class UsageStatsService:
                     if connection is None:
                         pass
                     elif kind == "snapshot":
-                        self._write(connection, snapshot)
+                        self._write_final_with_retry(connection, snapshot)
                     elif kind == "clear":
                         with connection:
                             connection.execute("BEGIN IMMEDIATE")
@@ -648,6 +651,24 @@ class UsageStatsService:
                 self._release_lock(connection)
             if connection is not None:
                 connection.close()
+
+    def _write_final_with_retry(self, connection, snapshot):
+        """Retry a final snapshot once if the shared database is briefly locked.
+
+        A lost final write would leave the session running, and a later launch
+        would count a delivered dictation as interrupted.
+        """
+        try:
+            self._write(connection, snapshot)
+        except sqlite3.OperationalError as error:
+            error_code = getattr(error, "sqlite_errorcode", 0) & 0xFF
+            if snapshot.outcome == "running" or error_code not in {
+                sqlite3.SQLITE_BUSY,
+                sqlite3.SQLITE_LOCKED,
+            }:
+                raise
+            time.sleep(_FINAL_WRITE_RETRY_SECONDS)
+            self._write(connection, snapshot)
 
     def _write(self, connection, snapshot):
         if self._provenance is None:
@@ -740,6 +761,8 @@ class UsageStatsService:
                 )
             ]
             rows.append(data)
+        # Chronological, so exports read in order; session IDs are random UUIDs.
+        rows.sort(key=lambda row: (row["started_at"], row["session_id"]))
         return rows
 
     def _summary(self, rows, gap):

@@ -2725,9 +2725,39 @@ def test_statistics_files_unexpected_finalize_error_under_finalization(
     ]
 
 
-@pytest.mark.parametrize("observed", [False, True])
-def test_statistics_counts_one_whisper_failure_once(
-    usage_service, monkeypatch, observed
+@pytest.mark.parametrize("capture_error", [False, True])
+def test_statistics_capture_stage_fails_after_mid_recording_mic_error(
+    usage_service, monkeypatch, capture_error
+):
+    app = make_app(None, FakeTranscriber())
+    app.recorder = FakeRecorder(make_audio_data())
+    app.tray = FakeTray()
+    app._stats_session = usage_service.start_session()
+    app._stats_capture_error = capture_error
+    for name in (
+        "_show_overlay",
+        "_resume_owned_media",
+        "_stop_live_segmentation",
+        "_stop_live_transcription",
+        "_finalize_recording",
+    ):
+        monkeypatch.setattr(app, name, lambda *a, **k: None)
+    app._stop_and_finalize_session()
+    app._stats_session.finish("success")
+    row = usage_service.export_rows().result(timeout=3)[0]
+    assert row["stage_capture_outcome"] == ("failed" if capture_error else "success")
+
+
+@pytest.mark.parametrize(
+    ("observed", "expected"),
+    [
+        (None, {"whisper_failed": 1}),
+        (("offline_whisper", "whisper_failed"), {"whisper_failed": 1}),
+        (("local_cleanup", "local_cleanup_failed"), {"local_cleanup_failed": 1}),
+    ],
+)
+def test_statistics_counts_one_transcription_failure_once(
+    usage_service, monkeypatch, observed, expected
 ):
     from src.observations import emit_observation
 
@@ -2738,8 +2768,13 @@ def test_statistics_counts_one_whisper_failure_once(
 
     def fail_transcription(audio_data):
         if observed:
+            stage, code = observed
             emit_observation(
-                outcome="failed", seconds=0.1, code="whisper_failed", category="error"
+                stage=None if stage == "offline_whisper" else stage,
+                outcome="failed",
+                seconds=0.1,
+                code=code,
+                category="error",
             )
         raise RuntimeError("model unavailable")
 
@@ -2747,7 +2782,7 @@ def test_statistics_counts_one_whisper_failure_once(
     app._process_audio(make_audio_data(), finalization_started_at=10.0)
     summary = usage_service.summary().result(timeout=3)
     assert summary["counts"]["failed"] == 1
-    assert summary["issues"] == {"whisper_failed": 1}
+    assert summary["issues"] == expected
 
 
 def test_statistics_disabled_cleanup_is_off_without_an_issue(usage_service):

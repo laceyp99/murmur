@@ -114,6 +114,10 @@ Statistics storage failures are contained independently of transcription and
 clipboard delivery. Locked, incompatible, or unavailable SQLite storage leaves
 dictation running, flags incomplete history, and allows a later session to
 retry collection. It never persists transcript/audio as a recovery mechanism.
+A final session snapshot that encounters a SQLite lock is retried once after
+0.5 seconds on the background worker. Intermediate snapshots and other storage
+errors are not retried this way. Persistent failure still flags incomplete
+history; neither the wait nor the retry blocks dictation or clipboard delivery.
 CSV export and Settings reads also use the statistics worker, with file writing
 outside its database transaction.
 

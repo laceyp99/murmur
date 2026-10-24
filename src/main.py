@@ -656,7 +656,15 @@ class MurmurApp:
             audio_data = self.recorder.stop_recording()
             if audio_data is not None:
                 self._stats("update", capture_seconds=audio_data.duration)
-                self._stats("stage", "capture", "success", audio_data.duration)
+                # Audio can come back after a mid-recording mic error; keep that visible.
+                self._stats(
+                    "stage",
+                    "capture",
+                    "failed"
+                    if getattr(self, "_stats_capture_error", False)
+                    else "success",
+                    audio_data.duration,
+                )
             if audio_data is not None and not self._cancel_event.is_set():
                 self._show_overlay(PROCESSING)
             # Resume media if it was playing before recording.
@@ -811,7 +819,13 @@ class MurmurApp:
             raise
         except Exception:
             check_cancelled(self._cancel_event)
-            self._stats("issue_once", "offline_whisper", "whisper_failed")
+            # The transcriber already recorded failures it re-raises; don't double-count.
+            self._stats(
+                "issue_once",
+                "offline_whisper",
+                "whisper_failed",
+                covered_by=("local_cleanup_failed",),
+            )
             self._stats("finish", "failed")
             print("Transcription failed.")
             self.notifications.notify_error("Transcription failed.")
@@ -1191,6 +1205,7 @@ class MurmurApp:
 
 def main():
     """Main entry point for the application."""
+    # The console script enters here directly; run.py has usually started this.
     capture_build_info_in_background()
     print("Starting murmur...")
     app = None

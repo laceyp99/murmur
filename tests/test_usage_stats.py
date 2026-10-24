@@ -53,7 +53,8 @@ def test_empty_schema_and_private_contract(service):
 def test_terminal_snapshot_is_idempotent_and_unknown_stays_null(service):
     collector = service.start_session()
     collector.update(whisper_model="small", whisper_device="cpu")
-    collector.stage("offline_whisper", "failed", seconds=2, code="whisper_failed")
+    collector.stage("offline_whisper", "failed", seconds=2)
+    collector.issue("offline_whisper", "whisper_failed")
     collector.stage("offline_whisper", "success", seconds=3)
     collector.issue("offline_whisper", "whisper_failed", recovered=True)
     collector.issue("offline_whisper", "whisper_failed", recovered=True)
@@ -435,6 +436,67 @@ def test_long_session_updates_collapse_to_newest_write(service, monkeypatch):
     assert summary["stages"]["live_whisper"]["success_count"] == 300
     assert summary["delivered_words"] == 5
     assert len(writes) == 2  # First snapshot, then one write with the newest state.
+
+
+def test_locked_final_write_is_retried_once(service, monkeypatch):
+    monkeypatch.setattr("src.usage_stats._FINAL_WRITE_RETRY_SECONDS", 0)
+    original = service._write
+    attempts = []
+
+    def locked_once(connection, snapshot):
+        attempts.append(snapshot.outcome)
+        if snapshot.outcome == "success" and attempts.count("success") == 1:
+            error = sqlite3.OperationalError("database is locked")
+            error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+            raise error
+        original(connection, snapshot)
+
+    collector = service.start_session()
+    barrier(service)
+    monkeypatch.setattr(service, "_write", locked_once)
+    collector.finish("success")
+    summary = barrier(service)
+    assert attempts == ["success", "success"]
+    assert summary["counts"]["success"] == 1
+    assert summary["counts"]["running"] == 0
+    assert summary["incomplete"] is False
+
+
+@pytest.mark.parametrize(
+    ("error_code", "expected_attempts"),
+    [(sqlite3.SQLITE_BUSY, 2), (sqlite3.SQLITE_READONLY, 1)],
+)
+def test_final_write_retries_only_contention_and_stays_bounded(
+    service, monkeypatch, error_code, expected_attempts
+):
+    monkeypatch.setattr("src.usage_stats._FINAL_WRITE_RETRY_SECONDS", 0)
+    collector = service.start_session()
+    barrier(service)
+    attempts = []
+
+    def fail(connection, snapshot):
+        attempts.append(snapshot.outcome)
+        error = sqlite3.OperationalError("synthetic storage failure")
+        error.sqlite_errorcode = error_code
+        raise error
+
+    monkeypatch.setattr(service, "_write", fail)
+    collector.finish("success")
+    summary = barrier(service)
+    assert attempts == ["success"] * expected_attempts
+    assert summary["incomplete"] is True
+
+
+def test_export_rows_are_chronological(service, monkeypatch):
+    from uuid import UUID
+
+    identifiers = iter(UUID(int=value) for value in range(5, 0, -1))
+    monkeypatch.setattr("src.usage_stats.uuid.uuid4", lambda: next(identifiers))
+    for _ in range(5):
+        service.start_session().finish("success")
+    rows = service.export_rows().result(timeout=5)
+    started = [row["started_at"] for row in rows]
+    assert started == sorted(started)
 
 
 def test_export_rows_stay_raw_and_unknown_codes_are_fixed(service):
