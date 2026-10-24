@@ -173,6 +173,21 @@ def test_baseline_messages_match_evaluated_prompt_artifact_exactly():
             "Hi Pat,\n\nGood, Pat here, just confirming Tuesday.",
             "Good, Pat here, just confirming Tuesday.",
         ),
+        (
+            "I told him the plan is fine",
+            "Hi,\n\nI told him the plan is fine.",
+            "I told him the plan is fine.",
+        ),
+        (
+            "That is a good idea let's go",
+            "Hi,\n\nThat is a good idea. Let's go.",
+            "That is a good idea. Let's go.",
+        ),
+        (
+            "Um hi just checking in",
+            "Hi,\n\nJust checking in.",
+            "Hi,\n\nJust checking in.",
+        ),
         ("Hi pat", "Hi Pat,", "Hi Pat,"),
         ("Thanks again", "Hi Pat,", "Hi Pat,"),
         (
@@ -195,6 +210,9 @@ def test_baseline_messages_match_evaluated_prompt_artifact_exactly():
         "dictated-misheard",
         "dictated-good-morning",
         "lone-good-is-not-a-greeting",
+        "bare-with-him-later",
+        "bare-with-good-later",
+        "bare-dictated-after-filler",
         "only-greeting-dictated",
         "only-greeting",
         "longer-name",
