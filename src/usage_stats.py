@@ -34,6 +34,8 @@ STAGES = (
     "ollama_cleanup",
     "clipboard",
 )
+# Issues may also name finalization, for failures the handler cannot place.
+ISSUE_STAGES = (*STAGES, "finalization")
 StageOutcome = Literal["running", "success", "failed", "skipped", "cancelled"]
 SessionOutcome = Literal["success", "failed", "no_speech", "cancelled", "interrupted"]
 STAGE_OUTCOMES = {"running", "success", "failed", "skipped", "cancelled"}
@@ -44,9 +46,7 @@ ISSUE_CODES = frozenset(
         "capture_start_failed",
         "capture_failed",
         "no_audio",
-        "live_start_failed",
         "live_degraded",
-        "live_retry_exhausted",
         "live_empty",
         "vad_unavailable",
         "vad_error",
@@ -215,7 +215,7 @@ class SessionCollector:
 
     def _issue(self, stage, code, category, recovered):
         if (
-            stage not in STAGES
+            stage not in ISSUE_STAGES
             or category not in CATEGORIES
             or type(recovered) is not bool
         ):

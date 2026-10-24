@@ -619,7 +619,8 @@ class MurmurApp:
             except TranscriptionCancelledError:
                 self._stats("finish", "cancelled")
             except Exception:
-                self._stats("issue", "capture", "unknown_error")
+                # Any step of finalization may have raised; don't blame capture.
+                self._stats("issue", "finalization", "unknown_error")
                 self._stats("finish", "failed")
                 raise
             finally:

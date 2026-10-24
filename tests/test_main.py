@@ -1,6 +1,7 @@
 import _thread
 import importlib.metadata
 import io
+import json
 import runpy
 import sys
 import threading
@@ -2700,6 +2701,28 @@ def test_statistics_separates_normal_routing_from_error_fallback(
     rows = usage_service.export_rows().result(timeout=3)
     assert "private raw exception" not in str(rows)
     assert rows[0]["transcription_route"] == "full_clip"
+
+
+def test_statistics_files_unexpected_finalize_error_under_finalization(
+    usage_service, monkeypatch
+):
+    app = make_app(None, FakeTranscriber())
+    app.tray = FakeTray()
+    app.hotkey_manager = FakeHotkeyManager()
+    app._stats_session = usage_service.start_session()
+
+    def fail_finalize():
+        raise RuntimeError("cleanup bug")
+
+    monkeypatch.setattr(app, "_stop_and_finalize_session", fail_finalize)
+    with pytest.raises(RuntimeError):
+        app._finish_recording_stop()
+    row = usage_service.export_rows().result(timeout=3)[0]
+    assert row["outcome"] == "failed"
+    issues = json.loads(row["issues"])
+    assert [(i["stage"], i["code"]) for i in issues] == [
+        ("finalization", "unknown_error")
+    ]
 
 
 @pytest.mark.parametrize("observed", [False, True])
