@@ -98,6 +98,27 @@ _BARE_GREETING_LINE = re.compile(
 _DICTATED_GREETING_WORDS = frozenset(
     {"hi", "hey", "hello", "dear", "greetings", "good", "high", "him", "hay"}
 )
+# Spoken filler the model drops, so "Um hey Pat" still counts as a dictated greeting.
+_FILLER_WORDS = frozenset(
+    {"um", "uh", "uhm", "er", "ah", "oh", "okay", "ok", "so", "alright", "well"}
+)
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[a-z']+", text.casefold())
+
+
+def _dictation_greets_speaker(dictation: str, names: Iterable[str]) -> bool:
+    """Whether the dictation opens with a greeting to a speaker, ignoring filler."""
+    spoken = " ".join(word for word in _words(dictation) if word not in _FILLER_WORDS)
+    greetings = "|".join(sorted(_DICTATED_GREETING_WORDS))
+    name_pattern = "|".join(re.escape(" ".join(_words(name))) for name in names)
+    return bool(
+        re.match(
+            rf"(?:{greetings})(?: morning| afternoon| evening)? (?:{name_pattern})\b",
+            spoken,
+        )
+    )
 
 
 def strip_invented_greeting(
@@ -106,7 +127,7 @@ def strip_invented_greeting(
     """Remove a greeting the model invented at the start of cleaned output.
 
     Strips a greeting addressed to the speaker unless the dictation opens with
-    one, or a bare greeting line ("Hi,") when the dictation's first five words
+    one (after any filler, misheard greetings included), or a bare greeting line ("Hi,") when the dictation's first five words
     contain no greeting word. Greetings to anyone else are left alone, and the
     original output is returned if stripping would leave nothing.
     """
@@ -116,14 +137,15 @@ def strip_invented_greeting(
         name_pattern = "|".join(
             re.escape(name) for name in sorted(names, key=len, reverse=True)
         )
-        to_speaker = rf"{_GREETING}[ \t,]*(?:{name_pattern})\b"
-        # In the output the greeting must end at punctuation or a line break, so
-        # "Hi Pat Lacey," is never cut down to "Lacey,".
+        # The greeting must end at punctuation or a line break, so "Hi Pat Lacey,"
+        # is never cut down to "Lacey,".
         match = re.match(
-            rf"{to_speaker}[ \t]*(?:[,.!:]+|(?=\n)|$)\s*", output, re.IGNORECASE
+            rf"{_GREETING}[ \t,]*(?:{name_pattern})\b[ \t]*(?:[,.!:]+|(?=\n)|$)\s*",
+            output,
+            re.IGNORECASE,
         )
         if match:
-            if re.match(to_speaker, dictation.strip(), re.IGNORECASE):
+            if _dictation_greets_speaker(dictation, names):
                 return output
             stripped = output[match.end() :]
             if not stripped.strip():
@@ -132,7 +154,7 @@ def strip_invented_greeting(
 
     match = _BARE_GREETING_LINE.match(output)
     if match:
-        first_words = re.findall(r"[a-z']+", dictation.casefold())[:5]
+        first_words = _words(dictation)[:5]
         if _DICTATED_GREETING_WORDS.isdisjoint(first_words):
             stripped = output[match.end() :]
             if stripped.strip():

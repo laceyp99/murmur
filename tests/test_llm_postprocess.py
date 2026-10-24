@@ -143,6 +143,21 @@ def test_baseline_messages_match_evaluated_prompt_artifact_exactly():
             "Hi Pat Lacey,\n\nMy name is Pat Lacey.",
             "Hi Pat Lacey,\n\nMy name is Pat Lacey.",
         ),
+        (
+            "Um hey Pat can you check the build",
+            "Hey Pat,\n\nCan you check the build?",
+            "Hey Pat,\n\nCan you check the build?",
+        ),
+        (
+            "Hey uh Pat thanks",
+            "Hey Pat,\n\nThanks.",
+            "Hey Pat,\n\nThanks.",
+        ),
+        (
+            "Hey chat I'm Pat and I run the Tuesday group",
+            "Hey Pat,\n\nI'm Pat and I run the Tuesday group.",
+            "I'm Pat and I run the Tuesday group.",
+        ),
         ("Hi pat", "Hi Pat,", "Hi Pat,"),
         ("Thanks again", "Hi Pat,", "Hi Pat,"),
         (
@@ -159,6 +174,9 @@ def test_baseline_messages_match_evaluated_prompt_artifact_exactly():
         "other-name",
         "inline",
         "unlisted-full-name",
+        "dictated-after-filler",
+        "dictated-filler-before-name",
+        "assistant-kickoff",
         "only-greeting-dictated",
         "only-greeting",
         "longer-name",
