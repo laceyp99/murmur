@@ -98,6 +98,20 @@ def test_export_rounds_durations_to_milliseconds(service):
     assert len(EXPORT_COLUMNS) == len(set(EXPORT_COLUMNS))
 
 
+def test_terminal_issue_deduplication_preserves_failures_in_other_stages(service):
+    collector = service.start_session()
+    collector.issue("live_whisper", "whisper_failed")
+    collector.issue_once("offline_whisper", "whisper_failed")
+    collector.issue_once("offline_whisper", "whisper_failed")
+    collector.finish("failed")
+    row = service.export_rows().result(timeout=5)[0]
+    issues = json.loads(row["issues"])
+    assert {(issue["stage"], issue["code"], issue["count"]) for issue in issues} == {
+        ("live_whisper", "whisper_failed", 1),
+        ("offline_whisper", "whisper_failed", 1),
+    }
+
+
 def test_exact_metrics_and_context_groups(service):
     fixtures = [
         ("success", 1, True, True, False),
@@ -366,11 +380,13 @@ def test_bounded_nonblocking_snapshots_and_controls(service, monkeypatch):
     monkeypatch.setattr(service, "_snapshot_slots", threading.BoundedSemaphore(2))
     entered = threading.Event()
     release = threading.Event()
+    timed_out = threading.Event()
     original = service._write
 
     def blocked_write(connection, snapshot):
         entered.set()
-        assert release.wait(timeout=5)
+        if not release.wait(timeout=5):
+            timed_out.set()
         original(connection, snapshot)
 
     monkeypatch.setattr(service, "_write", blocked_write)
@@ -394,6 +410,9 @@ def test_bounded_nonblocking_snapshots_and_controls(service, monkeypatch):
     assert exported.result(timeout=5)
     cleared.result(timeout=5)
     assert barrier(service)["sessions"] == 0
+    assert not timed_out.is_set(), (
+        "Snapshot admission blocked until the writer timed out"
+    )
 
 
 def test_long_session_updates_collapse_to_newest_write(service, monkeypatch):

@@ -243,10 +243,11 @@ class SessionCollector:
 
         covered_by lists other codes that already explain the same failure.
         """
-        covering = {code, *covered_by}
         with self._lock:
             if self._snapshot.outcome != "running" or any(
-                issue.code in covering for issue in self._snapshot.issues
+                (issue.stage == stage and issue.code == code)
+                or issue.code in covered_by
+                for issue in self._snapshot.issues
             ):
                 return
             self._issue(stage, code, category, False)
