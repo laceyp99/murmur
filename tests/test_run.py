@@ -5,6 +5,7 @@ import runpy
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -139,15 +140,15 @@ def test_startup_freezes_identity_before_desktop_runtime(monkeypatch):
     assert events == ["identity", "runtime"]
 
 
-def test_packaging_self_check_commits_sqlite_transaction(monkeypatch):
+def test_packaging_self_check_commits_sqlite_transaction(monkeypatch, tmp_path):
     connect = sqlite3.connect
-    statements = []
     connections = []
+    database_path = tmp_path / "packaging.sqlite3"
 
     def open_database(database):
         assert database == ":memory:"
-        connection = connect(database)
-        connection.set_trace_callback(statements.append)
+        # A second connection can only see the inserted row after it commits.
+        connection = connect(database_path)
         connections.append(connection)
         return connection
 
@@ -156,10 +157,8 @@ def test_packaging_self_check_commits_sqlite_transaction(monkeypatch):
     monkeypatch.setitem(sys.modules, "numpy", None)
     with pytest.raises(ModuleNotFoundError, match="numpy"):
         run._run_packaging_self_check()
-    assert "BEGIN " in statements
-    assert "INSERT INTO packaging_check VALUES (1)" in statements
-    assert "COMMIT" in statements
-    assert "SELECT value FROM packaging_check" in statements
+    with closing(connect(database_path)) as reader:
+        assert reader.execute("SELECT * FROM packaging_check").fetchall() == [(1,)]
     with pytest.raises(sqlite3.ProgrammingError, match="closed"):
         connections[0].execute("SELECT 1")
 
