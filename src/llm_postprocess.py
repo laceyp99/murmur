@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from math import ceil
 from typing import Any
@@ -87,6 +87,97 @@ DISALLOWED_PREFIXES = (
     "sure",
     "of course",
 )
+
+_GREETING = r"(?:hi|hey|hello|dear|good[ \t]+(?:morning|afternoon|evening))"
+_BARE_GREETING_LINE = re.compile(
+    r"(?:hi|hey|hello|good[ \t]+(?:morning|afternoon|evening))(?:[ \t]+there)?"
+    r"[ \t]*[,.!]*[ \t]*\n\s*",
+    re.IGNORECASE,
+)
+# Spoken greetings, including common speech-to-text mishearings ("high", "him",
+# "hay"). A lone "good" is not a greeting ("Good, Pat here..."), only "good morning" is.
+_SPOKEN_GREETING = (
+    r"(?:hi|hey|hello|dear|greetings|high|him|hay|good (?:morning|afternoon|evening))"
+)
+# Spoken filler the model drops, so "Um hey Pat" still counts as a dictated greeting.
+_FILLER_WORDS = frozenset(
+    {
+        "um",
+        "uh",
+        "uhm",
+        "er",
+        "ah",
+        "oh",
+        "okay",
+        "ok",
+        "so",
+        "alright",
+        "well",
+        "hmm",
+        "yeah",
+        "like",
+    }
+)
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[\w']+", text.casefold())
+
+
+def _dictation_opens_with_greeting(
+    dictation: str, names: Iterable[str] | None = None
+) -> bool:
+    """Whether the dictation opens with a greeting, to one of `names` if given."""
+    addressee = ""
+    if names is not None:
+        spoken_names = [" ".join(_words(name)) for name in names]
+        name_pattern = "|".join(re.escape(name) for name in spoken_names if name)
+        if not name_pattern:
+            return False
+        addressee = rf" (?:{name_pattern})"
+    spoken = " ".join(word for word in _words(dictation) if word not in _FILLER_WORDS)
+    return bool(re.match(rf"{_SPOKEN_GREETING}{addressee}\b", spoken))
+
+
+def strip_invented_greeting(
+    dictation: str, output: str, speaker_names: Iterable[str]
+) -> str:
+    """Remove a greeting the model invented at the start of cleaned output.
+
+    Strips a greeting addressed to the speaker, or a bare greeting line ("Hi,"),
+    unless the dictation itself opens with that kind of greeting. Leading filler
+    and misheard greetings ("High Pat") are allowed in the dictation. Greetings
+    to anyone else are left alone, and the original output is returned if
+    stripping would leave nothing.
+    """
+    names = {name.strip() for name in speaker_names if name.strip()}
+    if names:
+        # Longest first so "Pat Lacey" wins over "Pat" in the alternation.
+        name_pattern = "|".join(
+            re.escape(name) for name in sorted(names, key=len, reverse=True)
+        )
+        # The greeting must end at punctuation or a line break, so "Hi Pat Lacey,"
+        # is never cut down to "Lacey,".
+        match = re.match(
+            rf"{_GREETING}[ \t,]*(?:{name_pattern})\b[ \t]*(?:[,.!:]+|(?=\n)|$)\s*",
+            output,
+            re.IGNORECASE,
+        )
+        if match:
+            if _dictation_opens_with_greeting(dictation, names):
+                return output
+            stripped = output[match.end() :]
+            if not stripped.strip():
+                return output
+            return stripped[0].upper() + stripped[1:]
+
+    match = _BARE_GREETING_LINE.match(output)
+    if match and not _dictation_opens_with_greeting(dictation):
+        stripped = output[match.end() :]
+        if stripped.strip():
+            return stripped
+
+    return output
 
 
 class OllamaClient:
@@ -282,9 +373,11 @@ class LLMPostProcessor:
         self,
         client: OllamaClient,
         user_vocab: Mapping[str, str] | None = None,
+        speaker_names: Iterable[str] = (),
     ):
         self.client = client
         self.user_vocab = dict(user_vocab or {})
+        self.speaker_names = tuple(speaker_names)
 
     def process(self, text: str) -> str:
         """Return cleaned transcript text, or the original text on failure."""
@@ -343,7 +436,9 @@ class LLMPostProcessor:
         if self._is_acceptable_output(normalized_result, cleaned_input):
             observe("success", "cleanup_applied", "success")
             print(f"LLM post-processing completed in {elapsed:.2f}s")
-            return normalized_result
+            return strip_invented_greeting(
+                cleaned_input, normalized_result, self.speaker_names
+            )
 
         observe("failed", "cleanup_output_rejected", "error")
         print(

@@ -28,6 +28,7 @@ class FakeConfig:
     ollama_endpoint = "http://localhost:11434"
     ollama_model_name = DEFAULT_OLLAMA_MODEL_NAME
     ollama_timeout_seconds = DEFAULT_OLLAMA_TIMEOUT_SECONDS
+    speaker_names = ("Pat",)
 
 
 class FakeModel:
@@ -731,9 +732,10 @@ def test_get_llm_post_processor_loads_user_vocab(monkeypatch):
             }
 
     class StubLLMPostProcessor:
-        def __init__(self, client, user_vocab=None):
+        def __init__(self, client, user_vocab=None, speaker_names=()):
             captured["client"] = client
             captured["user_vocab"] = user_vocab
+            captured["speaker_names"] = speaker_names
             captured["processor_instance"] = self
 
     monkeypatch.setattr("src.transcription.OllamaClient", StubOllamaClient)
@@ -756,3 +758,4 @@ def test_get_llm_post_processor_loads_user_vocab(monkeypatch):
         "timeout": float(DEFAULT_OLLAMA_TIMEOUT_SECONDS),
     }
     assert captured["user_vocab"] == {"brew ridge": "Blue Ridge Data"}
+    assert captured["speaker_names"] == ("Pat",)

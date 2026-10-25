@@ -45,6 +45,8 @@ DEFAULT_CONFIG = {
     "ollama_model_name": DEFAULT_OLLAMA_MODEL_NAME,
     "ollama_timeout_seconds": DEFAULT_OLLAMA_TIMEOUT_SECONDS,
     "ollama_preload_model": True,
+    # Names of the person dictating; cleanup drops greetings the model invents to them.
+    "speaker_names": ["Pat"],
 }
 
 _BOOLEAN_KEYS = {
@@ -88,6 +90,8 @@ def _valid_config_value(key: str, value: Any, *, ollama_enabled: bool) -> bool:
         return isinstance(value, str) and (allow_blank or bool(value.strip()))
     if key in _OPTIONAL_STRING_KEYS:
         return value is None or isinstance(value, str)
+    if key == "speaker_names":
+        return isinstance(value, list) and all(isinstance(name, str) for name in value)
     if key == "microphone":
         return value is None or (
             isinstance(value, dict)
@@ -252,6 +256,8 @@ class Config:
                 value = "on" if value else "off"
             elif value is None:
                 value = "not set"
+            elif isinstance(value, list):
+                value = ", ".join(value) or "none"
             elif key == "sample_rate":
                 value = f"{value:,} Hz"
             elif key.endswith("_ms"):
@@ -413,6 +419,11 @@ class Config:
     def ollama_preload_model(self) -> bool:
         """Whether to attempt to preload/warm the Ollama model on startup."""
         return self.get("ollama_preload_model", True)
+
+    @property
+    def speaker_names(self) -> tuple[str, ...]:
+        """Names of the person dictating, used to drop invented greetings to them."""
+        return tuple(self.get("speaker_names", DEFAULT_CONFIG["speaker_names"]))
 
 
 def get_config() -> Config:

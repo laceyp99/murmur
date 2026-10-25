@@ -235,6 +235,7 @@ class Transcriber:
                     timeout=float(self.config.ollama_timeout_seconds),
                 ),
                 user_vocab=load_user_vocab(),
+                speaker_names=self.config.speaker_names,
             )
         except Exception:
             print("Warning: Ollama post-processor unavailable.")

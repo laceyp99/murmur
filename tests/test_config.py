@@ -156,6 +156,8 @@ def test_config_recovers_from_invalid_utf8_bytes(tmp_path, monkeypatch):
         ("hotkey", 12),
         ("language", 12),
         ("microphone", {"name": "USB Mic"}),
+        ("speaker_names", "Pat"),
+        ("speaker_names", ["Pat", 3]),
     ],
 )
 def test_invalid_known_values_are_backed_up_and_repaired(
@@ -330,6 +332,13 @@ def test_invalid_ollama_enablement_disables_cleanup(
         == invalid_enabled
     )
     assert Config().ollama_enabled is False
+
+
+def test_recovery_notice_lists_repaired_speaker_names_plainly(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    Config().update({"speaker_names": "Pat"})
+
+    assert "Speaker names: Pat." in Config().consume_startup_notice()
 
 
 def test_recovery_notice_stays_available_until_dismissed_without_saving(
