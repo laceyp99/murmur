@@ -158,10 +158,6 @@ The current default values are:
 }
 ```
 
-`speaker_names` lists the names of the person dictating. It has no Settings
-control. After Ollama cleanup, murmur removes a greeting the model invented to
-one of these names, such as `Hi Pat,` on a self-introduction.
-
 **Show recording overlay** and **Enable notifications** are independent. The
 overlay is on by default; Windows toast notifications are off by default.
 Turning the overlay off suppresses every overlay state, including errors, while

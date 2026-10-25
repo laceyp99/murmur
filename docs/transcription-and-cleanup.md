@@ -144,22 +144,14 @@ turn dictated text into an answer, a list, or a rewritten document.
 
 ## Invented Greeting Guard
 
-Accepted output then passes through `strip_invented_greeting`. Small models
-sometimes open with a greeting the speaker never said, such as `Hi Pat,` on a
-self-introduction. The guard checks only the start of the output:
+Accepted output passes through `strip_invented_greeting`, which removes invented
+opening greetings to a name in `speaker_names` or bare greeting lines such as
+`Hi,`. Dictated greetings and greetings to other people are kept; stripping
+never leaves an empty result.
 
-- A greeting to a name in `speaker_names` is removed unless the dictation opens
-  with a greeting to that name. Both `Hi Pat,` on its own line and inline
-  `Hi Pat, I think...` are handled.
-- A bare greeting line such as `Hi,` or `Hi there,` is removed unless the
-  dictation opens with a greeting.
-- When checking how the dictation opens, filler such as `um`, `uh`, `uhm`,
-  `hmm`, `yeah`, `like`, or `okay` is skipped and misheard greetings such as
-  `High Pat` count. A lone `good` does not count; `good morning` does.
-  This also means `High priority...` can preserve an invented bare greeting.
-- Greetings to anyone else are kept, because they are often repairs of a garbled
-  dictated greeting.
-- If stripping would leave nothing, the output is returned unchanged.
+The dictation check skips filler such as `um` or `like` and accepts misheard
+greetings such as `High Pat`. A known miss is `High priority...`, which can
+preserve an invented bare greeting.
 
 ## Vocabulary Overrides
 
