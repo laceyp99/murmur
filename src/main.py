@@ -28,7 +28,7 @@ from .recording_overlay import (
     RECORDING,
     SUCCESS,
 )
-from .transcription import Transcriber
+from .transcription import FinalTranscript, Transcriber
 from .transcription_live import (
     LiveSegmentMetrics,
     LiveTranscriptionWorker,
@@ -771,8 +771,8 @@ class MurmurApp:
             return
 
         with observe_transcription(self._stats_observer()):
-            live_text = self._get_live_transcript_text()
-        if not live_text:
+            live_transcript = self._get_live_transcript()
+        if not live_transcript.text:
             self._stats("issue", "live_whisper", "live_empty", category="routing")
             self._process_audio(
                 audio_data,
@@ -784,7 +784,7 @@ class MurmurApp:
         try:
             self._complete_transcription(
                 audio_data,
-                live_text,
+                live_transcript,
                 finalization_started_at=finalization_started_at,
                 live_segment_metrics=self._get_live_segment_metrics(),
             )
@@ -807,10 +807,10 @@ class MurmurApp:
         try:
             self._stats("update", reached_transcription=True)
             with observe_transcription(self._stats_observer()):
-                text = self._transcribe_audio(audio_data)
+                transcript = self._transcribe_audio(audio_data)
             self._complete_transcription(
                 audio_data,
-                text,
+                transcript,
                 finalization_started_at=finalization_started_at,
                 live_segment_metrics=LiveSegmentMetrics.empty(),
             )
@@ -831,7 +831,7 @@ class MurmurApp:
             self.notifications.notify_error("Transcription failed.")
             self._show_overlay(ERROR, OVERLAY_TRANSCRIPTION_FAILED)
 
-    def _transcribe_audio(self, audio_data: AudioData) -> str:
+    def _transcribe_audio(self, audio_data: AudioData) -> FinalTranscript:
         """Transcribe audio through VAD segments with a full-clip fallback."""
         check_cancelled(self._cancel_event)
         segmenter = self._get_segmenter(audio_data.sample_rate)
@@ -892,16 +892,16 @@ class MurmurApp:
 
         return self.transcriber.transcribe_segments(
             segments, debug=True, cancel_event=self._cancel_event
-        ).text
+        ).final
 
-    def _get_live_transcript_text(self) -> str:
-        """Return the finalized live transcript text accumulated during recording."""
+    def _get_live_transcript(self) -> FinalTranscript:
+        """Return the finalized live transcript accumulated during recording."""
         if self.live_transcript_accumulator is None:
-            return ""
+            return FinalTranscript("")
 
         chunks = self.live_transcript_accumulator.ordered_chunks()
         if not chunks:
-            return ""
+            return FinalTranscript("")
 
         return self.transcriber.finalize_segment_texts(
             [chunk.text for chunk in chunks], cancel_event=self._cancel_event
@@ -917,12 +917,13 @@ class MurmurApp:
     def _complete_transcription(
         self,
         audio_data: AudioData,
-        text: str,
+        transcript: FinalTranscript,
         *,
         finalization_started_at: float,
         live_segment_metrics: LiveSegmentMetrics,
     ) -> None:
         """Finish clipboard, notification, and logging for a completed transcript."""
+        text = transcript.text
         with self._recording_stop_lock:
             check_cancelled(self._cancel_event)
             if self._delivery_started:
@@ -953,7 +954,16 @@ class MurmurApp:
             final_word_count=len(text.split()),
             stop_to_clipboard_seconds=runtime if copied else None,
         )
-        log_entry = self.logger.log(audio_data, text, runtime, live_segment_metrics)
+        log_entry = self.logger.log(
+            audio_data,
+            text,
+            cleanup_input=transcript.cleanup_input,
+            cleanup_status=transcript.cleanup_status,
+            cleanup_model=transcript.cleanup_model,
+            session_id=getattr(
+                getattr(self, "_stats_session", None), "session_id", None
+            ),
+        )
         if self._shutdown_event.is_set():
             return
 

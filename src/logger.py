@@ -14,22 +14,23 @@ import numpy as np
 
 from .audio import AudioData
 from .config import get_config, get_training_data_dir
-from .transcription_live import LiveSegmentMetrics
+from .llm_postprocess import CLEANUP_VERSION, CleanupStatus
 
 
 @dataclass
 class TranscriptionLog:
-    """Log entry for a transcription."""
+    """One fine-tuning row: Ollama cleanup input, output, and labels.
 
-    timestamp: str
+    Timing and performance data live in usage statistics, joined by session_id.
+    """
+
+    session_id: str | None
     audio_file: str
+    cleanup_input: str
     transcription: str
-    duration: float
-    model: str
-    processing_time: float
-    live_segment_count: int
-    live_segment_latency_avg_seconds: float | None
-    live_segment_latency_max_seconds: float | None
+    cleanup_status: CleanupStatus
+    cleanup_model: str | None
+    cleanup_version: str | None
 
 
 @dataclass(frozen=True)
@@ -65,17 +66,22 @@ class DataLogger:
         self,
         audio_data: AudioData,
         transcription: str,
-        processing_time: float,
-        live_segment_metrics: LiveSegmentMetrics | None = None,
+        *,
+        cleanup_input: str = "",
+        cleanup_status: CleanupStatus = "off",
+        cleanup_model: str | None = None,
+        session_id: str | None = None,
     ) -> TranscriptionLog | None:
         """
         Log an audio recording and its transcription.
 
         Args:
             audio_data: The recorded audio data
-            transcription: The transcription text
-            processing_time: Finalization latency after recording stops, in seconds
-            live_segment_metrics: Runtime metrics for live chunks that contributed text
+            transcription: The final transcription text
+            cleanup_input: Text after local cleanup; Ollama's input when it ran
+            cleanup_status: The llm_cleanup outcome, using usage statistics names
+            cleanup_model: Model of the Ollama client that handled cleanup, if any
+            session_id: Usage statistics session, or None when statistics are off
 
         Returns:
             TranscriptionLog entry if successful, None otherwise
@@ -86,8 +92,7 @@ class DataLogger:
         if not transcription.strip():
             return None
 
-        if live_segment_metrics is None:
-            live_segment_metrics = LiveSegmentMetrics.empty()
+        cleanup_version = CLEANUP_VERSION if cleanup_status != "off" else None
 
         try:
             self.audio_dir.mkdir(parents=True, exist_ok=True)
@@ -102,19 +107,13 @@ class DataLogger:
 
             # Create log entry
             log_entry = TranscriptionLog(
-                timestamp=datetime.now().astimezone().isoformat(),
+                session_id=session_id,
                 audio_file=audio_filename,
+                cleanup_input=cleanup_input,
                 transcription=transcription,
-                duration=audio_data.duration,
-                model=self.config.get("model", "small"),
-                processing_time=processing_time,
-                live_segment_count=live_segment_metrics.segment_count,
-                live_segment_latency_avg_seconds=(
-                    live_segment_metrics.latency_avg_seconds
-                ),
-                live_segment_latency_max_seconds=(
-                    live_segment_metrics.latency_max_seconds
-                ),
+                cleanup_status=cleanup_status,
+                cleanup_model=cleanup_model,
+                cleanup_version=cleanup_version,
             )
 
             # Append to JSONL file

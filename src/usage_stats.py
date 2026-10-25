@@ -170,6 +170,11 @@ class SessionCollector:
             (),
         )
 
+    @property
+    def session_id(self) -> str:
+        """Identifier shared with the session's training-data row."""
+        return self._snapshot.session_id
+
     def _publish(self):
         self._service._submit(self._snapshot)
 

@@ -7,9 +7,11 @@ import pytest
 
 from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
 from src.llm_postprocess import (
+    CLEANUP_VERSION,
     CONTEXT_SIZE,
     DEFAULT_SYSTEM_PROMPT,
     FEW_SHOT_MESSAGES,
+    CleanupResult,
     LLMPostProcessor,
     OllamaClient,
     check_ollama_connection,
@@ -52,9 +54,10 @@ def test_cleanup_observes_source_outcomes_without_content(
     events = []
     with observe_transcription(events.append):
         result = processor.process(text)
-    assert result == text.strip()
+    assert result.text == text.strip()
     assert len(events) == 1
     event = events[0]
+    assert result.status == event["outcome"]
     assert event["code"] == expected_code
     assert event["stage"] == "llm_cleanup"
     assert event["seconds"] >= 0
@@ -74,7 +77,7 @@ def test_cleanup_transport_timeout_is_classified_without_exception_message():
 
     events = []
     with observe_transcription(events.append):
-        assert LLMPostProcessor(Client()).process("Secret text.") == "Secret text."
+        assert LLMPostProcessor(Client()).process("Secret text.").text == "Secret text."
     assert events[0]["category"] == "error"
     assert events[0]["code"] == "cleanup_timeout"
     assert "secret" not in repr(events).lower()
@@ -90,7 +93,7 @@ def test_cleanup_observer_failure_preserves_accepted_output():
 
     with observe_transcription(broken):
         assert (
-            LLMPostProcessor(Client()).process("Original sentence.")
+            LLMPostProcessor(Client()).process("Original sentence.").text
             == "Edited sentence."
         )
 
@@ -255,7 +258,7 @@ def test_llm_post_processor_strips_invented_greeting_to_speaker():
         speaker_names=["Pat"],
     )
 
-    assert processor.process("my name is Jordan") == "My name is Jordan."
+    assert processor.process("my name is Jordan").text == "My name is Jordan."
 
 
 class FakeOllamaPackageClient:
@@ -374,7 +377,9 @@ def test_llm_post_processor_builds_exact_evaluated_messages_and_returns_cleaned_
     raw_transcript = "  The report is ready. Please review it tomorrow.  "
     result = processor.process(raw_transcript)
 
-    assert result == "The report is ready. Please review it tomorrow."
+    assert result == CleanupResult(
+        "The report is ready. Please review it tomorrow.", "success"
+    )
     messages = fake_client.calls[0]["messages"]
     assert hashlib.sha256(messages[0]["content"].encode()).hexdigest() == (
         "b92a7358b8e6899334e568d4b7da80317f3feb491df5a983c67043744c8e8592"
@@ -384,6 +389,14 @@ def test_llm_post_processor_builds_exact_evaluated_messages_and_returns_cleaned_
         "role": "user",
         "content": "The report is ready. Please review it tomorrow.",
     }
+
+
+def test_cleanup_prompt_changes_require_cleanup_version_bump():
+    # If this fails after a prompt edit, bump CLEANUP_VERSION and pin both here.
+    prompt_hash = hashlib.sha256(
+        json.dumps([DEFAULT_SYSTEM_PROMPT, FEW_SHOT_MESSAGES]).encode("utf-8")
+    ).hexdigest()[:12]
+    assert (CLEANUP_VERSION, prompt_hash) == ("v1", "df160e8e7844")
 
 
 def test_llm_post_processor_appends_vocab_only_to_system_message():
@@ -459,7 +472,10 @@ def test_llm_post_processor_requires_a_normal_completion(
 
     result = processor.process(original)
 
-    assert result == (content if done is True and done_reason == "stop" else original)
+    if done is True and done_reason == "stop":
+        assert result == CleanupResult(content, "success")
+    else:
+        assert result == CleanupResult(original, "failed")
     assert len(client.calls) == 1
     output = capsys.readouterr().out
     assert "Invoice" not in output
@@ -503,7 +519,7 @@ def test_llm_post_processor_preserves_transcript_for_non_string_content(
     )
     original = "Invoice is $100, due May 5."
 
-    assert processor.process(original) == original
+    assert processor.process(original).text == original
     assert len(fake_client.calls) == 1
     output = capsys.readouterr().out
     assert "using original transcript" in output
@@ -533,7 +549,7 @@ def test_llm_post_processor_requires_present_completion_fields(
         OllamaClient("http://localhost:11434", MODEL_NAME, client=ResponseClient())
     )
 
-    assert processor.process(original) == original
+    assert processor.process(original).text == original
     assert "Ollama post-processing failed" in capsys.readouterr().out
 
 
@@ -553,7 +569,7 @@ def test_llm_post_processor_skips_90_distinct_invoices_when_full_allowance_does_
     client = CapturingClient()
     processor = LLMPostProcessor(client=client)
 
-    assert processor.process(transcript) == transcript
+    assert processor.process(transcript) == CleanupResult(transcript, "skipped")
     assert client.calls == []
 
 
@@ -575,7 +591,7 @@ def test_llm_post_processor_allows_output_budget_over_1024_when_it_fits(
 
     client = CapturingClient()
     processor = LLMPostProcessor(client=client)
-    assert processor.process(transcript) == "Cleaned transcript."
+    assert processor.process(transcript).text == "Cleaned transcript."
 
     assert client.calls[0][1]["max_tokens"] == expected_budget
 
@@ -605,11 +621,13 @@ def test_llm_post_processor_context_boundary_controls_request_through_process():
     boundary_text = "a" * boundary_size
     expected_budget = max(ceil(boundary_size / 4), 64)
 
-    assert processor.process(boundary_text) == "A cleaned transcript."
+    assert processor.process(boundary_text).text == "A cleaned transcript."
     assert len(client.calls) == 1
     assert client.calls[0]["max_tokens"] == expected_budget
 
-    assert processor.process("a" * (boundary_size + 1)) == "a" * (boundary_size + 1)
+    assert processor.process("a" * (boundary_size + 1)).text == "a" * (
+        boundary_size + 1
+    )
     assert len(client.calls) == 1
 
 
@@ -624,7 +642,7 @@ def test_llm_post_processor_skips_oversize_input_without_calling_client(capsys):
         )
     )
 
-    assert processor.process(private_text) == private_text.strip()
+    assert processor.process(private_text).text == private_text.strip()
     assert fake_client.calls == []
     stdout = capsys.readouterr().out
     assert (
@@ -647,7 +665,7 @@ def test_llm_post_processor_returns_original_text_on_failure():
         )
     )
 
-    assert processor.process("keep this text") == "keep this text"
+    assert processor.process("keep this text").text == "keep this text"
 
 
 def test_llm_post_processor_failure_output_is_content_safe(capsys):
@@ -663,7 +681,7 @@ def test_llm_post_processor_failure_output_is_content_safe(capsys):
         )
     )
 
-    assert processor.process("private dictated text") == "private dictated text"
+    assert processor.process("private dictated text").text == "private dictated text"
     stdout = capsys.readouterr().out
     assert "Ollama post-processing failed" in stdout
     assert "private dictated text" not in stdout
@@ -685,7 +703,7 @@ def test_llm_post_processor_normalizes_wrapped_output_before_accepting():
         )
     )
 
-    assert processor.process("hello world") == "Hello, world."
+    assert processor.process("hello world").text == "Hello, world."
 
 
 def test_llm_post_processor_rejects_assistant_preamble_output():
@@ -705,7 +723,7 @@ def test_llm_post_processor_rejects_assistant_preamble_output():
         )
     )
 
-    assert processor.process("Hello world.") == "Hello world."
+    assert processor.process("Hello world.").text == "Hello world."
 
 
 def test_llm_post_processor_allows_transcript_text_with_meta_like_phrases():
@@ -726,7 +744,7 @@ def test_llm_post_processor_allows_transcript_text_with_meta_like_phrases():
     )
 
     assert (
-        processor.process("I corrected the deployment note as requested.")
+        processor.process("I corrected the deployment note as requested.").text
         == "I corrected the deployment note as requested."
     )
 
@@ -752,7 +770,7 @@ def test_llm_post_processor_rejects_length_explosion_output():
         )
     )
 
-    assert processor.process("Hello world.") == "Hello world."
+    assert processor.process("Hello world.").text == "Hello world."
 
 
 def test_llm_post_processor_rejects_chat_or_list_shaped_output():
@@ -772,7 +790,7 @@ def test_llm_post_processor_rejects_chat_or_list_shaped_output():
         )
     )
 
-    assert processor.process("Hello world.") == "Hello world."
+    assert processor.process("Hello world.").text == "Hello world."
 
 
 def test_llm_post_processor_rejects_single_bullet_output():
@@ -792,7 +810,7 @@ def test_llm_post_processor_rejects_single_bullet_output():
         )
     )
 
-    assert processor.process("Hello world.") == "Hello world."
+    assert processor.process("Hello world.").text == "Hello world."
 
 
 def test_ollama_client_warm_loads_existing_model_without_generation():

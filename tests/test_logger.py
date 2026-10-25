@@ -4,17 +4,12 @@ import numpy as np
 
 import src.logger as logger_module
 from src.audio import AudioData
+from src.llm_postprocess import CLEANUP_VERSION
 from src.logger import DataLogger
-from src.transcription_live import LiveSegmentMetrics
 
 
 class FakeConfig:
     enable_logging = True
-
-    def get(self, key, default=None):
-        if key == "model":
-            return "small"
-        return default
 
 
 def make_audio_data():
@@ -25,47 +20,55 @@ def make_audio_data():
     )
 
 
-def test_data_logger_writes_live_segment_metrics(monkeypatch, tmp_path):
+def read_single_entry(log_dir):
+    [entry_line] = (
+        (log_dir / "transcriptions.jsonl").read_text(encoding="utf-8").splitlines()
+    )
+    return json.loads(entry_line)
+
+
+def test_data_logger_writes_ollama_cleanup_pair(monkeypatch, tmp_path):
     monkeypatch.setattr(logger_module, "get_config", lambda: FakeConfig())
     data_logger = DataLogger(log_dir=tmp_path)
 
     data_logger.log(
         make_audio_data(),
-        "hello",
-        1.25,
-        LiveSegmentMetrics(
-            segment_count=2,
-            latency_avg_seconds=0.35,
-            latency_max_seconds=0.6,
-        ),
+        "Hello, world.",
+        cleanup_input="hello world",
+        cleanup_status="success",
+        cleanup_model="cleanup-model",
+        session_id="session-1",
     )
 
-    [entry_line] = (
-        (tmp_path / "transcriptions.jsonl").read_text(encoding="utf-8").splitlines()
-    )
-    entry = json.loads(entry_line)
+    entry = read_single_entry(tmp_path)
+    assert entry == {
+        "session_id": "session-1",
+        "audio_file": entry["audio_file"],
+        "cleanup_input": "hello world",
+        "transcription": "Hello, world.",
+        "cleanup_status": "success",
+        "cleanup_model": "cleanup-model",
+        "cleanup_version": CLEANUP_VERSION,
+    }
+    assert (tmp_path / "audio" / entry["audio_file"]).is_file()
 
-    assert entry["live_segment_count"] == 2
-    assert entry["live_segment_latency_avg_seconds"] == 0.35
-    assert entry["live_segment_latency_max_seconds"] == 0.6
 
-
-def test_data_logger_writes_empty_live_segment_metrics_by_default(
-    monkeypatch, tmp_path
-):
+def test_data_logger_omits_cleanup_labels_when_ollama_off(monkeypatch, tmp_path):
     monkeypatch.setattr(logger_module, "get_config", lambda: FakeConfig())
     data_logger = DataLogger(log_dir=tmp_path)
 
-    data_logger.log(make_audio_data(), "hello", 1.25)
-
-    [entry_line] = (
-        (tmp_path / "transcriptions.jsonl").read_text(encoding="utf-8").splitlines()
+    data_logger.log(
+        make_audio_data(),
+        "Hello world.",
+        cleanup_input="Hello world.",
+        cleanup_status="off",
     )
-    entry = json.loads(entry_line)
 
-    assert entry["live_segment_count"] == 0
-    assert entry["live_segment_latency_avg_seconds"] is None
-    assert entry["live_segment_latency_max_seconds"] is None
+    entry = read_single_entry(tmp_path)
+    assert entry["session_id"] is None
+    assert entry["cleanup_status"] == "off"
+    assert entry["cleanup_model"] is None
+    assert entry["cleanup_version"] is None
 
 
 def test_storage_summary_counts_existing_logged_files_without_creating_dir(
