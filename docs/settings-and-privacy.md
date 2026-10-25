@@ -195,33 +195,27 @@ training_data/
 └── transcriptions.jsonl
 ```
 
-Each metadata record contains the timestamp, audio filename, final transcript,
-recorded duration, configured model, finalization latency, live-segment
-metrics, and Ollama cleanup details. `processing_time` measures from stop-time finalization start through
-the clipboard attempt; it excludes the subsequent logging write. Live latency
-values measure Whisper runtime for chunks that contributed text, not queue wait
-or finalization time. If no live chunks contributed text, the count is `0` and
-the latency fields are `null`.
-
-Records also capture the Ollama cleanup stage so cleanup prompts and models
-can be evaluated against real dictation:
+Each record holds only what fine-tuning the Ollama cleanup stage needs. Timing
+and performance data stay in [local statistics](#local-statistics), joined by
+`session_id`:
 
 | Field | Meaning |
 | --- | --- |
-| `transcription` | Final text sent to the clipboard. |
+| `session_id` | The usage statistics session for this dictation, or `null` when statistics are off. |
+| `audio_file` | WAV filename in `audio/`. The name also encodes when it was recorded. |
 | `cleanup_input` | Text after Whisper and local cleanup, which is the input given to Ollama when it ran. |
+| `transcription` | Final text sent to the clipboard. |
 | `cleanup_status` | The same Ollama cleanup outcome shown in usage statistics: `success` when Ollama's output was used, `failed` for a request error or rejected output, `skipped` when the input was too long for the model's context, `unavailable` when the cleanup client could not start, or `off` when Ollama cleanup is disabled. Every status except `success` keeps `cleanup_input` as the final text. |
 | `cleanup_model` | Model of the Ollama client that handled cleanup, or `null` when no client ran (off or unavailable). A model changed in settings is recorded only after restart, matching when it takes effect. |
 | `cleanup_version` | Readable cleanup label, such as `v1`, or `null` when cleanup is off. It is bumped whenever the prompt, examples, output normalization, or acceptance gate changes. |
-| `cleanup_prompt_hash` | Short hash of the built-in cleanup prompt and examples, or `null` when cleanup is off. User vocabulary is not included. |
 
 Rows with `cleanup_status: "success"` form `cleanup_input` to `transcription`
 pairs. Other rows keep `cleanup_input` as unlabeled evaluation input. Group or
 filter rows by `cleanup_version`; `git log -S 'CLEANUP_VERSION = "v1"'` finds
-the code behind a label. A test pins `cleanup_prompt_hash` to the current
-label, so editing the prompt fails until `CLEANUP_VERSION` in
-`src/llm_postprocess.py` is bumped. Older records written before these fields
-existed omit them.
+the code behind a label. A test pins a hash of the built-in prompt and examples
+to the current label, so editing the prompt fails until `CLEANUP_VERSION` in
+`src/llm_postprocess.py` is bumped. Older records use an earlier, wider layout
+with timing fields and no cleanup fields.
 
 The **Delete Logged Data** action displays a file count and approximate size,
 asks for confirmation, then removes the logged WAV files and JSONL metadata.

@@ -7,7 +7,6 @@ import pytest
 
 from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
 from src.llm_postprocess import (
-    CLEANUP_PROMPT_HASH,
     CLEANUP_VERSION,
     CONTEXT_SIZE,
     DEFAULT_SYSTEM_PROMPT,
@@ -394,7 +393,10 @@ def test_llm_post_processor_builds_exact_evaluated_messages_and_returns_cleaned_
 
 def test_cleanup_prompt_changes_require_cleanup_version_bump():
     # If this fails after a prompt edit, bump CLEANUP_VERSION and pin both here.
-    assert (CLEANUP_VERSION, CLEANUP_PROMPT_HASH) == ("v1", "df160e8e7844")
+    prompt_hash = hashlib.sha256(
+        json.dumps([DEFAULT_SYSTEM_PROMPT, FEW_SHOT_MESSAGES]).encode("utf-8")
+    ).hexdigest()[:12]
+    assert (CLEANUP_VERSION, prompt_hash) == ("v1", "df160e8e7844")
 
 
 def test_llm_post_processor_appends_vocab_only_to_system_message():

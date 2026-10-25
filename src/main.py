@@ -957,11 +957,12 @@ class MurmurApp:
         log_entry = self.logger.log(
             audio_data,
             text,
-            runtime,
-            live_segment_metrics,
             cleanup_input=transcript.cleanup_input,
             cleanup_status=transcript.cleanup_status,
             cleanup_model=transcript.cleanup_model,
+            session_id=getattr(
+                getattr(self, "_stats_session", None), "session_id", None
+            ),
         )
         if self._shutdown_event.is_set():
             return

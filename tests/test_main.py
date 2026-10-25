@@ -220,10 +220,10 @@ class FakeLogger:
         self.entries = []
         self.cleanup_details = []
 
-    def log(self, audio_data, text, elapsed, live_segment_metrics=None, **cleanup):
+    def log(self, audio_data, text, **cleanup):
         if not self.enabled:
             return None
-        self.entries.append((audio_data, text, elapsed, live_segment_metrics))
+        self.entries.append((audio_data, text))
         self.cleanup_details.append(cleanup)
         return self.entries[-1]
 
@@ -774,7 +774,9 @@ def test_start_recovers_from_runtime_hotkey_registration_failure(monkeypatch):
     ]
 
 
-def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeypatch):
+def test_finalize_recording_uses_live_transcript_before_offline_fallback(
+    monkeypatch, capsys
+):
     transcriber = FakeTranscriber()
     app = make_app(segmenter=None, transcriber=transcriber)
     app.live_transcript_accumulator = main_module.TranscriptAccumulator()
@@ -805,7 +807,7 @@ def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeyp
     assert transcriber.finalize_calls == ["hello world again"]
     assert app.notifications.copied_to_clipboard == 1
     assert app.notifications.completed == []
-    [(logged_audio, logged_text, elapsed, live_segment_metrics)] = app.logger.entries
+    [(logged_audio, logged_text)] = app.logger.entries
     assert logged_audio is audio_data
     assert logged_text == "FINAL:hello world again"
     assert app.logger.cleanup_details == [
@@ -813,12 +815,11 @@ def test_finalize_recording_uses_live_transcript_before_offline_fallback(monkeyp
             "cleanup_input": "hello world again",
             "cleanup_status": "success",
             "cleanup_model": None,
+            "session_id": None,
         }
     ]
-    assert elapsed == 1.25
-    assert live_segment_metrics.segment_count == 2
-    assert live_segment_metrics.latency_avg_seconds == 49.55
-    assert live_segment_metrics.latency_max_seconds == 99.0
+    stdout = capsys.readouterr().out
+    assert "Live segments: count=2 avg_latency=49.55s max_latency=99.00s" in stdout
     # Readiness belongs to the stop owner after finalization and worker teardown.
     assert app.tray.statuses == []
     assert app.hotkey_manager.processing_calls == 1
@@ -863,11 +864,9 @@ def test_complete_transcription_copies_before_training_data_logging(monkeypatch)
     call_order = []
 
     class OrderedLogger(FakeLogger):
-        def log(self, audio_data, text, elapsed, live_segment_metrics=None, **cleanup):
+        def log(self, audio_data, text, **cleanup):
             call_order.append("log")
-            return super().log(
-                audio_data, text, elapsed, live_segment_metrics, **cleanup
-            )
+            return super().log(audio_data, text, **cleanup)
 
     app.logger = OrderedLogger()
 
@@ -908,13 +907,9 @@ def test_process_audio_logs_empty_live_segment_metrics_for_offline_fallback(
 
     stdout = capsys.readouterr().out
     assert "Live segments: count=0 avg_latency=n/a max_latency=n/a" in stdout
-    [(logged_audio, logged_text, elapsed, live_segment_metrics)] = app.logger.entries
+    [(logged_audio, logged_text)] = app.logger.entries
     assert logged_audio is audio_data
     assert logged_text == "Fallback text."
-    assert elapsed == 1.5
-    assert live_segment_metrics.segment_count == 0
-    assert live_segment_metrics.latency_avg_seconds is None
-    assert live_segment_metrics.latency_max_seconds is None
 
 
 def test_complete_transcription_stdout_omits_transcript_on_clipboard_failure(
@@ -949,13 +944,9 @@ def test_complete_transcription_stdout_omits_transcript_on_clipboard_failure(
     assert app.notifications.errors == [
         "Clipboard copy failed. Please retry the recording. The transcript was saved to training data."
     ]
-    [(logged_audio, logged_text, elapsed, logged_live_segment_metrics)] = (
-        app.logger.entries
-    )
+    [(logged_audio, logged_text)] = app.logger.entries
     assert logged_audio is audio_data
     assert logged_text == "private dictated text"
-    assert elapsed == 1.5
-    assert logged_live_segment_metrics is live_segment_metrics
 
 
 def test_complete_transcription_clipboard_failure_retry_message_when_logging_disabled(
@@ -1387,7 +1378,9 @@ def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
     assert overlay_calls[1:] == ["stream-started", ("recording", 2, "")]
 
 
-def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch):
+def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(
+    monkeypatch, capsys
+):
     transcriber = FakeTranscriber()
     audio_data = make_audio_data()
     app = make_app(segmenter=None, transcriber=transcriber)
@@ -1443,13 +1436,11 @@ def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(monkeypatch
     assert segmentation_stops == [True]
     assert transcription_stops == [True]
     assert copied_text == ["FINAL:tail kept"]
-    [(logged_audio, logged_text, elapsed, live_segment_metrics)] = app.logger.entries
+    [(logged_audio, logged_text)] = app.logger.entries
     assert logged_audio is audio_data
     assert logged_text == "FINAL:tail kept"
-    assert elapsed == 0.75
-    assert live_segment_metrics.segment_count == 1
-    assert live_segment_metrics.latency_avg_seconds == 0.1
-    assert live_segment_metrics.latency_max_seconds == 0.1
+    stdout = capsys.readouterr().out
+    assert "Live segments: count=1 avg_latency=0.10s max_latency=0.10s" in stdout
     assert app.media_controller.play_calls == 1
     assert app.hotkey_manager.processing_calls == 1
     assert app.hotkey_manager.idle_calls == 1
@@ -2694,6 +2685,23 @@ def test_statistics_clipboard_outcome_has_counts_without_text(
     assert (row["stop_to_clipboard_seconds"] is not None) is copied
     assert "synthetic private marker" not in str(rows)
     assert row["stage_clipboard_outcome"] == ("success" if copied else "failed")
+
+
+def test_training_row_shares_statistics_session_id(usage_service, monkeypatch):
+    app = make_app(None, FakeTranscriber())
+    app._stats_session = usage_service.start_session()
+    app.logger = FakeLogger()
+    app.notifications = FakeNotifications()
+    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda _: True)
+    app._complete_transcription(
+        make_audio_data(),
+        FinalTranscript("Hello."),
+        finalization_started_at=main_module.time.perf_counter(),
+        live_segment_metrics=main_module.LiveSegmentMetrics.empty(),
+    )
+    [row] = usage_service.export_rows().result(timeout=3)
+    [cleanup] = app.logger.cleanup_details
+    assert cleanup["session_id"] == row["session_id"]
 
 
 @pytest.mark.parametrize("segmentation_error", [False, True])

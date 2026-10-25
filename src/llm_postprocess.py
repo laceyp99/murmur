@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 import time
 from collections.abc import Iterable, Mapping
@@ -80,15 +78,8 @@ FEW_SHOT_MESSAGES = [
 # Readable label recorded in training data so cleanup outputs can be grouped
 # and traced back to the code that produced them. Bump it whenever cleanup
 # behavior changes: prompt, few-shot examples, output normalization, or the
-# acceptance gate.
+# acceptance gate. A test pins a hash of the prompt and examples to this label.
 CLEANUP_VERSION = "v1"
-
-# Short fingerprint of the built-in prompt and examples. Tests pin it to
-# CLEANUP_VERSION so prompt edits fail until the version is bumped. User
-# vocabulary is intentionally excluded.
-CLEANUP_PROMPT_HASH = hashlib.sha256(
-    json.dumps([DEFAULT_SYSTEM_PROMPT, FEW_SHOT_MESSAGES]).encode("utf-8")
-).hexdigest()[:12]
 
 CONTEXT_SIZE = 4096
 CONTEXT_HEADROOM = 0.10
