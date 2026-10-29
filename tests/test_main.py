@@ -304,7 +304,7 @@ class FakeMediaController:
     def __init__(self):
         self.play_calls = 0
 
-    def play(self):
+    def play(self, source_id):
         self.play_calls += 1
         return True
 
@@ -1213,7 +1213,7 @@ def test_media_resumes_only_after_successful_pause(
 ):
     app = make_app(segmenter=None, transcriber=FakeTranscriber())
     app.config.pause_media_while_recording = enabled
-    app._was_media_playing = True
+    app._paused_media_source = "media.app"
     app.notifications = FakeNotifications()
     app.notifications.notify_recording_started = lambda: None
     app.hotkey_manager = FakeHotkeyManager()
@@ -1224,8 +1224,8 @@ def test_media_resumes_only_after_successful_pause(
     pauses = []
     app.media_controller = SimpleNamespace(
         is_media_playing=lambda: playing,
-        pause=lambda: pauses.append(True) or pause_succeeded,
-        play=lambda: plays.append(True) or True,
+        pause=lambda: pauses.append(True) or ("media.app" if pause_succeeded else None),
+        play=lambda source_id: plays.append(source_id) or True,
     )
 
     def start_recording():
@@ -1247,14 +1247,14 @@ def test_media_resumes_only_after_successful_pause(
             assert not app._media_pause_thread.is_alive()
         stop_current(app)
     assert len(pauses) == int(enabled and playing and not recording_failed)
-    assert len(plays) == expected_plays
-    assert app._was_media_playing is False
+    assert plays == ["media.app"] * expected_plays
+    assert app._paused_media_source is None
 
 
 def test_accepted_capture_error_cannot_stop_next_session(monkeypatch):
     app = make_app(segmenter=None, transcriber=FakeTranscriber())
     app.config.pause_media_while_recording = False
-    app._was_media_playing = False
+    app._paused_media_source = None
     app.notifications = FakeNotifications()
     app.notifications.notify_recording_started = lambda: None
     app.hotkey_manager = FakeHotkeyManager()
@@ -1345,7 +1345,7 @@ def test_on_recording_start_leaves_recorder_reusable_after_failed_stream_start(
     app.notifications = FakeNotifications()
     app.notifications.notify_recording_started = lambda: None
     app.hotkey_manager = FakeHotkeyManager()
-    app._was_media_playing = False
+    app._paused_media_source = None
     live_calls = []
     monkeypatch.setattr(app, "_start_live_transcription", lambda: None)
     monkeypatch.setattr(app, "_start_live_segmentation", lambda: None)
@@ -1390,7 +1390,7 @@ def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(
     app.logger = FakeLogger()
     app.hotkey_manager = FakeHotkeyManager()
     app.media_controller = FakeMediaController()
-    app._was_media_playing = True
+    app._paused_media_source = "media.app"
     app.live_transcript_accumulator = main_module.TranscriptAccumulator()
     app.live_transcript_accumulator.add_chunk(
         SimpleNamespace(segment_id=0, text="tail kept", latency_seconds=0.1)
@@ -1409,7 +1409,7 @@ def test_on_recording_stop_finalizes_live_pipeline_and_resumes_media(
     monkeypatch.setattr(
         app.media_controller,
         "play",
-        lambda: stop_order.append("media") or play_media(),
+        lambda source_id: stop_order.append("media") or play_media(source_id),
     )
     monkeypatch.setattr(
         app,
@@ -1454,7 +1454,7 @@ def make_stop_app(audio_data):
     app.logger = FakeLogger()
     app.hotkey_manager = FakeHotkeyManager()
     app.media_controller = FakeMediaController()
-    app._was_media_playing = False
+    app._paused_media_source = None
     app._overlay_session = 7
     app._stop_live_segmentation = lambda: None
     app._stop_live_transcription = lambda: None
@@ -1601,7 +1601,7 @@ def test_entrypoints_record_with_restricted_output(
     app.recorder.start_recording = start_recording
     # Exercise background media warning output and the offline VAD fallback.
     app.media_controller.is_media_playing = lambda: True
-    app.media_controller.pause = lambda: False
+    app.media_controller.pause = lambda: None
     app._start_live_transcription = lambda: None
     app._start_live_segmentation = lambda: None
 
@@ -1842,7 +1842,7 @@ def test_cancel_capture_discards_session_and_resumes_media(
     audio = make_audio_data()
     audio.input_overflowed = input_overflowed
     app = make_stop_app(audio)
-    app._was_media_playing = True
+    app._paused_media_source = "media.app"
     copied = []
     monkeypatch.setattr(main_module, "copy_to_clipboard", copied.append)
 
@@ -1977,7 +1977,7 @@ def test_exit_capture_discards_queued_workers_and_restores_media_once(
     app = make_stop_app(make_audio_data())
     events = []
     queued_segments = [object()]
-    app._was_media_playing = True
+    app._paused_media_source = "media.app"
     app.hotkey_manager.unregister = lambda: None
     app.tray.stop = lambda: None
     app.recorder.stop_recording = lambda: (
@@ -2008,7 +2008,7 @@ def test_exit_capture_discards_queued_workers_and_restores_media_once(
         app, "_stop_live_transcription", MurmurApp._stop_live_transcription.__get__(app)
     )
 
-    def play():
+    def play(source_id):
         events.append("media.play")
         if play_result == "raises":
             raise RuntimeError("media provider failed")
@@ -2029,7 +2029,7 @@ def test_exit_capture_discards_queued_workers_and_restores_media_once(
     assert events.index("media.play") < events.index("vad.stop")
     assert events.index("media.play") < events.index("transcription.stop")
     assert queued_segments == []
-    assert app._was_media_playing is False
+    assert app._paused_media_source is None
     assert app.transcriber.audio_calls == []
     assert app.transcriber.segment_calls == []
     assert app.logger.entries == []
@@ -2219,7 +2219,7 @@ def test_cancel_or_exit_during_stream_open_closes_without_commit(
     errors = []
     app.config.pause_media_while_recording = True
     app.media_controller.is_media_playing = lambda: True
-    app.media_controller.pause = lambda: True
+    app.media_controller.pause = lambda: "media.app"
     app.notifications.notify_recording_started = lambda: None
     app.recorder.set_capture_error_callback = lambda callback: None
     app.hotkey_manager.unregister = lambda: None
@@ -2357,11 +2357,11 @@ def test_media_wait_cancel_or_exit_closes_capture_and_restores_late_pause(
             entered.set()
             assert release.wait(2)
         pauses.append(True)
-        return True
+        return "media.app"
 
     app.media_controller.is_media_playing = detect_playing
     app.media_controller.pause = pause
-    app.media_controller.play = lambda: plays.append(True) or True
+    app.media_controller.play = lambda source_id: plays.append(True) or True
     app.recorder.start_recording = lambda: opens.append(True)
     original_stop = app.recorder.stop_recording
 

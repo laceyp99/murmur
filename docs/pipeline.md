@@ -175,11 +175,17 @@ that has not begun. Teardown closes the microphone before waiting for an
 in-flight media operation, then resumes playback only if its pause request
 succeeded. This also restores a successful pause that finishes after Stop.
 
+Pause targets the current Windows media session and remembers that session's
+source app. Resume plays only a paused session from that same app, preferring
+the current session if several match. If another app became current during
+dictation, it is left alone. If the paused app closed or is already playing
+again, Murmur clears ownership without starting anything.
+
 Playback ownership is consumed once, so overlapping teardown does not resume
 twice. A failed pause request does not schedule a resume, and a resume failure
-does not prevent capture and worker cleanup. Media control still targets the
-current Windows media session; timed-out provider calls may finish later without
-reporting success to Murmur.
+does not prevent capture and worker cleanup. Sessions are matched by app, not by
+tab, so a browser with several paused tabs may resume a sibling tab. Timed-out
+provider calls may finish later without reporting success to Murmur.
 
 ### Live Segmentation
 
