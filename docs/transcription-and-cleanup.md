@@ -71,8 +71,8 @@ Final cleanup has two layers:
 2. Optional Ollama cleanup in `LLMPostProcessor.process()`.
 
 The Ollama processor is constructed lazily on the first finalization that needs
-it. Startup warmup only checks for the configured installed model and attempts
-to load it into memory; it does not download a missing model. If the client
+it. Startup warmup runs in the background after the hotkey registers. It only
+checks for the configured installed model and attempts to load it into memory; it does not download a missing model. If the client
 cannot be built, the request fails, or the response fails the acceptance gate,
 the local cleanup result is returned.
 

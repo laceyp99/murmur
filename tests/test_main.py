@@ -263,6 +263,8 @@ class FakeStartupConfig:
         self.hotkey = hotkey
         self.model_name = "small"
         self.start_with_windows = False
+        self.ollama_enabled = False
+        self.ollama_preload_model = True
         self.set_calls = []
         self._startup_notice = startup_notice
 
@@ -448,7 +450,7 @@ def test_on_live_segment_ready_queues_segment_for_background_transcription():
     assert app.live_transcript_accumulator.get_text() == "live-3"
 
 
-def test_init_preloads_whisper_and_ollama_when_enabled(monkeypatch):
+def test_init_preloads_whisper_without_waiting_on_ollama(monkeypatch):
     fake_transcriber = FakeTranscriber()
     fake_recorder = FakeRecorder(audio_data=None)
     fake_config = SimpleNamespace(
@@ -477,7 +479,7 @@ def test_init_preloads_whisper_and_ollama_when_enabled(monkeypatch):
     app = main_module.MurmurApp(preload_model=True)
 
     assert fake_transcriber.load_model_calls == 1
-    assert fake_transcriber.warm_llm_post_processor_calls == 1
+    assert fake_transcriber.warm_llm_post_processor_calls == 0
     assert identity_calls == [True]
     assert fake_recorder.recording_limit_callback.__self__ is app
     assert (
@@ -486,30 +488,47 @@ def test_init_preloads_whisper_and_ollama_when_enabled(monkeypatch):
     )
 
 
-def test_init_skips_ollama_warmup_when_disabled(monkeypatch):
-    fake_transcriber = FakeTranscriber()
-    fake_config = SimpleNamespace(
-        ollama_enabled=False,
-        ollama_preload_model=True,
-        start_with_windows=False,
-    )
+def test_start_is_ready_while_ollama_warmup_is_blocked():
+    config = FakeStartupConfig(DEFAULT_CONFIG["hotkey"])
+    config.ollama_enabled = True
+    manager = FakeStartupHotkeyManager(config, lambda hotkey: True)
+    app = make_start_app(config, manager)
+    warmup_started = threading.Event()
+    release_warmup = threading.Event()
 
-    monkeypatch.setattr(main_module, "configure_windows_app_identity", lambda: None)
-    monkeypatch.setattr(main_module, "get_config", lambda: fake_config)
-    monkeypatch.setattr(main_module, "AudioRecorder", lambda: SimpleNamespace())
-    monkeypatch.setattr(main_module, "Transcriber", lambda: fake_transcriber)
-    monkeypatch.setattr(main_module, "HotkeyManager", lambda: SimpleNamespace())
-    monkeypatch.setattr(
-        main_module, "get_notification_manager", lambda: SimpleNamespace()
-    )
-    monkeypatch.setattr(main_module, "get_logger", lambda: SimpleNamespace())
-    monkeypatch.setattr(main_module, "TrayManager", lambda **kwargs: SimpleNamespace())
-    monkeypatch.setattr(main_module, "get_media_controller", lambda: SimpleNamespace())
+    def blocked_warmup():
+        warmup_started.set()
+        release_warmup.wait(timeout=5)
+        return False
 
-    main_module.MurmurApp(preload_model=True)
+    app.transcriber.warm_llm_post_processor = blocked_warmup
+    try:
+        app.start()
 
-    assert fake_transcriber.load_model_calls == 1
-    assert fake_transcriber.warm_llm_post_processor_calls == 0
+        assert manager.register_calls == [DEFAULT_CONFIG["hotkey"]]
+        assert app.notifications.messages[-1] == (
+            "murmur",
+            "Ready! Press hotkey to start recording.",
+        )
+        assert warmup_started.wait(timeout=5)
+    finally:
+        release_warmup.set()
+
+
+@pytest.mark.parametrize(
+    ("ollama_enabled", "ollama_preload_model"), [(False, True), (True, False)]
+)
+def test_start_skips_ollama_warmup_when_not_configured(
+    ollama_enabled, ollama_preload_model
+):
+    config = FakeStartupConfig(DEFAULT_CONFIG["hotkey"])
+    config.ollama_enabled = ollama_enabled
+    config.ollama_preload_model = ollama_preload_model
+    app = make_start_app(config, FakeStartupHotkeyManager(config, lambda hotkey: True))
+
+    app.start()
+
+    assert app.transcriber.warm_llm_post_processor_calls == 0
 
 
 def test_start_live_transcription_replaces_existing_worker():
