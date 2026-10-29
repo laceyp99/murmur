@@ -495,16 +495,20 @@ def test_start_is_ready_while_ollama_warmup_is_blocked():
     app = make_start_app(config, manager)
     warmup_started = threading.Event()
     release_warmup = threading.Event()
+    warmup_finished = threading.Event()
 
     def blocked_warmup():
         warmup_started.set()
         release_warmup.wait(timeout=5)
+        warmup_finished.set()
         return False
 
     app.transcriber.warm_llm_post_processor = blocked_warmup
     try:
         app.start()
 
+        # A synchronous warmup would only return after its wait timed out.
+        assert not warmup_finished.is_set()
         assert manager.register_calls == [DEFAULT_CONFIG["hotkey"]]
         assert app.notifications.messages[-1] == (
             "murmur",

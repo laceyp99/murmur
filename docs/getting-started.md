@@ -167,9 +167,10 @@ flowchart TB
 The first launch downloads the selected Whisper model if it is not already in
 Whisper's user cache. Ollama warmup runs in the background after the hotkey is
 registered, so a slow or unreachable endpoint does not delay dictation or the
-tray. It checks for an installed model but does not download one. If the configured hotkey is invalid or cannot be registered,
-murmur attempts to reset it to the default `ctrl+shift+space`; an unrecoverable
-registration failure stops startup.
+tray. It checks for an installed model but does not download one. If the
+configured hotkey is invalid or cannot be registered, murmur attempts
+to reset it to the default `ctrl+shift+space`; an unrecoverable registration
+failure stops startup.
 
 ## Record a transcript
 
