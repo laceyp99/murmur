@@ -78,8 +78,10 @@ the local cleanup result is returned. When Ollama cleanup fails this way, the
 copied notification reads "Copied to clipboard without Ollama cleanup." instead
 of the usual message, so a silent fallback is not mistaken for a cleaned result.
 
-Connecting to Ollama is capped at 5 seconds; `ollama_timeout_seconds` covers
-model loading and the response once connected. If the connection fails
+Each connection attempt to Ollama is capped at 5 seconds. A hostname with
+several addresses, such as IPv6 and IPv4, is tried one address at a time, so it
+can take 5 seconds per address. `ollama_timeout_seconds` covers model loading
+and the response once connected. If the connection fails
 (refused or no answer within 5 seconds), the processor remembers it for 30
 seconds and later sessions in that window skip the request and return the local
 result right away. Each skipped session still counts as a failed cleanup
