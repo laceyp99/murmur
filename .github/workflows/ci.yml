@@ -43,7 +43,17 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y libportaudio2 portaudio19-dev
+          sudo apt-get install -y libportaudio2 portaudio19-dev pulseaudio
+
+      # Newer runner images make PortAudio fail on import without a PulseAudio
+      # server, so start one with a silent output device.
+      - name: Start dummy PulseAudio server on Ubuntu
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=dummy
+          pactl info
 
       - name: Set up Python
         uses: actions/setup-python@v5
