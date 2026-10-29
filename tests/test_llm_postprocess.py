@@ -4,13 +4,17 @@ from math import ceil
 from types import SimpleNamespace
 
 import pytest
+from httpx import ConnectTimeout, ReadTimeout
 
+from src import llm_postprocess
 from src.config import DEFAULT_OLLAMA_MODEL_NAME, DEFAULT_OLLAMA_TIMEOUT_SECONDS
 from src.llm_postprocess import (
     CLEANUP_VERSION,
     CONTEXT_SIZE,
     DEFAULT_SYSTEM_PROMPT,
     FEW_SHOT_MESSAGES,
+    OLLAMA_CONNECT_TIMEOUT_SECONDS,
+    OLLAMA_UNREACHABLE_RETRY_SECONDS,
     CleanupResult,
     LLMPostProcessor,
     OllamaClient,
@@ -81,6 +85,66 @@ def test_cleanup_transport_timeout_is_classified_without_exception_message():
     assert events[0]["category"] == "error"
     assert events[0]["code"] == "cleanup_timeout"
     assert "secret" not in repr(events).lower()
+
+
+class ScriptedClient:
+    """Raise or return each scripted response in turn, counting chat calls."""
+
+    model_name = "actual-model"
+
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.calls = 0
+
+    def chat(self, *args, **kwargs):
+        self.calls += 1
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ConnectionError("refused"), ConnectTimeout("no answer")],
+    ids=["refused", "connect-timeout"],
+)
+def test_unreachable_host_skips_cleanup_until_retry_window_passes(monkeypatch, error):
+    now = [100.0]
+    monkeypatch.setattr(llm_postprocess.time, "monotonic", lambda: now[0])
+    client = ScriptedClient(error, "Cleaned.")
+    processor = LLMPostProcessor(client)
+
+    events = []
+    with observe_transcription(events.append):
+        first = processor.process("Private text.")
+        now[0] += OLLAMA_UNREACHABLE_RETRY_SECONDS - 1
+        second = processor.process("Private text.")
+        now[0] += 1
+        third = processor.process("Private text.")
+
+    assert [first.status, second.status, third.status] == [
+        "failed",
+        "failed",
+        "success",
+    ]
+    assert second.text == "Private text."
+    assert client.calls == 2
+    assert [event["code"] for event in events] == [
+        "cleanup_unreachable",
+        "cleanup_unreachable_skip",
+        "cleanup_applied",
+    ]
+    assert "private" not in repr(events).lower()
+
+
+def test_slow_response_is_not_remembered_as_unreachable():
+    client = ScriptedClient(ReadTimeout("slow"), "Cleaned.")
+    processor = LLMPostProcessor(client)
+
+    assert processor.process("Text.").status == "failed"
+    assert processor.process("Text.").status == "success"
+    assert client.calls == 2
 
 
 def test_cleanup_observer_failure_preserves_accepted_output():
@@ -282,6 +346,18 @@ class FakeOllamaPackageClient:
     def chat(self, **kwargs):
         self.calls.append(kwargs)
         return self.chat_response
+
+
+def test_ollama_client_uses_short_connect_timeout_and_configured_read_timeout():
+    client = OllamaClient(
+        endpoint="http://localhost:11434",
+        model_name=MODEL_NAME,
+        timeout=TIMEOUT_SECONDS,
+    )
+
+    timeout = client._client._client.timeout
+    assert timeout.connect == OLLAMA_CONNECT_TIMEOUT_SECONDS
+    assert timeout.read == TIMEOUT_SECONDS
 
 
 def test_ollama_client_generate_uses_model_and_options():

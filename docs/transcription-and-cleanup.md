@@ -74,7 +74,18 @@ The Ollama processor is constructed lazily on the first finalization that needs
 it. Startup warmup only checks for the configured installed model and attempts
 to load it into memory; it does not download a missing model. If the client
 cannot be built, the request fails, or the response fails the acceptance gate,
-the local cleanup result is returned.
+the local cleanup result is returned. When Ollama cleanup fails this way, the
+copied notification reads "Copied to clipboard without Ollama cleanup." instead
+of the usual message, so a silent fallback is not mistaken for a cleaned result.
+
+Connecting to Ollama is capped at 5 seconds; `ollama_timeout_seconds` covers
+model loading and the response once connected. If the connection fails
+(refused or no answer within 5 seconds), the processor remembers it for 30
+seconds and later sessions in that window skip the request and return the local
+result right away. Each skipped session still counts as a failed cleanup
+(`cleanup_unreachable_skip`) and gets the same notification. The first session
+after the window tries Ollama again. A slow response that times out after
+connecting is not remembered, because the host is up.
 
 All configured models receive the same request profile: thinking disabled,
 `num_ctx=4096`, temperature `0`, and a 10-minute keep-alive.
@@ -102,7 +113,9 @@ flowchart TB
     Available -->|yes| BuildMessages["Build system, examples, vocab, transcript prompt"]
     BuildMessages --> Budget{"Fits context budget?"}
     Budget -->|no| ReturnLocal
-    Budget -->|yes| Ollama["Ollama chat request"]
+    Budget -->|yes| Recent{"Connection failed<br/>in last 30s?"}
+    Recent -->|yes| ReturnLocal
+    Recent -->|no| Ollama["Ollama chat request<br/>5s connect limit"]
     Ollama --> Completion{"done=true and done_reason=stop?"}
     Completion -->|yes| Content{"Message content is a string?"}
     Content -->|yes| Normalize["Normalize model output"]
@@ -113,6 +126,7 @@ flowchart TB
     Greeting --> ReturnLLM["Return LLM cleaned text"]
     Gate -->|no| ReturnLocal
     Ollama -->|exception| ReturnLocal
+    Ollama -->|connection failed| Remember["Remember for 30s"] --> ReturnLocal
 ```
 
 ## Ollama Acceptance Gate

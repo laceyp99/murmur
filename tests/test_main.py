@@ -182,6 +182,7 @@ class FakeNotifications:
     def __init__(self):
         self.completed = []
         self.copied_to_clipboard = 0
+        self.cleanup_failed_copies = 0
         self.messages = []
         self.errors = []
         self.recording_limits = []
@@ -192,8 +193,9 @@ class FakeNotifications:
     def notify_transcription_complete(self, text):
         self.completed.append(text)
 
-    def notify_transcription_copied(self):
+    def notify_transcription_copied(self, cleanup_failed=False):
         self.copied_to_clipboard += 1
+        self.cleanup_failed_copies += cleanup_failed
 
     def notify_clipboard_failure_retry(self):
         self.notify_error("Clipboard copy failed. Please retry the recording.")
@@ -855,6 +857,29 @@ def test_complete_transcription_stdout_omits_transcript_on_success(
     assert copied_text == ["private dictated text"]
     assert app.notifications.copied_to_clipboard == 1
     assert app.notifications.completed == []
+
+
+@pytest.mark.parametrize(
+    ("cleanup_status", "expected_failed_copies"),
+    [("success", 0), ("skipped", 0), ("off", 0), ("failed", 1), ("unavailable", 1)],
+)
+def test_copied_notification_flags_failed_ollama_cleanup(
+    monkeypatch, cleanup_status, expected_failed_copies
+):
+    app = make_app(segmenter=None, transcriber=FakeTranscriber())
+    app.notifications = FakeNotifications()
+    app.logger = FakeLogger()
+    monkeypatch.setattr(main_module, "copy_to_clipboard", lambda text: True)
+
+    app._complete_transcription(
+        make_audio_data(),
+        FinalTranscript("text", "text", cleanup_status),
+        finalization_started_at=1.0,
+        live_segment_metrics=main_module.LiveSegmentMetrics.empty(),
+    )
+
+    assert app.notifications.copied_to_clipboard == 1
+    assert app.notifications.cleanup_failed_copies == expected_failed_copies
 
 
 def test_complete_transcription_copies_before_training_data_logging(monkeypatch):
