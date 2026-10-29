@@ -88,19 +88,27 @@ def test_resume_prefers_current_session_among_same_app_sessions(media):
     assert second_tab.calls == ["play"]
 
 
-@pytest.mark.parametrize("paused_app_state", ["closed", "already playing"])
-def test_resume_skips_when_paused_app_is_not_waiting(media, paused_app_state):
+def test_resume_skips_when_paused_app_closed(media):
     spotify, browser = FakeSession("Spotify"), FakeSession("Chrome", PAUSED)
     media.manager = FakeManager(spotify, browser)
     assert media.controller.pause() == "Spotify"
     media.manager.current = browser
-    if paused_app_state == "closed":
-        media.manager.sessions.remove(spotify)
-    else:
-        spotify.status = PLAYING
+    media.manager.sessions.remove(spotify)
 
     assert media.controller.play("Spotify") is True
-    assert spotify.calls == ["pause"]
+    assert browser.calls == []
+
+
+def test_resume_plays_app_whose_status_has_not_updated_yet(media):
+    spotify, browser = FakeSession("Spotify"), FakeSession("Chrome", PAUSED)
+    media.manager = FakeManager(spotify, browser)
+    assert media.controller.pause() == "Spotify"
+    # Stop right after pause: the app still reports PLAYING.
+    spotify.status = PLAYING
+    media.manager.current = browser
+
+    assert media.controller.play("Spotify") is True
+    assert spotify.calls == ["pause", "play"]
     assert browser.calls == []
 
 

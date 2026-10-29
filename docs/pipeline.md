@@ -176,10 +176,11 @@ in-flight media operation, then resumes playback only if its pause request
 succeeded. This also restores a successful pause that finishes after Stop.
 
 Pause targets the current Windows media session and remembers that session's
-source app. Resume plays only a paused session from that same app, preferring
-the current session if several match. If another app became current during
-dictation, it is left alone. If the paused app closed or is already playing
-again, Murmur clears ownership without starting anything.
+source app. Resume plays only a session from that same app, preferring one that
+reports paused and then the current session. Status only ranks matches, because
+an app may not report paused yet when Stop follows the pause closely. If another
+app became current during dictation, it is left alone. If the paused app closed,
+Murmur clears ownership without starting anything.
 
 Playback ownership is consumed once, so overlapping teardown does not resume
 twice. A failed pause request does not schedule a resume, and a resume failure

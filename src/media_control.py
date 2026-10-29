@@ -151,9 +151,10 @@ class MediaController:
         """
         Async resume the paused session from the given source app.
 
-        Prefers the current session when several share the source id. Leaves
-        other apps alone, and does nothing if that source is gone or no longer
-        paused.
+        Among sessions from that app, prefers a paused one, then the current
+        one. Status only ranks matches, since an app may not report PAUSED yet
+        right after a pause. Leaves other apps alone and does nothing if that
+        app is gone.
 
         Returns:
             False if the manager is unavailable or the matching resume failed.
@@ -174,21 +175,22 @@ class MediaController:
             current = manager.get_current_session()
             sessions = [current] if current is not None else []
             sessions.extend(manager.get_sessions())
-            for session in sessions:
-                if session.source_app_user_model_id != source_id:
-                    continue
-                playback_info = session.get_playback_info()
-                if (
-                    playback_info is None
-                    or playback_info.playback_status != PlaybackStatus.PAUSED
-                ):
-                    continue
-                result = await session.try_play_async()
-                print(f"[MediaControl] Play result: {result}")
-                return result
+            matches = [s for s in sessions if s.source_app_user_model_id == source_id]
+            if not matches:
+                print("[MediaControl] Paused session is no longer available")
+                return True
 
-            print("[MediaControl] Paused session is no longer waiting to resume")
-            return True
+            def is_paused(session) -> bool:
+                playback_info = session.get_playback_info()
+                return (
+                    playback_info is not None
+                    and playback_info.playback_status == PlaybackStatus.PAUSED
+                )
+
+            target = next((s for s in matches if is_paused(s)), matches[0])
+            result = await target.try_play_async()
+            print(f"[MediaControl] Play result: {result}")
+            return result
 
         except Exception as e:
             print(f"[MediaControl] Error playing: {e}")
