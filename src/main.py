@@ -129,10 +129,6 @@ class MurmurApp:
             print("Preloading Whisper model...")
             self.transcriber.load_model()
 
-        if self.config.ollama_enabled and self.config.ollama_preload_model:
-            print("Warming Ollama model...")
-            self.transcriber.warm_llm_post_processor()
-
         # Ensure autostart matches config
         if self.config.start_with_windows:
             set_autostart(True)
@@ -261,6 +257,19 @@ class MurmurApp:
         self.notifications.notify("murmur", "Ready! Press hotkey to start recording.")
         # Start the shared UI thread now so the first recording shows promptly.
         self._show_overlay(HIDDEN)
+        self._start_ollama_warmup()
+
+    def _start_ollama_warmup(self) -> None:
+        """Warm optional Ollama cleanup without delaying hotkeys or the tray."""
+        if not (self.config.ollama_enabled and self.config.ollama_preload_model):
+            return
+        print("Warming Ollama model in the background...")
+        # Daemon so a slow endpoint never holds up exit; warmup has no state to save.
+        threading.Thread(
+            target=self.transcriber.warm_llm_post_processor,
+            name="murmur-ollama-warmup",
+            daemon=True,
+        ).start()
 
     def _recover_failed_hotkey_registration(self) -> tuple[str | None, bool]:
         """Recover from invalid or unregistrable configured hotkeys."""

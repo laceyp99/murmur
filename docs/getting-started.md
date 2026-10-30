@@ -156,19 +156,21 @@ flowchart TB
     CreateDefaults --> Resources["Initialize recorder, workers, and transcriber"]
     UseConfig --> Resources
     Resources --> Whisper["Preload Whisper model"]
-    Whisper --> OllamaCheck{"Ollama enabled and preload enabled?"}
-    OllamaCheck -->|yes| WarmOllama["Warm installed Ollama model"]
-    OllamaCheck -->|no| Autostart["Sync Windows autostart if enabled"]
-    WarmOllama --> Autostart
+    Whisper --> Autostart["Sync Windows autostart if enabled"]
     Autostart --> Register["Register global hotkey"]
-    Register --> Tray["Run system tray loop"]
+    Register --> OllamaCheck{"Ollama enabled and preload enabled?"}
+    OllamaCheck -->|yes| WarmOllama["Start background Ollama warmup"]
+    OllamaCheck -->|no| Tray["Run system tray loop"]
+    WarmOllama --> Tray
 ```
 
 The first launch downloads the selected Whisper model if it is not already in
-Whisper's user cache. Ollama warmup checks for an installed model but does not
-download one. If the configured hotkey is invalid or cannot be registered,
-murmur attempts to reset it to the default `ctrl+shift+space`; an unrecoverable
-registration failure stops startup.
+Whisper's user cache. Ollama warmup runs in the background after the hotkey is
+registered, so a slow or unreachable endpoint does not delay dictation or the
+tray. It checks for an installed model but does not download one. If the
+configured hotkey is invalid or cannot be registered, murmur attempts
+to reset it to the default `ctrl+shift+space`; an unrecoverable registration
+failure stops startup.
 
 ## Record a transcript
 

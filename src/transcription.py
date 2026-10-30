@@ -7,7 +7,7 @@ import re
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from threading import Event
+from threading import Event, Lock
 from typing import Protocol
 
 import numpy as np
@@ -115,6 +115,8 @@ class Transcriber:
         self._model_name = model_name if model is not None else None
         self._device: str = device or self._get_device()
         self._llm_post_processor = llm_post_processor
+        # Startup warmup and finalization can both build the processor.
+        self._llm_post_processor_lock = Lock()
 
     def _get_device(self) -> str:
         """Determine the best device to use for inference."""
@@ -237,24 +239,25 @@ class Transcriber:
 
     def _get_llm_post_processor(self) -> LLMPostProcessor | None:
         """Build the optional final-pass LLM post-processor lazily."""
-        if self._llm_post_processor is not None:
+        with self._llm_post_processor_lock:
+            if self._llm_post_processor is not None:
+                return self._llm_post_processor
+
+            try:
+                self._llm_post_processor = LLMPostProcessor(
+                    client=OllamaClient(
+                        endpoint=self.config.ollama_endpoint,
+                        model_name=self.config.ollama_model_name,
+                        timeout=float(self.config.ollama_timeout_seconds),
+                    ),
+                    user_vocab=load_user_vocab(),
+                    speaker_names=self.config.speaker_names,
+                )
+            except Exception:
+                print("Warning: Ollama post-processor unavailable.")
+                self._llm_post_processor = None
+
             return self._llm_post_processor
-
-        try:
-            self._llm_post_processor = LLMPostProcessor(
-                client=OllamaClient(
-                    endpoint=self.config.ollama_endpoint,
-                    model_name=self.config.ollama_model_name,
-                    timeout=float(self.config.ollama_timeout_seconds),
-                ),
-                user_vocab=load_user_vocab(),
-                speaker_names=self.config.speaker_names,
-            )
-        except Exception:
-            print("Warning: Ollama post-processor unavailable.")
-            self._llm_post_processor = None
-
-        return self._llm_post_processor
 
     def warm_llm_post_processor(self) -> bool:
         """Warm the configured Ollama model without affecting transcription fallback."""
