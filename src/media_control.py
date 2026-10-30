@@ -116,12 +116,12 @@ class MediaController:
             print(f"[MediaControl] Error checking playback status: {e}")
             return False
 
-    async def _pause_async(self) -> bool:
+    async def _pause_async(self) -> str | None:
         """
         Async pause the current media session.
 
         Returns:
-            True if pause was successful, False otherwise.
+            The paused session's source app id, or None if pause failed.
         """
         from winrt.windows.media.control import (
             GlobalSystemMediaTransportControlsSessionManager as MediaManager,
@@ -131,28 +131,39 @@ class MediaController:
             manager = await MediaManager.request_async()
             if manager is None:
                 print("[MediaControl] Manager is None")
-                return False
+                return None
 
             session = manager.get_current_session()
             if session is None:
                 print("[MediaControl] No session to pause")
-                return False
+                return None
 
-            return await session.try_pause_async()
+            source_id = session.source_app_user_model_id
+            if not await session.try_pause_async():
+                return None
+            return source_id
 
         except Exception as e:
             print(f"[MediaControl] Error pausing: {e}")
-            return False
+            return None
 
-    async def _play_async(self) -> bool:
+    async def _play_async(self, source_id: str) -> bool:
         """
-        Async play/resume the current media session.
+        Async resume the paused session from the given source app.
+
+        Among sessions from that app, prefers a paused one, then the current
+        one. Status only ranks matches, since an app may not report PAUSED yet
+        right after a pause. Leaves other apps alone and does nothing if that
+        app is gone.
 
         Returns:
-            True if play was successful, False otherwise.
+            False if the manager is unavailable or the matching resume failed.
         """
         from winrt.windows.media.control import (
             GlobalSystemMediaTransportControlsSessionManager as MediaManager,
+        )
+        from winrt.windows.media.control import (
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
         )
 
         try:
@@ -161,12 +172,23 @@ class MediaController:
                 print("[MediaControl] Manager is None")
                 return False
 
-            session = manager.get_current_session()
-            if session is None:
-                print("[MediaControl] No session to play")
-                return False
+            current = manager.get_current_session()
+            sessions = [current] if current is not None else []
+            sessions.extend(manager.get_sessions())
+            matches = [s for s in sessions if s.source_app_user_model_id == source_id]
+            if not matches:
+                print("[MediaControl] Paused session is no longer available")
+                return True
 
-            result = await session.try_play_async()
+            def is_paused(session) -> bool:
+                playback_info = session.get_playback_info()
+                return (
+                    playback_info is not None
+                    and playback_info.playback_status == PlaybackStatus.PAUSED
+                )
+
+            target = next((s for s in matches if is_paused(s)), matches[0])
+            result = await target.try_play_async()
             print(f"[MediaControl] Play result: {result}")
             return result
 
@@ -191,35 +213,34 @@ class MediaController:
             print(f"[MediaControl] Exception in is_media_playing: {e}")
             return False
 
-    def pause(self) -> bool:
+    def pause(self) -> str | None:
         """
         Pause the current media session.
 
         Returns:
-            True if pause was successful, False otherwise.
+            The paused session's source app id, or None if pause failed.
         """
         if not self.is_available():
-            return False
+            return None
 
         try:
-            result = self._run_async(self._pause_async)
-            return result if result is not None else False
+            return self._run_async(self._pause_async)
         except Exception as e:
             print(f"[MediaControl] Exception in pause: {e}")
-            return False
+            return None
 
-    def play(self) -> bool:
+    def play(self, source_id: str) -> bool:
         """
-        Play/resume the current media session.
+        Resume the session that pause() returned, without starting other apps.
 
         Returns:
-            True if play was successful, False otherwise.
+            False if the resume request failed, True otherwise.
         """
         if not self.is_available():
             return False
 
         try:
-            result = self._run_async(self._play_async)
+            result = self._run_async(lambda: self._play_async(source_id))
             return result if result is not None else False
         except Exception as e:
             print(f"[MediaControl] Exception in play: {e}")

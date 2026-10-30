@@ -105,7 +105,8 @@ class MurmurApp:
         self._media_pause_thread: threading.Thread | None = None
 
         self._running = False
-        self._was_media_playing = False
+        # Source app id of the media session this attempt paused, if any.
+        self._paused_media_source: str | None = None
         self._vad_disabled_reason: str | None = None
         self._live_vad_disabled_reason: str | None = None
         self._live_pipeline_degraded = False
@@ -407,7 +408,7 @@ class MurmurApp:
         )
         self.tray.set_status("Preparing...")
 
-        self._was_media_playing = False
+        self._paused_media_source = None
         try:
             if self._startup_abandoned(request):
                 self._abort_startup()
@@ -498,8 +499,8 @@ class MurmurApp:
                 return
             playing = self.media_controller.is_media_playing()
             if playing and self._media_pause_allowed(request):
-                self._was_media_playing = self.media_controller.pause()
-                if not self._was_media_playing:
+                self._paused_media_source = self.media_controller.pause()
+                if self._paused_media_source is None:
                     print("Warning: Failed to pause media playback")
                     self.notifications.notify(
                         "murmur", "Could not pause media playback"
@@ -518,18 +519,19 @@ class MurmurApp:
         self._stats("finish", "cancelled")
 
     def _resume_owned_media(self) -> None:
-        """Resume playback once when this attempt successfully paused it."""
+        """Resume the paused media session once, never whichever app is current."""
         thread = self._media_pause_thread
         self._media_pause_thread = None
         if thread is not None:
             # Capture is closed before joining. Wait for a late successful pause
             # so it cannot affect the next session or leave playback paused.
             thread.join()
-        if not self._was_media_playing:
+        source_id = self._paused_media_source
+        if source_id is None:
             return
-        self._was_media_playing = False
+        self._paused_media_source = None
         try:
-            if not self.media_controller.play():
+            if not self.media_controller.play(source_id):
                 print("Warning: Failed to resume media playback")
                 self.notifications.notify("murmur", "Could not resume media playback")
         except Exception:
