@@ -358,6 +358,31 @@ def test_ollama_client_uses_short_connect_timeout_and_configured_read_timeout():
     timeout = client._client._client.timeout
     assert timeout.connect == OLLAMA_CONNECT_TIMEOUT_SECONDS
     assert timeout.read == TIMEOUT_SECONDS
+    warmup_timeout = client._warmup_client._client.timeout
+    assert warmup_timeout.connect == TIMEOUT_SECONDS
+    assert warmup_timeout.read == TIMEOUT_SECONDS
+
+
+def test_ollama_client_warm_uses_warmup_client():
+    class FailingClient:
+        def list(self):
+            raise AssertionError("warmup must not use the dictation client")
+
+        def chat(self, **kwargs):
+            raise AssertionError("warmup must not use the dictation client")
+
+    client = OllamaClient(
+        endpoint="http://localhost:11434",
+        model_name=MODEL_NAME,
+        timeout=TIMEOUT_SECONDS,
+    )
+    warmup_client = FakeOllamaPackageClient(None)
+    warmup_client.list_response = {"models": [{"name": MODEL_NAME}]}
+    client._client = FailingClient()
+    client._warmup_client = warmup_client
+
+    assert client.warm() is True
+    assert warmup_client.calls[0]["keep_alive"] == "10m"
 
 
 def test_ollama_client_generate_uses_model_and_options():

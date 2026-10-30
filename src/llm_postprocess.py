@@ -17,7 +17,8 @@ try:
 except ImportError:  # pragma: no cover - exercised indirectly via runtime error path
     OllamaPackageClient = None
 
-# Fail fast on an unreachable host; the configured timeout covers model load and reads.
+# Dictation fails fast on an unreachable host; the configured timeout covers
+# model load and reads. Startup warmup keeps the full timeout for connecting.
 OLLAMA_CONNECT_TIMEOUT_SECONDS = 5.0
 # After a failed connection, later sessions skip cleanup this long instead of
 # each waiting on a host that is down. Slow responses are not remembered.
@@ -206,9 +207,11 @@ class OllamaClient:
         self.endpoint = endpoint
         self.model_name = model_name
         self.timeout = timeout
-        self._client = client or self._build_client()
+        self._client = client or self._build_client(OLLAMA_CONNECT_TIMEOUT_SECONDS)
+        # Warmup runs in the background, so it can wait longer for the host.
+        self._warmup_client = client or self._build_client(timeout)
 
-    def _build_client(self) -> Any:
+    def _build_client(self, connect_timeout: float) -> Any:
         if OllamaPackageClient is None:
             raise RuntimeError(
                 "The 'ollama' package is not installed. Install dependencies before enabling Ollama post-processing."
@@ -216,7 +219,7 @@ class OllamaClient:
 
         return OllamaPackageClient(
             host=self.endpoint,
-            timeout=httpx.Timeout(self.timeout, connect=OLLAMA_CONNECT_TIMEOUT_SECONDS),
+            timeout=httpx.Timeout(self.timeout, connect=connect_timeout),
         )
 
     def generate(
@@ -276,21 +279,20 @@ class OllamaClient:
 
     def is_model_available(self) -> bool:
         """Return whether the configured model is already available locally."""
-        models_response = self._client.list()
-        for model_name in self._extract_model_names(models_response):
-            if model_name == self.model_name:
-                return True
-        return False
+        return self._has_model(self._client)
+
+    def _has_model(self, client: Any) -> bool:
+        return self.model_name in self._extract_model_names(client.list())
 
     def warm(self, keep_alive: str = "10m") -> bool:
         """Load an already-installed model into memory without downloading it."""
-        if not self.is_model_available():
+        if not self._has_model(self._warmup_client):
             print(
                 f"Warning: Ollama model '{self.model_name}' is not installed locally; skipping warmup."
             )
             return False
 
-        self._client.chat(
+        self._warmup_client.chat(
             model=self.model_name,
             messages=[],
             stream=False,
