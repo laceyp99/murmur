@@ -93,6 +93,28 @@ result right away. Each skipped session still counts as a failed cleanup
 after the window tries Ollama again. A slow response that times out after
 connecting is not remembered, because the host is up.
 
+Over a run of murmur, Ollama cleanup moves between these states. Dictation is
+available during warmup; each dictation follows the request flow further below.
+
+```mermaid
+stateDiagram-v2
+    state "Startup warmup (background)" as Warmup
+    state "Normal cleanup" as Normal
+    state "Skipping Ollama for 30 s" as Skip
+
+    [*] --> Warmup: murmur starts, hotkey ready
+    Warmup --> Normal: model loaded
+    Warmup --> Normal: no answer in about 21 s, warning only
+    Normal --> Normal: connects within 5 s, cleaned text
+    Normal --> Normal: slow reply times out, local text
+    Normal --> Skip: no connection within 5 s, local text
+    Skip --> Skip: dictation gets local text instantly
+    Skip --> Normal: 30 s pass
+```
+
+Every dictation that returns local text after Ollama was attempted or skipped
+shows "Copied to clipboard without Ollama cleanup."
+
 All configured models receive the same request profile: thinking disabled,
 `num_ctx=4096`, temperature `0`, and a 10-minute keep-alive.
 
