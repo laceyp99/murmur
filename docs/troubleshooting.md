@@ -41,13 +41,10 @@ are taking too long to close.
 
 - Confirm Ollama is running at the configured `ollama_endpoint`.
 - Confirm the configured model is installed locally.
-- Increase `ollama_timeout_seconds` if model startup is slow. It covers model
-  loading and the response; during dictation each connection attempt is capped
-  at 5 seconds (per address, if the hostname has more than one), so an
-  unreachable host falls back quickly. Startup warmup waits longer to connect.
-- After a failed connection, murmur skips Ollama for 30 seconds and the copied
-  notification says "Copied to clipboard without Ollama cleanup." The next
-  dictation after that window tries Ollama again.
+- Increase `ollama_timeout_seconds` if model startup is slow. Connecting during
+  dictation is capped at 5 seconds regardless.
+- After a failed connection, murmur skips Ollama for 30 seconds and the toast
+  reads "Copied to clipboard without Ollama cleanup."
 - murmur falls back to the locally cleaned transcript when Ollama is unavailable.
 
 ### Slow transcription

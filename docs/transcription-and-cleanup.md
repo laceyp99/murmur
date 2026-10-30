@@ -75,26 +75,15 @@ it. Startup warmup runs in the background after the hotkey registers. It only
 checks for the configured installed model and attempts to load it into memory;
 it does not download a missing model. If the client cannot be built, the
 request fails, or the response fails the acceptance gate, the local cleanup
-result is returned. When Ollama cleanup fails this way, the copied notification
-reads "Copied to clipboard without Ollama cleanup." instead of the usual
-message, so a silent fallback is not mistaken for a cleaned result.
+result is returned, and the copied notification reads "Copied to clipboard
+without Ollama cleanup."
 
-During dictation, each connection attempt to Ollama is capped at 5 seconds. A
-hostname with several addresses, such as IPv6 and IPv4, is tried one address at
-a time, so it can take 5 seconds per address. `ollama_timeout_seconds` covers
-model loading and the response once connected. Startup warmup uses
-`ollama_timeout_seconds` for connecting too, because it runs in the background
-(Windows usually abandons an unanswered connection after about 21 seconds). If
-a dictation's connection fails
-(refused or no answer within 5 seconds), the processor remembers it for 30
-seconds and later sessions in that window skip the request and return the local
-result right away. Each skipped session still counts as a failed cleanup
-(`cleanup_unreachable_skip`) and gets the same notification. The first session
-after the window tries Ollama again. A slow response that times out after
-connecting is not remembered, because the host is up.
-
-Over a run of murmur, Ollama cleanup moves between these states. Dictation is
-available during warmup; each dictation follows the request flow further below.
+During dictation, connecting to Ollama is capped at 5 seconds per address;
+`ollama_timeout_seconds` covers model loading and the response. Startup warmup
+runs in the background, so it connects with `ollama_timeout_seconds` (Windows
+usually gives up on an unanswered connection after about 21 seconds). A failed
+dictation connection makes later sessions skip Ollama for 30 seconds, recorded
+as `cleanup_unreachable_skip`. A slow response is not remembered.
 
 ```mermaid
 stateDiagram-v2
@@ -111,9 +100,6 @@ stateDiagram-v2
     Skip --> Skip: dictation gets local text instantly
     Skip --> Normal: 30 s pass
 ```
-
-Every dictation that returns local text after Ollama was attempted or skipped
-shows "Copied to clipboard without Ollama cleanup."
 
 All configured models receive the same request profile: thinking disabled,
 `num_ctx=4096`, temperature `0`, and a 10-minute keep-alive.
