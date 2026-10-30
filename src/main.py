@@ -105,7 +105,8 @@ class MurmurApp:
         self._media_pause_thread: threading.Thread | None = None
 
         self._running = False
-        self._was_media_playing = False
+        # Source app id of the media session this attempt paused, if any.
+        self._paused_media_source: str | None = None
         self._vad_disabled_reason: str | None = None
         self._live_vad_disabled_reason: str | None = None
         self._live_pipeline_degraded = False
@@ -128,10 +129,6 @@ class MurmurApp:
         if preload_model:
             print("Preloading Whisper model...")
             self.transcriber.load_model()
-
-        if self.config.ollama_enabled and self.config.ollama_preload_model:
-            print("Warming Ollama model...")
-            self.transcriber.warm_llm_post_processor()
 
         # Ensure autostart matches config
         if self.config.start_with_windows:
@@ -261,6 +258,19 @@ class MurmurApp:
         self.notifications.notify("murmur", "Ready! Press hotkey to start recording.")
         # Start the shared UI thread now so the first recording shows promptly.
         self._show_overlay(HIDDEN)
+        self._start_ollama_warmup()
+
+    def _start_ollama_warmup(self) -> None:
+        """Warm optional Ollama cleanup without delaying hotkeys or the tray."""
+        if not (self.config.ollama_enabled and self.config.ollama_preload_model):
+            return
+        print("Warming Ollama model in the background...")
+        # Daemon so a slow endpoint never holds up exit; warmup has no state to save.
+        threading.Thread(
+            target=self.transcriber.warm_llm_post_processor,
+            name="murmur-ollama-warmup",
+            daemon=True,
+        ).start()
 
     def _recover_failed_hotkey_registration(self) -> tuple[str | None, bool]:
         """Recover from invalid or unregistrable configured hotkeys."""
@@ -398,7 +408,7 @@ class MurmurApp:
         )
         self.tray.set_status("Preparing...")
 
-        self._was_media_playing = False
+        self._paused_media_source = None
         try:
             if self._startup_abandoned(request):
                 self._abort_startup()
@@ -489,8 +499,8 @@ class MurmurApp:
                 return
             playing = self.media_controller.is_media_playing()
             if playing and self._media_pause_allowed(request):
-                self._was_media_playing = self.media_controller.pause()
-                if not self._was_media_playing:
+                self._paused_media_source = self.media_controller.pause()
+                if self._paused_media_source is None:
                     print("Warning: Failed to pause media playback")
                     self.notifications.notify(
                         "murmur", "Could not pause media playback"
@@ -509,18 +519,19 @@ class MurmurApp:
         self._stats("finish", "cancelled")
 
     def _resume_owned_media(self) -> None:
-        """Resume playback once when this attempt successfully paused it."""
+        """Resume the paused media session once, never whichever app is current."""
         thread = self._media_pause_thread
         self._media_pause_thread = None
         if thread is not None:
             # Capture is closed before joining. Wait for a late successful pause
             # so it cannot affect the next session or leave playback paused.
             thread.join()
-        if not self._was_media_playing:
+        source_id = self._paused_media_source
+        if source_id is None:
             return
-        self._was_media_playing = False
+        self._paused_media_source = None
         try:
-            if not self.media_controller.play():
+            if not self.media_controller.play(source_id):
                 print("Warning: Failed to resume media playback")
                 self.notifications.notify("murmur", "Could not resume media playback")
         except Exception:
