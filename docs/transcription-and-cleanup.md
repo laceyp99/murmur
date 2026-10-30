@@ -75,7 +75,31 @@ it. Startup warmup runs in the background after the hotkey registers. It only
 checks for the configured installed model and attempts to load it into memory;
 it does not download a missing model. If the client cannot be built, the
 request fails, or the response fails the acceptance gate, the local cleanup
-result is returned.
+result is returned, and the copied notification reads "Copied to clipboard
+without Ollama cleanup."
+
+During dictation, connecting to Ollama is capped at 5 seconds per address;
+`ollama_timeout_seconds` covers model loading and the response. Startup warmup
+runs in the background, so it connects with `ollama_timeout_seconds` (Windows
+usually gives up on an unanswered connection after about 21 seconds). A failed
+dictation connection makes later sessions skip Ollama for 30 seconds, recorded
+as `cleanup_unreachable_skip`. A slow response is not remembered.
+
+```mermaid
+stateDiagram-v2
+    state "Startup warmup (background)" as Warmup
+    state "Normal cleanup" as Normal
+    state "Skipping Ollama for 30 s" as Skip
+
+    [*] --> Warmup: murmur starts, hotkey ready
+    Warmup --> Normal: model loaded
+    Warmup --> Normal: no answer in about 21 s, warning only
+    Normal --> Normal: connects within 5 s, cleaned text
+    Normal --> Normal: slow reply times out, local text
+    Normal --> Skip: no connection within 5 s, local text
+    Skip --> Skip: dictation gets local text instantly
+    Skip --> Normal: 30 s pass
+```
 
 All configured models receive the same request profile: thinking disabled,
 `num_ctx=4096`, temperature `0`, and a 10-minute keep-alive.
@@ -103,7 +127,9 @@ flowchart TB
     Available -->|yes| BuildMessages["Build system, examples, vocab, transcript prompt"]
     BuildMessages --> Budget{"Fits context budget?"}
     Budget -->|no| ReturnLocal
-    Budget -->|yes| Ollama["Ollama chat request"]
+    Budget -->|yes| Recent{"Connection failed<br/>in last 30s?"}
+    Recent -->|yes| ReturnLocal
+    Recent -->|no| Ollama["Ollama chat request<br/>5s connect limit"]
     Ollama --> Completion{"done=true and done_reason=stop?"}
     Completion -->|yes| Content{"Message content is a string?"}
     Content -->|yes| Normalize["Normalize model output"]
@@ -114,6 +140,7 @@ flowchart TB
     Greeting --> ReturnLLM["Return LLM cleaned text"]
     Gate -->|no| ReturnLocal
     Ollama -->|exception| ReturnLocal
+    Ollama -->|connection failed| Remember["Remember for 30s"] --> ReturnLocal
 ```
 
 ## Ollama Acceptance Gate

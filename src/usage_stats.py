@@ -57,6 +57,8 @@ ISSUE_CODES = frozenset(
         "local_cleanup_failed",
         "cleanup_unavailable",
         "cleanup_timeout",
+        "cleanup_unreachable",
+        "cleanup_unreachable_skip",
         "cleanup_request_failed",
         "cleanup_context_skip",
         "cleanup_output_rejected",

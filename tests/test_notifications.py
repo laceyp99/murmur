@@ -55,8 +55,12 @@ def test_transcription_copied_notification_uses_success_message(monkeypatch):
     )
 
     manager.notify_transcription_copied()
+    manager.notify_transcription_copied(cleanup_failed=True)
 
-    assert messages == [("murmur", "Transcription copied to clipboard.", 3, True)]
+    assert messages == [
+        ("murmur", "Transcription copied to clipboard.", 3, True),
+        ("murmur", "Copied to clipboard without Ollama cleanup.", 3, True),
+    ]
 
 
 def test_clipboard_failure_notifications_use_retry_wording(monkeypatch):

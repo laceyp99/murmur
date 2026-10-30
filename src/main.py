@@ -987,7 +987,10 @@ class MurmurApp:
                 )
                 self._show_overlay(ERROR, OVERLAY_AUDIO_INCOMPLETE)
             else:
-                self.notifications.notify_transcription_copied()
+                self.notifications.notify_transcription_copied(
+                    cleanup_failed=transcript.cleanup_status
+                    in {"failed", "unavailable"}
+                )
                 self._show_overlay(SUCCESS)
             return
 

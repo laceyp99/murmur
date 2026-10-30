@@ -12,9 +12,17 @@ from typing import Any, Literal
 from .observations import emit_observation, failure_category
 
 try:
+    import httpx
     from ollama import Client as OllamaPackageClient
 except ImportError:  # pragma: no cover - exercised indirectly via runtime error path
     OllamaPackageClient = None
+
+# Dictation fails fast on an unreachable host; the configured timeout covers
+# model load and reads. Startup warmup keeps the full timeout for connecting.
+OLLAMA_CONNECT_TIMEOUT_SECONDS = 5.0
+# After a failed connection, later sessions skip cleanup this long instead of
+# each waiting on a host that is down. Slow responses are not remembered.
+OLLAMA_UNREACHABLE_RETRY_SECONDS = 30.0
 
 
 DEFAULT_SYSTEM_PROMPT = """Clean up the transcription below into a message or note ready to paste. Return only the cleaned text.
@@ -199,15 +207,20 @@ class OllamaClient:
         self.endpoint = endpoint
         self.model_name = model_name
         self.timeout = timeout
-        self._client = client or self._build_client()
+        self._client = client or self._build_client(OLLAMA_CONNECT_TIMEOUT_SECONDS)
+        # Warmup runs in the background, so it can wait longer for the host.
+        self._warmup_client = client or self._build_client(timeout)
 
-    def _build_client(self) -> Any:
+    def _build_client(self, connect_timeout: float) -> Any:
         if OllamaPackageClient is None:
             raise RuntimeError(
                 "The 'ollama' package is not installed. Install dependencies before enabling Ollama post-processing."
             )
 
-        return OllamaPackageClient(host=self.endpoint, timeout=self.timeout)
+        return OllamaPackageClient(
+            host=self.endpoint,
+            timeout=httpx.Timeout(self.timeout, connect=connect_timeout),
+        )
 
     def generate(
         self,
@@ -266,21 +279,20 @@ class OllamaClient:
 
     def is_model_available(self) -> bool:
         """Return whether the configured model is already available locally."""
-        models_response = self._client.list()
-        for model_name in self._extract_model_names(models_response):
-            if model_name == self.model_name:
-                return True
-        return False
+        return self._has_model(self._client)
+
+    def _has_model(self, client: Any) -> bool:
+        return self.model_name in self._extract_model_names(client.list())
 
     def warm(self, keep_alive: str = "10m") -> bool:
         """Load an already-installed model into memory without downloading it."""
-        if not self.is_model_available():
+        if not self._has_model(self._warmup_client):
             print(
                 f"Warning: Ollama model '{self.model_name}' is not installed locally; skipping warmup."
             )
             return False
 
-        self._client.chat(
+        self._warmup_client.chat(
             model=self.model_name,
             messages=[],
             stream=False,
@@ -384,6 +396,14 @@ def check_ollama_connection(
         )
 
 
+def is_connection_failure(error: Exception) -> bool:
+    """Return whether the request never reached Ollama (refused or connect timeout)."""
+    # The ollama package re-raises httpx.ConnectError as the builtin ConnectionError.
+    return isinstance(
+        error, (ConnectionError, httpx.ConnectError, httpx.ConnectTimeout)
+    )
+
+
 class LLMPostProcessor:
     """Single-pass transcript cleanup using a local Ollama model."""
 
@@ -396,6 +416,8 @@ class LLMPostProcessor:
         self.client = client
         self.user_vocab = dict(user_vocab or {})
         self.speaker_names = tuple(speaker_names)
+        # time.monotonic() deadline set by the last connection failure.
+        self._unreachable_until = 0.0
 
     def process(self, text: str) -> CleanupResult:
         """Return cleaned text and the cleanup outcome, keeping input on failure."""
@@ -430,6 +452,15 @@ class LLMPostProcessor:
             )
             return CleanupResult(cleaned_input, "skipped")
 
+        retry_in = self._unreachable_until - time.monotonic()
+        if retry_in > 0:
+            observe("failed", "cleanup_unreachable_skip", "error")
+            print(
+                "Ollama was unreachable moments ago; skipping cleanup "
+                f"(retrying in {ceil(retry_in)}s)."
+            )
+            return CleanupResult(cleaned_input, "failed")
+
         start_time = time.time()
         try:
             result = self.client.chat(
@@ -438,6 +469,16 @@ class LLMPostProcessor:
                 temperature=0.0,
             )
         except Exception as exc:
+            if is_connection_failure(exc):
+                self._unreachable_until = (
+                    time.monotonic() + OLLAMA_UNREACHABLE_RETRY_SECONDS
+                )
+                observe("failed", "cleanup_unreachable", "error")
+                print(
+                    "Could not reach Ollama; using original transcript and skipping "
+                    f"cleanup for {OLLAMA_UNREACHABLE_RETRY_SECONDS:g}s."
+                )
+                return CleanupResult(cleaned_input, "failed")
             category = failure_category(exc)
             observe(
                 "failed",

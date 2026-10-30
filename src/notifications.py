@@ -108,8 +108,11 @@ class NotificationManager:
         """Notify that transcription is complete."""
         self.notify_transcription_copied()
 
-    def notify_transcription_copied(self) -> None:
-        """Notify that transcription was copied to the clipboard."""
+    def notify_transcription_copied(self, cleanup_failed: bool = False) -> None:
+        """Notify that transcription was copied, flagging a failed Ollama cleanup."""
+        if cleanup_failed:
+            self.notify("murmur", "Copied to clipboard without Ollama cleanup.")
+            return
         self.notify("murmur", "Transcription copied to clipboard.")
 
     def notify_clipboard_failure_retry(self) -> None:
