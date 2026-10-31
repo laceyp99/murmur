@@ -31,8 +31,13 @@ flowchart LR
     Result --> Edit
     Action -->|Save| Validate["Validate hotkey, language, numeric values, and Ollama fields"]
     Validate -->|invalid| Edit
-    Validate -->|valid| Write["Atomically write config.json"]
-    Write --> Runtime["Update logger statistics eligibility and Windows autostart"]
+    Validate -->|valid| Autostart["Read Windows startup state and apply requested choice"]
+    Autostart -->|failure| Error["Show error; keep Settings open"]
+    Error --> Edit
+    Autostart -->|success| Write["Atomically write config.json"]
+    Write -->|failure| Rollback["Restore previous Windows startup state; report rollback failure"]
+    Rollback --> Error
+    Write -->|success| Runtime["Update logger and statistics eligibility"]
     Runtime --> Restart{"Restart-required values changed?"}
     Restart -->|yes| Notice["Save and show restart notice"]
     Restart -->|no| Close["Save and close"]
@@ -169,6 +174,23 @@ atomically. Windows autostart is stored in the current user's
 its own `murmur.exe`; a Python install registers the same environment's
 `pythonw.exe -m src`. Source development requires an editable install so the
 module is available outside the checkout.
+
+Every Settings save reconciles **Start with Windows** before writing the config,
+including an unchanged disabled choice that may have a stale startup entry.
+When startup is already disabled and remains disabled, no registry write is
+needed, so a read-only Run key does not prevent saving other settings.
+If Windows rejects the change, no settings are saved, the switch returns to the
+previous Windows registration, and an error keeps the window open. If the
+registration cannot be read, saving stops with an error because its effective
+state is unknown. A config write failure attempts to restore the previous
+Windows enabled/disabled state using the current launch command when enabling.
+If that rollback also fails, the error says the requested
+Windows choice is still active and asks you to retry saving.
+
+At launch, murmur reconciles both enabled and disabled saved choices. A registry
+failure prints a warning and leaves dictation available; the saved choice is
+retried on the next launch or Settings save. Background launches may hide that
+console warning, so use Settings to retry and see registry errors.
 
 ## Training-data logging
 

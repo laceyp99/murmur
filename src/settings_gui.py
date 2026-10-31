@@ -19,7 +19,7 @@ import customtkinter as ctk
 from PIL import Image
 
 from .assets import get_app_icon_path, get_logo_path
-from .autostart import set_autostart
+from .autostart import is_autostart_enabled, set_autostart
 from .config import ConfigError, get_config, get_training_data_dir
 from .hotkey import is_hotkey_valid
 from .input_devices import (
@@ -1813,7 +1813,6 @@ class SettingsWindow:
             )
             return
 
-        old_autostart = self.config.start_with_windows
         old_overlay_enabled = self.config.show_recording_overlay
         new_autostart = self.autostart_var.get()
         updated_values = {
@@ -1849,11 +1848,46 @@ class SettingsWindow:
             updated_values["logging_consent_source"] = "settings"
 
         try:
-            self.config.update(updated_values)
-        except ConfigError as exc:
+            previous_autostart = is_autostart_enabled()
+        except OSError as exc:
             messagebox.showerror(
                 _APP_DISPLAY_NAME,
-                f"Failed to save settings: {exc}",
+                f"Settings were not saved. Could not check Start with Windows: {exc}",
+                parent=self.root,
+            )
+            return
+
+        # Reconcile even an unchanged choice, including stale disabled entries.
+        autostart_needs_write = new_autostart or previous_autostart
+        try:
+            if autostart_needs_write:
+                set_autostart(new_autostart)
+        except OSError as exc:
+            self.autostart_var.set(previous_autostart)
+            messagebox.showerror(
+                _APP_DISPLAY_NAME,
+                f"Settings were not saved. Could not update Start with Windows: {exc}. "
+                "The switch now shows the current Windows startup state.",
+                parent=self.root,
+            )
+            return
+
+        try:
+            self.config.update(updated_values)
+        except ConfigError as exc:
+            rollback_error = ""
+            try:
+                if autostart_needs_write:
+                    set_autostart(previous_autostart)
+                self.autostart_var.set(previous_autostart)
+            except OSError as rollback_exc:
+                rollback_error = (
+                    " Start with Windows could not be restored and still reflects "
+                    f"your requested choice: {rollback_exc}. Retry saving settings."
+                )
+            messagebox.showerror(
+                _APP_DISPLAY_NAME,
+                f"Failed to save settings: {exc}.{rollback_error}",
                 parent=self.root,
             )
             return
@@ -1873,10 +1907,6 @@ class SettingsWindow:
             close_overlay()
 
         self.logger.set_enabled(new_logging)
-
-        # Update registry if autostart changed
-        if old_autostart != new_autostart:
-            set_autostart(new_autostart)
 
         if restart_settings:
             messagebox.showinfo(

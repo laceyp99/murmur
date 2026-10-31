@@ -1,11 +1,12 @@
 import queue
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
 from src import settings_gui as settings_module
-from src.config import DEFAULT_CONFIG
+from src.config import DEFAULT_CONFIG, ConfigError
 
 
 def test_overlay_cancel_dispatch_uses_latest_callback_and_session(monkeypatch):
@@ -107,6 +108,170 @@ class FakeConfig:
         notice = self.startup_notice
         self.startup_notice = None
         return notice
+
+
+@pytest.fixture
+def autostart_window(monkeypatch):
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.config = FakeConfig()
+    window.logger = FakeLogger()
+    variables = {
+        "hotkey": "hotkey",
+        "model": "model",
+        "device": "device",
+        "lang": "language",
+        "notify": "enable_notifications",
+        "overlay": "show_recording_overlay",
+        "logging": "enable_logging",
+        "pause_media": "pause_media_while_recording",
+        "keep_microphone_ready": "keep_microphone_ready",
+        "autostart": "start_with_windows",
+        "ollama_enabled": "ollama_enabled",
+        "ollama_endpoint": "ollama_endpoint",
+        "ollama_model_name": "ollama_model_name",
+        "ollama_preload_model": "ollama_preload_model",
+    }
+    for attr, key in variables.items():
+        value = DEFAULT_CONFIG[key]
+        setattr(window, attr + "_var", FakeValue(value if value is not None else ""))
+    window.numeric_vars = make_numeric_vars()
+    window.root = object()
+    window._close = Mock()
+    monkeypatch.setattr(settings_module, "is_hotkey_valid", lambda value: True)
+    monkeypatch.setattr(settings_module, "messagebox", Mock())
+    return window
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_autostart_failure_does_not_save_or_close(
+    autostart_window, monkeypatch, enabled
+):
+    window = autostart_window
+    window.config.start_with_windows = not enabled
+    window.autostart_var.set(enabled)
+    monkeypatch.setattr(settings_module, "is_autostart_enabled", lambda: not enabled)
+    apply = Mock(side_effect=PermissionError("access denied"))
+    monkeypatch.setattr(settings_module, "set_autostart", apply)
+
+    window._save()
+
+    apply.assert_called_once_with(enabled)
+    assert window.config.set_calls == []
+    assert window.config.start_with_windows is not enabled
+    assert window.autostart_var.get() is not enabled
+    assert window.logger.enabled_calls == []
+    window._close.assert_not_called()
+    settings_module.messagebox.showinfo.assert_not_called()
+    assert (
+        "Could not update Start with Windows"
+        in settings_module.messagebox.showerror.call_args.args[1]
+    )
+
+
+def test_save_retries_stale_disabled_registration(autostart_window, monkeypatch):
+    window = autostart_window
+    window.autostart_var.set(False)
+    monkeypatch.setattr(settings_module, "is_autostart_enabled", lambda: True)
+    apply = Mock()
+    monkeypatch.setattr(settings_module, "set_autostart", apply)
+
+    window._save()
+
+    apply.assert_called_once_with(False)
+    assert ("start_with_windows", False) in window.config.set_calls
+    window._close.assert_called_once()
+
+
+@pytest.mark.parametrize("config_fails", [False, True])
+def test_disabled_autostart_save_needs_no_registry_write(
+    autostart_window, monkeypatch, config_fails
+):
+    window = autostart_window
+    window.autostart_var.set(False)
+    window.hotkey_var.set("ctrl+alt+p")
+    accesses = []
+
+    def open_key(_root, _path, _reserved, access):
+        accesses.append(access)
+        if access == "write":
+            raise PermissionError("Run key is read-only")
+        return nullcontext(object())
+
+    monkeypatch.setattr(
+        "src.autostart.winreg",
+        SimpleNamespace(
+            HKEY_CURRENT_USER=object(),
+            KEY_READ="read",
+            KEY_SET_VALUE="write",
+            OpenKey=open_key,
+            QueryValueEx=Mock(side_effect=FileNotFoundError("no startup entry")),
+        ),
+    )
+    if config_fails:
+        window.config.update = Mock(side_effect=ConfigError("disk full"))
+
+    window._save()
+
+    assert accesses == ["read"]
+    assert window.autostart_var.get() is False
+    if config_fails:
+        window._close.assert_not_called()
+        message = settings_module.messagebox.showerror.call_args.args[1]
+        assert "disk full" in message
+        assert "could not be restored" not in message
+    else:
+        assert ("hotkey", "ctrl+alt+p") in window.config.set_calls
+        assert ("start_with_windows", False) in window.config.set_calls
+        settings_module.messagebox.showerror.assert_not_called()
+        window._close.assert_called_once()
+
+
+def test_autostart_read_failure_keeps_settings_open(autostart_window, monkeypatch):
+    window = autostart_window
+    monkeypatch.setattr(
+        settings_module,
+        "is_autostart_enabled",
+        Mock(side_effect=PermissionError("access denied")),
+    )
+    apply = Mock()
+    monkeypatch.setattr(settings_module, "set_autostart", apply)
+
+    window._save()
+
+    apply.assert_not_called()
+    assert window.config.set_calls == []
+    window._close.assert_not_called()
+    assert (
+        "Could not check Start with Windows"
+        in settings_module.messagebox.showerror.call_args.args[1]
+    )
+
+
+@pytest.mark.parametrize("rollback_fails", [False, True])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_config_failure_restores_autostart_or_reports_rollback_failure(
+    autostart_window, monkeypatch, rollback_fails, enabled
+):
+    window = autostart_window
+    window.config.start_with_windows = not enabled
+    window.autostart_var.set(enabled)
+    monkeypatch.setattr(settings_module, "is_autostart_enabled", lambda: not enabled)
+    apply = Mock(
+        side_effect=[None, PermissionError("access denied") if rollback_fails else None]
+    )
+    monkeypatch.setattr(settings_module, "set_autostart", apply)
+    window.config.update = Mock(side_effect=ConfigError("disk full"))
+
+    window._save()
+
+    assert [call.args for call in apply.call_args_list] == [(enabled,), (not enabled,)]
+    assert window.config.start_with_windows is not enabled
+    assert window.autostart_var.get() is (enabled if rollback_fails else not enabled)
+    window._close.assert_not_called()
+    settings_module.messagebox.showinfo.assert_not_called()
+    message = settings_module.messagebox.showerror.call_args.args[1]
+    assert "disk full" in message
+    assert ("could not be restored" in message) is rollback_fails
 
 
 def test_startup_notice_banner_shows_body_and_dismisses_without_saving(monkeypatch):

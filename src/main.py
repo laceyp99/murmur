@@ -130,9 +130,11 @@ class MurmurApp:
             print("Preloading Whisper model...")
             self.transcriber.load_model()
 
-        # Ensure autostart matches config
-        if self.config.start_with_windows:
-            set_autostart(True)
+        # Autostart is optional; reconcile disabled choices as well as enabled ones.
+        try:
+            set_autostart(self.config.start_with_windows)
+        except OSError as exc:
+            print(f"Warning: Could not sync Start with Windows: {exc}")
 
     def _set_recording_limit_callback(self) -> None:
         """Register app handling for recorder duration-limit events."""
