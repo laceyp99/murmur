@@ -1858,13 +1858,16 @@ class SettingsWindow:
             return
 
         # Reconcile even an unchanged choice, including stale disabled entries.
+        autostart_needs_write = new_autostart or previous_autostart
         try:
-            set_autostart(new_autostart)
+            if autostart_needs_write:
+                set_autostart(new_autostart)
         except OSError as exc:
             self.autostart_var.set(previous_autostart)
             messagebox.showerror(
                 _APP_DISPLAY_NAME,
-                f"Settings were not saved. Could not update Start with Windows: {exc}",
+                f"Settings were not saved. Could not update Start with Windows: {exc}. "
+                "The switch now shows the current Windows startup state.",
                 parent=self.root,
             )
             return
@@ -1874,7 +1877,8 @@ class SettingsWindow:
         except ConfigError as exc:
             rollback_error = ""
             try:
-                set_autostart(previous_autostart)
+                if autostart_needs_write:
+                    set_autostart(previous_autostart)
                 self.autostart_var.set(previous_autostart)
             except OSError as rollback_exc:
                 rollback_error = (

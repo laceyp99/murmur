@@ -177,11 +177,14 @@ module is available outside the checkout.
 
 Every Settings save reconciles **Start with Windows** before writing the config,
 including an unchanged disabled choice that may have a stale startup entry.
+When startup is already disabled and remains disabled, no registry write is
+needed, so a read-only Run key does not prevent saving other settings.
 If Windows rejects the change, no settings are saved, the switch returns to the
 previous Windows registration, and an error keeps the window open. If the
 registration cannot be read, saving stops with an error because its effective
 state is unknown. A config write failure attempts to restore the previous
-Windows registration. If that rollback also fails, the error says the requested
+Windows enabled/disabled state using the current launch command when enabling.
+If that rollback also fails, the error says the requested
 Windows choice is still active and asks you to retry saving.
 
 At launch, murmur reconciles both enabled and disabled saved choices. A registry

@@ -1,4 +1,5 @@
 import queue
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -179,6 +180,50 @@ def test_save_retries_stale_disabled_registration(autostart_window, monkeypatch)
     apply.assert_called_once_with(False)
     assert ("start_with_windows", False) in window.config.set_calls
     window._close.assert_called_once()
+
+
+@pytest.mark.parametrize("config_fails", [False, True])
+def test_disabled_autostart_save_needs_no_registry_write(
+    autostart_window, monkeypatch, config_fails
+):
+    window = autostart_window
+    window.autostart_var.set(False)
+    window.hotkey_var.set("ctrl+alt+p")
+    accesses = []
+
+    def open_key(_root, _path, _reserved, access):
+        accesses.append(access)
+        if access == "write":
+            raise PermissionError("Run key is read-only")
+        return nullcontext(object())
+
+    monkeypatch.setattr(
+        "src.autostart.winreg",
+        SimpleNamespace(
+            HKEY_CURRENT_USER=object(),
+            KEY_READ="read",
+            KEY_SET_VALUE="write",
+            OpenKey=open_key,
+            QueryValueEx=Mock(side_effect=FileNotFoundError("no startup entry")),
+        ),
+    )
+    if config_fails:
+        window.config.update = Mock(side_effect=ConfigError("disk full"))
+
+    window._save()
+
+    assert accesses == ["read"]
+    assert window.autostart_var.get() is False
+    if config_fails:
+        window._close.assert_not_called()
+        message = settings_module.messagebox.showerror.call_args.args[1]
+        assert "disk full" in message
+        assert "could not be restored" not in message
+    else:
+        assert ("hotkey", "ctrl+alt+p") in window.config.set_calls
+        assert ("start_with_windows", False) in window.config.set_calls
+        settings_module.messagebox.showerror.assert_not_called()
+        window._close.assert_called_once()
 
 
 def test_autostart_read_failure_keeps_settings_open(autostart_window, monkeypatch):
