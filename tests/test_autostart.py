@@ -1,6 +1,3 @@
-import sys
-from types import SimpleNamespace
-
 import pytest
 
 from src import autostart as autostart_module
@@ -37,55 +34,125 @@ def test_set_autostart_noops_when_winreg_is_unavailable(monkeypatch):
     assert autostart_module.is_autostart_enabled() is False
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows registry only")
-def test_set_autostart_uses_pythonw_and_registry(monkeypatch):
-    captured = {}
+class FakeRegistry:
+    HKEY_CURRENT_USER = object()
+    KEY_SET_VALUE = object()
+    KEY_READ = object()
+    REG_SZ = 1
 
-    class FakeRegistryKey:
-        pass
+    def __init__(self):
+        self.calls = {}
+        self.errors = {}
+        self.closed = False
 
-    registry_key = FakeRegistryKey()
+    def __enter__(self):
+        return self
 
-    def open_key(root, key_path, reserved, access):
-        captured["open_key"] = (root, key_path, reserved, access)
-        return registry_key
+    def __exit__(self, *args):
+        self.closed = True
 
-    def set_value_ex(reg_key, app_name, reserved, reg_type, cmd):
-        captured["set_value_ex"] = (reg_key, app_name, reserved, reg_type, cmd)
+    def _call(self, operation, args):
+        self.calls[operation] = args
+        if operation in self.errors:
+            raise self.errors[operation]
 
-    def delete_value(reg_key, app_name):
-        captured["delete_value"] = (reg_key, app_name)
+    def OpenKey(self, *args):  # noqa: N802 - match the winreg API
+        self._call("open", args)
+        return self
 
-    def close_key(reg_key):
-        captured["close_key"] = reg_key
+    def SetValueEx(self, *args):  # noqa: N802 - match the winreg API
+        self._call("set", args)
 
-    fake_winreg = SimpleNamespace(
-        HKEY_CURRENT_USER=object(),
-        KEY_SET_VALUE=object(),
-        REG_SZ=1,
-        OpenKey=open_key,
-        SetValueEx=set_value_ex,
-        DeleteValue=delete_value,
-        CloseKey=close_key,
-    )
+    def DeleteValue(self, *args):  # noqa: N802 - match the winreg API
+        self._call("delete", args)
 
+    def QueryValueEx(self, *args):  # noqa: N802 - match the winreg API
+        self._call("query", args)
+        return ("command", self.REG_SZ)
+
+
+@pytest.fixture
+def registry(monkeypatch):
+    fake_winreg = FakeRegistry()
     monkeypatch.setattr(autostart_module, "winreg", fake_winreg)
     monkeypatch.setattr(autostart_module, "_get_launch_command", lambda: "command")
+    return fake_winreg
 
+
+def test_set_autostart_uses_pythonw_and_registry(registry):
     autostart_module.set_autostart(True)
 
-    assert captured["open_key"] == (
-        fake_winreg.HKEY_CURRENT_USER,
+    assert registry.calls["open"] == (
+        registry.HKEY_CURRENT_USER,
         r"Software\Microsoft\Windows\CurrentVersion\Run",
         0,
-        fake_winreg.KEY_SET_VALUE,
+        registry.KEY_SET_VALUE,
     )
-    assert captured["set_value_ex"] == (
-        registry_key,
+    assert registry.calls["set"] == (
+        registry,
         "murmur",
         0,
-        fake_winreg.REG_SZ,
+        registry.REG_SZ,
         "command",
     )
-    assert captured["close_key"] is not None
-    assert "delete_value" not in captured
+    assert registry.closed
+    assert "delete" not in registry.calls
+
+
+def test_disable_autostart_removes_value_and_closes_handle(registry):
+    autostart_module.set_autostart(False)
+
+    assert registry.calls["delete"] == (registry, "murmur")
+    assert registry.closed
+
+
+@pytest.mark.parametrize("operation", ["open", "delete"])
+def test_disable_autostart_is_idempotent_for_missing_entries(registry, operation):
+    registry.errors[operation] = FileNotFoundError("missing")
+
+    autostart_module.set_autostart(False)
+
+    assert registry.closed is (operation == "delete")
+
+
+@pytest.mark.parametrize(
+    ("enabled", "operation"),
+    [(True, "open"), (False, "open"), (True, "set"), (False, "delete")],
+)
+def test_set_autostart_propagates_failure_and_closes_handle(
+    registry, enabled, operation
+):
+    error = PermissionError("access denied")
+    registry.errors[operation] = error
+
+    with pytest.raises(PermissionError) as caught:
+        autostart_module.set_autostart(enabled)
+
+    assert caught.value is error
+    assert registry.closed is (operation != "open")
+
+
+def test_is_autostart_enabled_closes_handle(registry):
+    assert autostart_module.is_autostart_enabled() is True
+    assert registry.calls["query"] == (registry, "murmur")
+    assert registry.closed
+
+
+@pytest.mark.parametrize("operation", ["open", "query"])
+def test_is_autostart_enabled_returns_false_for_missing_entries(registry, operation):
+    registry.errors[operation] = FileNotFoundError("missing")
+
+    assert autostart_module.is_autostart_enabled() is False
+    assert registry.closed is (operation == "query")
+
+
+@pytest.mark.parametrize("operation", ["open", "query"])
+def test_is_autostart_enabled_propagates_failure_and_closes_handle(registry, operation):
+    error = PermissionError("access denied")
+    registry.errors[operation] = error
+
+    with pytest.raises(PermissionError) as caught:
+        autostart_module.is_autostart_enabled()
+
+    assert caught.value is error
+    assert registry.closed is (operation == "query")

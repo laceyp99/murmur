@@ -24,11 +24,12 @@ def _get_launch_command() -> str:
     return f'"{executable}" -m src'
 
 
-def set_autostart(enabled: bool):
+def set_autostart(enabled: bool) -> None:
     """
     Enable or disable auto-start with Windows.
     Uses the packaged executable when frozen, otherwise the current Python
     environment's windowless interpreter and installed ``src`` module.
+    Registry failures propagate so callers can report an unsuccessful change.
     """
     if winreg is None:
         return
@@ -43,18 +44,21 @@ def set_autostart(enabled: bool):
         reg_key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE
         )
+    except FileNotFoundError:
+        if not enabled:
+            return
+        raise
+
+    with reg_key:
         if enabled:
             winreg.SetValueEx(reg_key, app_name, 0, winreg.REG_SZ, cmd)
         else:
             with contextlib.suppress(FileNotFoundError):
                 winreg.DeleteValue(reg_key, app_name)
-        winreg.CloseKey(reg_key)
-    except Exception as e:
-        print(f"Failed to update autostart registry: {e}")
 
 
 def is_autostart_enabled() -> bool:
-    """Check if auto-start is currently enabled in the registry."""
+    """Check auto-start, propagating registry failures other than missing entries."""
     if winreg is None:
         return False
 
@@ -62,13 +66,10 @@ def is_autostart_enabled() -> bool:
     app_name = "murmur"
 
     try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ)
-        try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ
+        ) as key:
             winreg.QueryValueEx(key, app_name)
-            enabled = True
-        except FileNotFoundError:
-            enabled = False
-        winreg.CloseKey(key)
-        return enabled
-    except Exception:
+        return True
+    except FileNotFoundError:
         return False
