@@ -452,15 +452,27 @@ def test_on_live_segment_ready_queues_segment_for_background_transcription():
     assert app.live_transcript_accumulator.get_text() == "live-3"
 
 
-def test_init_preloads_whisper_without_waiting_on_ollama(monkeypatch):
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("registry_fails", [False, True])
+def test_init_preloads_whisper_and_reconciles_autostart(
+    monkeypatch, enabled, registry_fails, capsys
+):
     fake_transcriber = FakeTranscriber()
     fake_recorder = FakeRecorder(audio_data=None)
     fake_config = SimpleNamespace(
         ollama_enabled=True,
         ollama_preload_model=True,
-        start_with_windows=False,
+        start_with_windows=enabled,
     )
     identity_calls = []
+    autostart_calls = []
+
+    def apply_autostart(value):
+        autostart_calls.append(value)
+        if registry_fails:
+            raise PermissionError("access denied")
+
+    monkeypatch.setattr(main_module, "set_autostart", apply_autostart)
 
     monkeypatch.setattr(
         main_module,
@@ -483,6 +495,10 @@ def test_init_preloads_whisper_without_waiting_on_ollama(monkeypatch):
     assert fake_transcriber.load_model_calls == 1
     assert fake_transcriber.warm_llm_post_processor_calls == 0
     assert identity_calls == [True]
+    assert autostart_calls == [enabled]
+    assert (
+        "Could not sync Start with Windows" in capsys.readouterr().out
+    ) is registry_fails
     assert fake_recorder.recording_limit_callback.__self__ is app
     assert (
         fake_recorder.recording_limit_callback.__func__

@@ -156,7 +156,7 @@ flowchart TB
     CreateDefaults --> Resources["Initialize recorder, workers, and transcriber"]
     UseConfig --> Resources
     Resources --> Whisper["Preload Whisper model"]
-    Whisper --> Autostart["Sync Windows autostart if enabled"]
+    Whisper --> Autostart["Sync enabled or disabled Windows autostart; continue on failure"]
     Autostart --> Register["Register global hotkey"]
     Register --> OllamaCheck{"Ollama enabled and preload enabled?"}
     OllamaCheck -->|yes| WarmOllama["Start background Ollama warmup"]
