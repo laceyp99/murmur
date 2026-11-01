@@ -211,14 +211,16 @@ remain at the recording rate, preserving the full recording for fallback.
 Recording defaults to 16 kHz and accepts configured rates from 8 to 96 kHz when
 the input device accepts them. Live VAD supports 8, 16, 32, and 48 kHz; other
 rates use the offline fallback. Higher recording rates use larger buffers and
-require conversion before inference. Before downsampling, the shared resampler
-applies a centered NumPy low-pass filter to reduce high-frequency noise folding
-into Whisper's speech band, without shifting segment timing. Short clips use
-endpoint padding; upsampling retains linear interpolation.
+require conversion before inference. When downsampling, the shared resampler
+evaluates a centered NumPy windowed-sinc low-pass filter directly at each output
+position. This reduces high-frequency noise folding into Whisper's speech band
+without shifting segment timing. It keeps speech through 6 kHz within 0.1 dB at
+every supported rate, including 22.05 and 24 kHz. Short clips use endpoint
+padding; upsampling retains linear interpolation.
 
-Peak normalization remains unchanged and can amplify residual noise in noise-only
-clips. Conversion from the supported 22.05 and 24 kHz rates can attenuate
-6 kHz audio by more than 1 dB.
+Peak normalization scales each clip to full scale. In the
+[issue #85 baseline](https://github.com/laceyp99/murmur/issues/85), quiet speech
+was the most accurate cohort, and generated noise-only clips produced no text.
 
 ### Finalization
 
