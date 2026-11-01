@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from .vad_types import AudioFrame
@@ -23,34 +25,63 @@ def resample_audio(audio: np.ndarray, source_rate: int, target_rate: int) -> np.
 
     target_length = max(1, round(mono_audio.size * target_rate / source_rate))
     if source_rate > target_rate:
-        # Scale the filter with the rate ratio so its transition stays similar
-        # across source rates. Linear interpolation below can still attenuate
-        # the upper speech band at lower source rates (tracked in issue #85).
-        half_width = int(np.ceil(16 * source_rate / target_rate))
-        offsets = np.arange(-half_width, half_width + 1, dtype=np.float64)
-        cutoff = 0.45 * target_rate / source_rate
-        kernel = 2 * cutoff * np.sinc(2 * cutoff * offsets)
-        kernel *= np.blackman(kernel.size)
-        kernel /= kernel.sum()
+        return _band_limited_downsample(
+            mono_audio, source_rate, target_rate, target_length
+        )
 
-        # Center the filter to avoid shifting segment boundaries. Extending the
-        # endpoint values also preserves DC, even for clips shorter than the filter.
-        padded_audio = np.pad(mono_audio, (half_width, half_width), mode="edge")
-        mono_audio = np.convolve(padded_audio, kernel.astype(np.float32), mode="valid")
-        source_positions = np.arange(mono_audio.size, dtype=np.float64)
-        target_positions = (
-            np.arange(target_length, dtype=np.float64) * source_rate / target_rate
-        )
-    else:
-        source_positions = np.arange(mono_audio.size, dtype=np.float32)
-        target_positions = np.linspace(
-            0,
-            mono_audio.size - 1,
-            num=target_length,
-            dtype=np.float32,
-        )
+    source_positions = np.arange(mono_audio.size, dtype=np.float32)
+    target_positions = np.linspace(
+        0,
+        mono_audio.size - 1,
+        num=target_length,
+        dtype=np.float32,
+    )
     resampled_audio = np.interp(target_positions, source_positions, mono_audio)
     return np.asarray(resampled_audio, dtype=np.float32)
+
+
+def _band_limited_downsample(
+    audio: np.ndarray, source_rate: int, target_rate: int, target_length: int
+) -> np.ndarray:
+    """Evaluate a windowed-sinc low-pass filter at each fractional output position.
+
+    Filtering and sample selection happen together, so non-integer ratios such as
+    22.05 kHz to 16 kHz avoid the upper-band loss of linear interpolation.
+    """
+    ratio = source_rate / target_rate
+    # Scale the filter with the rate ratio so its transition stays similar
+    # across source rates.
+    half_width = int(np.ceil(16 * ratio))
+    cutoff = 0.45 / ratio
+
+    # Output n sits at source position n * source_rate / target_rate. Its
+    # fractional phase repeats every `phase_count` outputs, while the source
+    # position advances by `source_step`, so each phase is one strided pass.
+    divisor = math.gcd(source_rate, target_rate)
+    phase_count = min(target_rate // divisor, target_length)
+    source_step = source_rate // divisor
+    numerators = np.arange(phase_count, dtype=np.int64) * source_rate
+    offsets = np.arange(-half_width, half_width + 1, dtype=np.float64)
+    distance = offsets[None, :] - (numerators % target_rate)[:, None] / target_rate
+    angle = np.pi * distance / (half_width + 1)
+    kernels = np.sinc(2 * cutoff * distance) * (
+        0.42 + 0.5 * np.cos(angle) + 0.08 * np.cos(2 * angle)
+    )
+    # Give every phase unity gain at DC.
+    kernels = (kernels / kernels.sum(axis=1, keepdims=True)).astype(np.float32)
+
+    # Center the filter to avoid shifting segment boundaries. Extending the
+    # endpoint values also preserves DC, even for clips shorter than the filter.
+    padded_audio = np.pad(
+        audio, (half_width, half_width + int(np.ceil(ratio)) + 1), mode="edge"
+    )
+    windows = np.lib.stride_tricks.sliding_window_view(padded_audio, offsets.size)
+    output = np.empty(target_length, dtype=np.float32)
+    for phase, kernel in enumerate(kernels):
+        count = len(range(phase, target_length, phase_count))
+        start = int(numerators[phase] // target_rate)
+        output[phase::phase_count] = windows[start::source_step][:count] @ kernel
+    return output
 
 
 def generate_frames(
