@@ -4,7 +4,7 @@ import pytest
 from src.vad_audio import resample_audio
 
 
-@pytest.mark.parametrize("source_rate", [32000, 44100, 48000, 96000])
+@pytest.mark.parametrize("source_rate", [22050, 24000, 32000, 44100, 48000, 96000])
 @pytest.mark.parametrize("frequency", [440, 3000, 6000])
 def test_downsampling_preserves_passband_amplitude(source_rate, frequency):
     positions = np.arange(source_rate) / source_rate
@@ -13,12 +13,14 @@ def test_downsampling_preserves_passband_amplitude(source_rate, frequency):
     result = resample_audio(audio, source_rate, 16000)[160:-160]
 
     gain_db = 20 * np.log10(np.sqrt(2 * np.mean(result.astype(float) ** 2)))
-    assert abs(gain_db) <= 1.0
+    assert abs(gain_db) <= 0.1
 
 
-@pytest.mark.parametrize("source_rate", [32000, 44100, 48000, 96000])
-@pytest.mark.parametrize("frequency", [9000, 9200, 12000, 15000])
+@pytest.mark.parametrize("source_rate", [22050, 24000, 32000, 44100, 48000, 96000])
+@pytest.mark.parametrize("frequency", [9000, 9200, 10500, 12000, 15000])
 def test_downsampling_rejects_frequencies_above_target_nyquist(source_rate, frequency):
+    if frequency >= source_rate / 2:
+        pytest.skip("frequency is not representable at this source rate")
     positions = np.arange(source_rate) / source_rate
     audio = np.sin(2 * np.pi * frequency * positions).astype(np.float32)
 
@@ -30,7 +32,7 @@ def test_downsampling_rejects_frequencies_above_target_nyquist(source_rate, freq
 
 
 @pytest.mark.parametrize("length", [1, 2, 3, 17, 101])
-@pytest.mark.parametrize("source_rate", [32000, 44100, 48000])
+@pytest.mark.parametrize("source_rate", [22050, 24000, 32000, 44100, 48000])
 def test_downsampling_short_constant_audio_preserves_length_and_dc(source_rate, length):
     audio = np.full(length, 0.375, dtype=np.float32)
     original = audio.copy()
@@ -81,7 +83,7 @@ def test_upsampling_retains_linear_interpolation():
     assert result.dtype == np.float32
 
 
-@pytest.mark.parametrize("source_rate", [32000, 44100, 48000])
+@pytest.mark.parametrize("source_rate", [22050, 24000, 32000, 44100, 48000])
 def test_downsampling_centered_impulse_has_no_filter_delay(source_rate):
     audio = np.zeros(source_rate, dtype=np.float32)
     audio[source_rate // 2] = 1.0
