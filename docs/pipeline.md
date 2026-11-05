@@ -218,9 +218,7 @@ without shifting segment timing. It keeps speech through 6 kHz within 0.1 dB at
 every supported rate, including 22.05 and 24 kHz. Short clips use endpoint
 padding; upsampling retains linear interpolation.
 
-Peak normalization scales each clip to full scale. In the
-[issue #85 baseline](https://github.com/laceyp99/murmur/issues/85), quiet speech
-was the most accurate cohort, and generated noise-only clips produced no text.
+Peak normalization then scales each clip to full scale.
 
 ### Finalization
 
