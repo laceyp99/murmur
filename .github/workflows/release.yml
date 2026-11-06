@@ -38,7 +38,9 @@ jobs:
           python - "$version" > release-notes.md <<'PY'
           import sys
           sys.path.insert(0, ".github/scripts")
-          from release_check import section_body
+          from release_check import VERSION_REQUIREMENT, parse_version, section_body
+          if parse_version(sys.argv[1]) is None:
+              sys.exit(f"pyproject.toml version {sys.argv[1]!r} {VERSION_REQUIREMENT}")
           body = section_body(open("CHANGELOG.md", encoding="utf-8").read(), sys.argv[1])
           if not (body or "").strip():
               sys.exit(f"CHANGELOG.md has no [{sys.argv[1]}] section")

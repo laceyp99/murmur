@@ -1,6 +1,9 @@
 """Exercise release metadata rules without accessing GitHub."""
 
 import importlib.util
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -9,6 +12,32 @@ SCRIPT = Path(__file__).resolve().parents[1] / ".github/scripts/release_check.py
 SPEC = importlib.util.spec_from_file_location("release_check", SCRIPT)
 release_check = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release_check)
+
+
+@pytest.mark.parametrize(
+    ("version", "exit_code"),
+    [("0.1.0", 0), ("0.2.0-beta", 1), ("0.2.0+build", 1)],
+)
+def test_release_workflow_validates_version_before_extracting_notes(version, exit_code):
+    root = SCRIPT.parents[2]
+    workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    # Run the workflow's actual Python notes step without creating a release.
+    notes_step = textwrap.dedent(
+        workflow.split("<<'PY'\n", 1)[1].split("          PY", 1)[0]
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", notes_step, version],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == exit_code
+    if exit_code:
+        assert "Windows exe version" in result.stderr
+        assert not result.stdout
+    else:
+        assert "Local Whisper dictation" in result.stdout
 
 
 @pytest.fixture
