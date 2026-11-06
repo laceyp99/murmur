@@ -18,8 +18,19 @@ SPEC.loader.exec_module(release_check)
     ("version", "exit_code"),
     [("0.1.0", 0), ("0.2.0-beta", 1), ("0.2.0+build", 1)],
 )
-def test_release_workflow_validates_version_before_extracting_notes(version, exit_code):
+def test_release_workflow_validates_version_before_extracting_notes(
+    tmp_path, version, exit_code
+):
     root = SCRIPT.parents[2]
+    scripts = tmp_path / ".github/scripts"
+    scripts.mkdir(parents=True)
+    (scripts / SCRIPT.name).write_text(
+        SCRIPT.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (tmp_path / "CHANGELOG.md").write_text(
+        f"## [{version}] - 2026-11-06\n\n- Fixture release notes.\n",
+        encoding="utf-8",
+    )
     workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
     # Run the workflow's actual Python notes step without creating a release.
     notes_step = textwrap.dedent(
@@ -27,7 +38,7 @@ def test_release_workflow_validates_version_before_extracting_notes(version, exi
     )
     result = subprocess.run(
         [sys.executable, "-c", notes_step, version],
-        cwd=root,
+        cwd=tmp_path,
         capture_output=True,
         text=True,
         check=False,
@@ -37,7 +48,7 @@ def test_release_workflow_validates_version_before_extracting_notes(version, exi
         assert "Windows exe version" in result.stderr
         assert not result.stdout
     else:
-        assert "Local Whisper dictation" in result.stdout
+        assert result.stdout.strip() == "- Fixture release notes."
 
 
 @pytest.fixture

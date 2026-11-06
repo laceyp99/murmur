@@ -179,46 +179,24 @@ def test_missing_or_invalid_source_version_is_unknown(
     assert build_info.get_build_info()["app_version"] is None
 
 
-def test_installed_version_uses_murmur_distribution(monkeypatch):
-    def version(name):
-        assert name == "murmur"
-        return "4.5.6"
+def test_missing_distribution_metadata_is_unknown_and_cached(tmp_path, monkeypatch):
+    monkeypatch.setattr(build_info, "__file__", str(tmp_path / "build_info.py"))
+    calls = []
 
-    monkeypatch.setattr(build_info.metadata, "version", version)
-    assert build_info._read_installed_version() == "4.5.6"
-
-
-def test_missing_distribution_metadata_is_unknown(monkeypatch):
     def missing(name):
+        calls.append(name)
         raise build_info.metadata.PackageNotFoundError(name)
 
     monkeypatch.setattr(build_info.metadata, "version", missing)
-    assert build_info._read_installed_version() is None
+    assert build_info.get_build_info()["app_version"] is None
+    assert build_info.get_build_info()["app_version"] is None
+    assert calls == ["murmur"]
 
 
 def test_missing_frozen_metadata_is_unknown(tmp_path, monkeypatch):
     monkeypatch.setattr(build_info, "__file__", str(tmp_path / "build_info.py"))
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     assert build_info.get_build_info()["app_version"] is None
-
-
-def test_installed_version_failure_is_unknown_and_cached(tmp_path, monkeypatch):
-    package = tmp_path / "src"
-    package.mkdir()
-    monkeypatch.setattr(build_info, "__file__", str(package / "build_info.py"))
-    calls = []
-
-    def missing():
-        calls.append(True)
-        return
-
-    monkeypatch.setattr(build_info, "_read_installed_version", missing)
-    assert build_info.get_build_info()["app_version"] is None
-    monkeypatch.setattr(
-        build_info, "_read_installed_version", lambda: pytest.fail("version re-read")
-    )
-    assert build_info.get_build_info()["app_version"] is None
-    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("commit", ["short", "", "a" * 64])
