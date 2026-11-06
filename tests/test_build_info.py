@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src import __version__, build_info
+from src import build_info
 
 COMMIT = "a" * 40
 
@@ -23,7 +23,9 @@ def source_package(tmp_path, monkeypatch):
     package = root / "src"
     package.mkdir(parents=True)
     (root / ".git").write_text("gitdir: elsewhere", encoding="utf-8")
-    (root / "pyproject.toml").write_text('[project]\nname = "murmur"', "utf-8")
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "murmur"\nversion = "2.3.4"', "utf-8"
+    )
     monkeypatch.setattr(build_info, "__file__", str(package / "build_info.py"))
     return package
 
@@ -50,7 +52,7 @@ def test_source_metadata_uses_package_root_and_bounded_git(
 
     monkeypatch.setattr(build_info.subprocess, "run", run)
     assert build_info.get_build_info() == {
-        "app_version": __version__,
+        "app_version": "2.3.4",
         "git_commit": COMMIT,
         "git_dirty": bool(status),
     }
@@ -73,7 +75,7 @@ def test_unavailable_git_stays_unknown_for_process(source_package, monkeypatch, 
         raise error
 
     monkeypatch.setattr(build_info.subprocess, "run", fail)
-    expected = {"app_version": __version__, "git_commit": None, "git_dirty": None}
+    expected = {"app_version": "2.3.4", "git_commit": None, "git_dirty": None}
     assert build_info.get_build_info() == expected
     assert build_info.get_build_info() == expected
     assert len(calls) == 1
@@ -127,10 +129,7 @@ def test_background_capture_freezes_launch_identity_without_blocking(
 
 
 @pytest.mark.parametrize("frozen", [False, True])
-@pytest.mark.parametrize("embedded", [False, True])
-def test_installed_and_frozen_never_query_checkout(
-    tmp_path, monkeypatch, frozen, embedded
-):
+def test_installed_and_frozen_never_query_checkout(tmp_path, monkeypatch, frozen):
     root = tmp_path / ("frozen" if frozen else "site-packages")
     package = root / "src"
     package.mkdir(parents=True)
@@ -143,8 +142,9 @@ def test_installed_and_frozen_never_query_checkout(
     monkeypatch.setattr(
         build_info, "_git", lambda *args: pytest.fail("installed build invoked Git")
     )
-    expected = {"app_version": __version__, "git_commit": None, "git_dirty": None}
-    if embedded:
+    monkeypatch.setattr(build_info, "_read_installed_version", lambda: "3.4.5")
+    expected = {"app_version": "3.4.5", "git_commit": None, "git_dirty": None}
+    if frozen:
         expected = {"app_version": "1.2.3", "git_commit": COMMIT, "git_dirty": True}
         (package / "_build_info.json").write_text(json.dumps(expected), "utf-8")
     assert build_info.get_build_info() == expected
@@ -158,15 +158,45 @@ def test_invalid_embedded_metadata_is_unknown(tmp_path, monkeypatch, content):
     package = tmp_path / "src"
     package.mkdir()
     monkeypatch.setattr(build_info, "__file__", str(package / "build_info.py"))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(
         build_info, "_git", lambda *args: pytest.fail("archive install invoked Git")
     )
     (package / "_build_info.json").write_text(content, "utf-8")
     assert build_info.get_build_info() == {
-        "app_version": __version__,
+        "app_version": None,
         "git_commit": None,
         "git_dirty": None,
     }
+
+
+@pytest.mark.parametrize("content", ['[project]\nname = "murmur"', "invalid toml"])
+def test_missing_or_invalid_source_version_is_unknown(
+    source_package, monkeypatch, content
+):
+    (source_package.parent / "pyproject.toml").write_text(content, "utf-8")
+    monkeypatch.setattr(build_info, "_read_git_info", lambda root: {})
+    assert build_info.get_build_info()["app_version"] is None
+
+
+def test_missing_distribution_metadata_is_unknown_and_cached(tmp_path, monkeypatch):
+    monkeypatch.setattr(build_info, "__file__", str(tmp_path / "build_info.py"))
+    calls = []
+
+    def missing(name):
+        calls.append(name)
+        raise build_info.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(build_info.metadata, "version", missing)
+    assert build_info.get_build_info()["app_version"] is None
+    assert build_info.get_build_info()["app_version"] is None
+    assert calls == ["murmur"]
+
+
+def test_missing_frozen_metadata_is_unknown(tmp_path, monkeypatch):
+    monkeypatch.setattr(build_info, "__file__", str(tmp_path / "build_info.py"))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert build_info.get_build_info()["app_version"] is None
 
 
 @pytest.mark.parametrize("commit", ["short", "", "a" * 64])
@@ -198,7 +228,7 @@ def test_status_failure_keeps_revision_with_unknown_dirty(source_package, monkey
 
     monkeypatch.setattr(build_info, "_git", git)
     assert build_info.get_build_info() == {
-        "app_version": __version__,
+        "app_version": "2.3.4",
         "git_commit": COMMIT,
         "git_dirty": None,
     }

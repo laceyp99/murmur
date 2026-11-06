@@ -270,8 +270,9 @@ App version, full Git commit, and whether uncommitted changes were present
 identify each run. Source identity is frozen at startup, using the running
 package's repository rather than the current shell directory. Restart after
 editing or changing commits for useful comparisons. Windows builds embed their
-identity during build preparation. Plain wheels without embedded metadata and
-unavailable Git information report unknown values rather than guessing.
+identity during build preparation. Installed wheels report their package version;
+their commit and dirty state remain unknown. Any unavailable source or frozen
+build identity values also remain unknown rather than being guessed.
 
 **Save** applies a collection toggle to the next session. A session already
 collecting finishes normally; enabling does not enroll an active session midway.

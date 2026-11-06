@@ -1,8 +1,8 @@
 """Resolve checkout identity once at startup and reuse it for session statistics.
 
 Source identity describes the checkout at launch. Restart after editing or
-changing commits to keep comparisons meaningful. Installed builds only trust
-embedded metadata, never a checkout found through the working directory.
+changing commits to keep comparisons meaningful. Frozen builds trust embedded
+metadata; installed wheels use distribution metadata, never the working directory.
 """
 
 import json
@@ -10,9 +10,9 @@ import re
 import subprocess
 import sys
 import threading
+import tomllib
+from importlib import metadata
 from pathlib import Path
-
-from src import __version__
 
 _BUILD_INFO_FILENAME = "_build_info.json"
 _GIT_TIMEOUT_SECONDS = 2
@@ -78,8 +78,8 @@ def _read_embedded_info(package_dir: Path) -> dict:
     commit = data.get("git_commit")
     return {
         "app_version": data.get("app_version")
-        if isinstance(data.get("app_version"), str) and data["app_version"]
-        else __version__,
+        if isinstance(data.get("app_version"), str) and data["app_version"].strip()
+        else None,
         "git_commit": commit
         if isinstance(commit, str)
         and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit)
@@ -88,6 +88,27 @@ def _read_embedded_info(package_dir: Path) -> dict:
         if isinstance(data.get("git_dirty"), bool)
         else None,
     }
+
+
+def _read_source_version(repo_root: Path) -> str | None:
+    try:
+        with (repo_root / "pyproject.toml").open("rb") as project_file:
+            project = tomllib.load(project_file).get("project")
+        version = project.get("version") if isinstance(project, dict) else None
+        if isinstance(version, str):
+            return version.strip() or None
+        return None
+    except (OSError, ValueError):
+        return None
+
+
+def _read_installed_version() -> str | None:
+    try:
+        version = metadata.version("murmur")
+        return version.strip() or None
+    except Exception:
+        # Broken or absent distribution metadata must not block startup.
+        return None
 
 
 def capture_build_info_in_background() -> None:
@@ -114,10 +135,13 @@ def get_build_info() -> dict:
     with _build_info_lock:
         if _build_info is None:
             package_dir = Path(__file__).resolve().parent
-            info = {"app_version": __version__, "git_commit": None, "git_dirty": None}
-            if (root := _source_root(package_dir)) is not None:
+            info = {"app_version": None, "git_commit": None, "git_dirty": None}
+            if getattr(sys, "frozen", False):
+                info.update(_read_embedded_info(package_dir))
+            elif (root := _source_root(package_dir)) is not None:
+                info["app_version"] = _read_source_version(root)
                 info.update(_read_git_info(root))
             else:
-                info.update(_read_embedded_info(package_dir))
+                info["app_version"] = _read_installed_version()
             _build_info = info
         return _build_info.copy()
