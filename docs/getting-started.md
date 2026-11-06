@@ -97,6 +97,34 @@ logo is included at `src/resources/icon.png`. Python-mode **Start with Windows**
 uses the installed environment's `pythonw.exe -m src`; the frozen release uses
 its executable. Source development autostart requires the editable install above.
 
+## Releases
+
+Change `project.version` in `pyproject.toml` to a version greater than the base
+branch. Use `X.Y.Z` or `X.Y.Z.W` integers, each at most 65535, so the same version
+works in Windows exe resources. Pre-release suffixes such as `-beta` and build
+suffixes such as `+build` are rejected.
+
+Add a matching `## [x.y.z] - YYYY-MM-DD` section in `CHANGELOG.md` with a valid
+date and user-facing notes under headings such as `### Added` or `### Fixed`.
+Keep the empty `## [Unreleased]` section at the top. The PR release check requires
+both the version bump and matching notes, except for the `skip-release` label or
+Conventional Commit title types `test`, `ci`, `docs`, `style`, and `chore`.
+
+On each merge to `main`, the release workflow reads `project.version`. If its
+`v<version>` tag does not exist, it creates the tag and a GitHub Release using
+that version's changelog section as the release notes. Existing tags are skipped.
+This job publishes notes only; Windows builds and packaging remain local.
+The initial automation merge also publishes the baseline release if untagged.
+
+```mermaid
+flowchart LR
+    PR[Version bump and changelog] --> Check[PR release check]
+    Check --> Main[Merge to main]
+    Main --> Tag{Version tag exists?}
+    Tag -->|No| Release[Tag and GitHub Release]
+    Tag -->|Yes| Skip[Skip]
+```
+
 ## Build a packaged release
 
 The packaged release keeps the Python source workflow above unchanged while

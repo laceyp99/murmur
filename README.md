@@ -69,6 +69,8 @@ folder. For manual per-user use, extract it to
 release](docs/getting-started.md#build-a-packaged-release) for requirements and
 repeat-build instructions.
 
+See [Releases](docs/getting-started.md#releases) for version bumps and release notes.
+
 ## Development
 
 Run the project checks from the repository virtual environment:

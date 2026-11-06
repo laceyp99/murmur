@@ -12,12 +12,18 @@ from PIL import Image
 import src
 from src.assets import get_app_icon_path, get_logo_path
 from src.autostart import _get_launch_command
+from src.build_info import get_build_info
 
 
 def main() -> None:
     """Verify the installed wheel without starting the real desktop runtime."""
     assert Path(src.__file__).is_relative_to(sys.prefix), src.__file__
     assert not Path("run.py").exists()
+    assert get_build_info() == {
+        "app_version": distribution("murmur").version,
+        "git_commit": None,
+        "git_dirty": None,
+    }
     logo = get_logo_path()
     assert logo is not None
     assert logo.is_relative_to(sys.prefix), logo

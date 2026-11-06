@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Validate pull-request release metadata.
+
+A non-skip pull request must:
+
+1. declare a Windows-compatible numeric version in ``pyproject.toml``,
+2. bump that version above the version on the base branch, and
+3. add a non-empty ``[x.y.z] - YYYY-MM-DD`` section to ``CHANGELOG.md`` matching
+   the new version. The release workflow publishes that section as release notes.
+
+Pull requests are skipped when they carry the ``skip-release`` label or use a
+Conventional Commit title whose type is test, ci, docs, style, or chore. The
+script is intentionally stdlib-only so CI can run it without environment setup.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import tomllib
+from datetime import date
+from pathlib import Path
+from typing import NoReturn
+
+CHANGELOG_PATH = "CHANGELOG.md"
+PYPROJECT_PATH = "pyproject.toml"
+
+SKIP_LABEL = "skip-release"
+SKIP_TYPES = {"test", "ci", "docs", "style", "chore"}
+
+CONVENTIONAL_TITLE = re.compile(r"^(?P<type>[a-z]+)(?:\([^)]+\))?!?: ")
+
+# Match tools/prepare_windows_build.py:_windows_version without build dependencies.
+WINDOWS_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?")
+VERSION_REQUIREMENT = (
+    "must be X.Y.Z or X.Y.Z.W integers, each at most 65535; "
+    "pre-release and build suffixes are not supported by the Windows exe version."
+)
+
+# A Keep a Changelog version heading, e.g. "## [0.6.0] - 2026-09-11".
+HEADING = re.compile(r"^##\s+\[(?P<version>[^\]]+)\](?:\s*-\s*(?P<date>.+))?\s*$")
+
+
+def fail(message: str) -> NoReturn:
+    print(f"release-check: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def git(*args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        fail(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+    return result.stdout
+
+
+def declared_version(raw: str, source: str) -> str:
+    try:
+        data = tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as error:
+        fail(f"could not parse {source}: {error}")
+    try:
+        return str(data["project"]["version"])
+    except KeyError:
+        fail(f"{source} does not declare project.version")
+
+
+def is_skipped() -> str | None:
+    labels = json.loads(os.environ.get("PR_LABELS", "[]"))
+    if SKIP_LABEL in labels:
+        return f"the {SKIP_LABEL!r} label is present"
+
+    title = os.environ.get("PR_TITLE", "")
+    match = CONVENTIONAL_TITLE.match(title)
+    if match and match.group("type") in SKIP_TYPES:
+        return f"the PR title type {match.group('type')!r} does not affect releases"
+    return None
+
+
+def parse_version(version: str) -> tuple[int, ...] | None:
+    if WINDOWS_VERSION.fullmatch(version) is None:
+        return None
+    parts = tuple(int(part) for part in version.split("."))
+    if any(part > 65535 for part in parts):
+        return None
+    return (*parts, 0) if len(parts) == 3 else parts
+
+
+def greater_than(left: str, right: str) -> bool:
+    left_key = parse_version(left)
+    right_key = parse_version(right)
+    if left_key is None or right_key is None:
+        return False
+
+    return left_key > right_key
+
+
+def sections(text: str) -> list[tuple[str, int]]:
+    """Return (version, start index) for each version heading."""
+    found = []
+    for index, line in enumerate(text.splitlines()):
+        match = HEADING.match(line)
+        if match:
+            found.append((match.group("version"), index))
+    return found
+
+
+def section_body(text: str, version: str) -> str | None:
+    """Return the selected release's notes, rejecting an invalid heading date."""
+    lines = text.splitlines()
+    found = sections(text)
+    for position, (label, start) in enumerate(found):
+        if label != version:
+            continue
+        match = HEADING.fullmatch(lines[start])
+        heading_date = (match.group("date") or "").strip()
+        try:
+            if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", heading_date):
+                raise ValueError("expected YYYY-MM-DD")
+            date.fromisoformat(heading_date)
+        except ValueError:
+            fail(f"{CHANGELOG_PATH} [{version}] heading needs a valid YYYY-MM-DD date.")
+        end = found[position + 1][1] if position + 1 < len(found) else len(lines)
+        return "\n".join(lines[start + 1 : end])
+    return None
+
+
+def entry_lines(body: str) -> list[str]:
+    """Return non-empty lines after removing hidden HTML comment blocks."""
+    body = re.sub(r"<!--.*?(?:-->|$)", "", body, flags=re.DOTALL)
+    return [line.strip() for line in body.splitlines() if line.strip()]
+
+
+def changelog_was_handled(new_version: str) -> None:
+    if not Path(CHANGELOG_PATH).exists():
+        fail(f"{CHANGELOG_PATH} does not exist")
+
+    text = Path(CHANGELOG_PATH).read_text(encoding="utf-8")
+    # Subheadings like "### Added" and HTML comments are outline, not notes.
+    entries = [
+        line
+        for line in entry_lines(section_body(text, new_version) or "")
+        if not line.startswith("#")
+    ]
+    if not entries:
+        fail(
+            f"{CHANGELOG_PATH} needs a [{new_version}] section with user-facing "
+            "entries. Merging publishes that section as the release notes."
+        )
+
+    print(
+        f"release-check: {CHANGELOG_PATH} has a [{new_version}] section "
+        "matching pyproject.toml."
+    )
+
+
+def main() -> None:
+    skipped_reason = is_skipped()
+    if skipped_reason is not None:
+        print(f"release-check: skipped because {skipped_reason}.")
+        return
+
+    base_ref = os.environ.get("BASE_REF", "main")
+    new_version = declared_version(
+        Path(PYPROJECT_PATH).read_text(encoding="utf-8"), PYPROJECT_PATH
+    )
+    if parse_version(new_version) is None:
+        fail(f"pyproject.toml version {new_version!r} {VERSION_REQUIREMENT}")
+
+    base_version = declared_version(
+        git("show", f"origin/{base_ref}:{PYPROJECT_PATH}"),
+        f"origin/{base_ref}:{PYPROJECT_PATH}",
+    )
+    if parse_version(base_version) is None:
+        fail(f"the {base_version!r} version on {base_ref} {VERSION_REQUIREMENT}")
+    if not greater_than(new_version, base_version):
+        fail(
+            f"pyproject.toml version {new_version!r} must be greater than the "
+            f"{base_version!r} version on {base_ref}."
+        )
+
+    changelog_was_handled(new_version)
+    print(
+        f"release-check: version {base_version} -> {new_version} and "
+        f"{CHANGELOG_PATH} are consistent."
+    )
+
+
+if __name__ == "__main__":
+    main()
