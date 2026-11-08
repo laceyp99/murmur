@@ -52,7 +52,9 @@ choose it, the update installs the next time murmur starts.
 Updates and uninstall replace only the application folder. Settings, statistics,
 vocabulary, and opted-in training data in `%APPDATA%\murmur` are kept. Uninstall
 also removes this install's **Start with Windows** entry. Source checkouts and
-manually copied builds show the button as unavailable.
+manually copied builds show the button as unavailable, and their console shows
+a harmless `VelopackApp: Error loading manager/locator: NotInstalled` line at
+startup.
 
 ## Install from source
 
