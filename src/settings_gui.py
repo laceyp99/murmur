@@ -18,8 +18,10 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 from PIL import Image
 
+from . import updater
 from .assets import get_app_icon_path, get_logo_path
 from .autostart import is_autostart_enabled, set_autostart
+from .build_info import get_build_info
 from .config import ConfigError, get_config, get_training_data_dir
 from .hotkey import is_hotkey_valid
 from .input_devices import (
@@ -226,6 +228,27 @@ def _statistics_view(summary) -> StatisticsView:
     return StatisticsView(
         tuple(notices), None, tiles, tuple(sections), tuple(footnotes)
     )
+
+
+_UPDATE_BUTTON_TEXT = "↻ Check for updates"
+_UPDATE_STATUS = {
+    updater.UpdateState.UNAVAILABLE: "Updates require the installed version",
+    updater.UpdateState.IDLE: "",
+    updater.UpdateState.CHECKING: "Checking for updates…",
+    updater.UpdateState.UP_TO_DATE: "Up to date",
+    updater.UpdateState.READY: "Update ready: use Restart to update in the tray",
+    updater.UpdateState.FAILED: "Couldn't check for updates. Try again later.",
+}
+
+
+def _update_view(state):
+    """Return (button enabled, status text) for an updater state."""
+    enabled = state in (
+        updater.UpdateState.IDLE,
+        updater.UpdateState.UP_TO_DATE,
+        updater.UpdateState.FAILED,
+    )
+    return enabled, _UPDATE_STATUS[state]
 
 
 def _format_bytes(size_bytes):
@@ -792,6 +815,8 @@ class SettingsWindow:
         self._ollama_test_button = None
         self._ollama_test_in_progress = False
         self._ollama_test_token = None
+        self._update_button = None
+        self._update_status_label = None
         self._statistics_results = queue.Queue()
         self._statistics_token = None
 
@@ -829,6 +854,7 @@ class SettingsWindow:
             text=_SETTINGS_TITLE,
             font=ctk.CTkFont(size=24, weight="bold"),
         ).grid(row=0, column=1, sticky="w")
+        self._add_update_controls(header)
 
         if self._startup_notice:
             self._add_startup_notice(row=1)
@@ -1477,6 +1503,41 @@ class SettingsWindow:
             _ollama_connection_test_results.put((test_window_ref, test_token, result))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _add_update_controls(self, header):
+        """Show the running version and a manual update check on every tab."""
+        controls = ctk.CTkFrame(header, fg_color="transparent")
+        controls.grid(row=0, column=2, sticky="e")
+        version = get_build_info().get("app_version")
+        if version:
+            ctk.CTkLabel(controls, text=f"v{version} ·").grid(
+                row=0, column=0, padx=(0, 6)
+            )
+        self._update_button = ctk.CTkButton(
+            controls, text=_UPDATE_BUTTON_TEXT, command=self._check_for_updates
+        )
+        self._update_button.grid(row=0, column=1)
+        self._update_status_label = ctk.CTkLabel(
+            controls, text="", font=ctk.CTkFont(size=12), text_color="gray"
+        )
+        self._update_status_label.grid(row=1, column=0, columnspan=2, sticky="e")
+        self._render_update_state()
+
+    def _check_for_updates(self):
+        updater.start_check()
+        self._render_update_state()
+
+    def _render_update_state(self):
+        """Mirror the updater state, polling while a check is in progress."""
+        if getattr(self, "_closed", False) or self._update_button is None:
+            return
+        state = updater.get_state()
+        enabled, status = _update_view(state)
+        self._update_button.configure(state="normal" if enabled else "disabled")
+        self._update_status_label.configure(text=status)
+        if state is updater.UpdateState.CHECKING:
+            with contextlib.suppress(tk.TclError):
+                self.root.after(250, self._render_update_state)
 
     def _setup_statistics(self, parent):
         self._add_switch(

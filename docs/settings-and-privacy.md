@@ -348,6 +348,11 @@ cleanup leaves the local computer. The Ollama cleanup result is accepted only
 when it remains transcript-like; otherwise murmur keeps the locally cleaned
 text.
 
+Installed copies contact GitHub only when **Check for updates** is clicked. The
+request names this repository's public releases and carries no token, settings,
+statistics, audio, or transcript data. See
+[Updates](getting-started.md#updates).
+
 ## Source map
 
 - [`src/settings_gui.py`](https://github.com/laceyp99/murmur/blob/main/src/settings_gui.py): UI thread, validation, save,

@@ -44,8 +44,15 @@ Then open [http://127.0.0.1:8000/](http://127.0.0.1:8000/).
 
 ## Quick Start
 
-murmur supports Windows 10/11 and Python 3.12. A microphone is required; an
-NVIDIA GPU and Ollama are optional.
+murmur supports Windows 10/11. A microphone is required; an NVIDIA GPU and
+Ollama are optional.
+
+To install, run `murmur-win-Setup.exe` from the
+[latest release](https://github.com/laceyp99/murmur/releases/latest). Installed
+copies update from **Settings > Check for updates**. See
+[Install the packaged app](docs/getting-started.md#install-the-packaged-app).
+
+To run from source with Python 3.12:
 
 ```powershell
 py -3.12 -m venv venv
@@ -62,12 +69,9 @@ To build the standalone Windows application folder with PyInstaller:
 powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
 ```
 
-The validated output is written to `dist\murmur\`. Distribute the complete
-folder. For manual per-user use, extract it to
-`%LOCALAPPDATA%\Programs\murmur` and optionally create a Desktop shortcut to
-`murmur.exe`. Keep the application files together. See [Build a packaged
-release](docs/getting-started.md#build-a-packaged-release) for requirements and
-repeat-build instructions.
+The validated output is written to `dist\murmur\` for local testing. See
+[Build a packaged release](docs/getting-started.md#build-a-packaged-release) for
+requirements and repeat-build instructions.
 
 See [Releases](docs/getting-started.md#releases) for version bumps and release notes.
 

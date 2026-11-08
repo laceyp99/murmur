@@ -7,6 +7,7 @@ import threading
 
 from PIL import Image
 
+from . import updater
 from .assets import get_logo_path
 from .config import get_config
 
@@ -21,11 +22,15 @@ class TrayManager:
         on_exit_callback=None,
         on_cancel_callback=None,
         get_cancel_session_callback=None,
+        on_update_callback=None,
+        can_update_callback=None,
     ):
         self.config = get_config()
         self.on_exit_callback = on_exit_callback
         self.on_cancel_callback = on_cancel_callback
         self.get_cancel_session_callback = get_cancel_session_callback
+        self.on_update_callback = on_update_callback
+        self.can_update_callback = can_update_callback
         self.icon = None
         self._status_text = "Ready"
         self._settings_lock = threading.Lock()
@@ -48,6 +53,10 @@ class TrayManager:
     def set_status(self, status: str):
         """Update the status text in the tray menu."""
         self._status_text = status
+        self.refresh_menu()
+
+    def refresh_menu(self):
+        """Re-evaluate menu labels and item states, e.g. after an update downloads."""
         if self.icon:
             self.icon.update_menu()
 
@@ -63,6 +72,28 @@ class TrayManager:
         if self.on_exit_callback:
             self.on_exit_callback()
         icon.stop()
+
+    def _has_update(self, item=None):
+        return self.on_update_callback is not None and (
+            updater.pending_update() is not None
+        )
+
+    def _can_update(self, item=None):
+        try:
+            return bool(self.can_update_callback and self.can_update_callback())
+        except Exception as exc:
+            print(f"Tray update status unavailable ({type(exc).__name__}).")
+            return False
+
+    def _on_update(self, icon, item):
+        """Restart into the downloaded release; murmur keeps running if refused."""
+        try:
+            restarting = self.on_update_callback()
+        except Exception as exc:
+            print(f"Tray update failed ({type(exc).__name__}).", file=sys.stderr)
+            return
+        if restarting:
+            icon.stop()
 
     def _can_cancel(self, item=None):
         try:
@@ -117,6 +148,12 @@ class TrayManager:
                 ),
                 pystray.Menu.SEPARATOR,
                 MenuItem("Cancel dictation", self._on_cancel, enabled=self._can_cancel),
+                MenuItem(
+                    "Restart to update",
+                    self._on_update,
+                    enabled=self._can_update,
+                    visible=self._has_update,
+                ),
                 MenuItem("Settings", self._on_settings),
                 MenuItem("Exit", self._on_exit),
             )

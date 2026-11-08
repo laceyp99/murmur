@@ -3,6 +3,8 @@ import importlib
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from src.tray import TrayManager
 
 
@@ -168,3 +170,25 @@ def test_tray_cancel_captures_session_before_background_dispatch(monkeypatch):
     session[0] = None
     tray._on_cancel()
     assert len(threads) == 1
+
+
+@pytest.mark.parametrize("restarting", [True, False])
+def test_restart_to_update_stops_tray_only_when_restart_begins(restarting):
+    stopped = []
+    tray = TrayManager(on_update_callback=lambda: restarting)
+
+    tray._on_update(SimpleNamespace(stop=lambda: stopped.append(True)), None)
+
+    assert stopped == ([True] if restarting else [])
+
+
+def test_restart_to_update_is_hidden_until_a_release_downloads(monkeypatch):
+    from src import tray as tray_module
+
+    pending = [None]
+    monkeypatch.setattr(tray_module.updater, "pending_update", lambda: pending[0])
+    tray = TrayManager(on_update_callback=lambda: True)
+
+    assert tray._has_update() is False
+    pending[0] = object()
+    assert tray._has_update() is True

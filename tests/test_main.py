@@ -2957,3 +2957,51 @@ def test_statistics_failure_does_not_prevent_clipboard_delivery(monkeypatch):
     )
     assert deliveries == ["delivered"]
     assert app.notifications.copied_to_clipboard == 1
+
+
+def make_update_app(monkeypatch, schedule_error=None):
+    """Build an idle app with a downloaded release and record the restart path."""
+    events = []
+    app = MurmurApp.__new__(MurmurApp)
+    app._shutdown_event = threading.Event()
+    app.hotkey_manager = HotkeyManager()
+    app.stop = lambda: events.append("stop")
+    release = object()
+    monkeypatch.setattr(main_module.updater, "pending_update", lambda: release)
+
+    def schedule(info):
+        events.append(("schedule", info is release))
+        if schedule_error is not None:
+            raise schedule_error
+
+    monkeypatch.setattr(main_module.updater, "schedule_update", schedule)
+    return app, events
+
+
+def test_restart_to_update_refuses_during_a_session(monkeypatch):
+    app, events = make_update_app(monkeypatch)
+    app.hotkey_manager._on_hotkey_pressed()
+
+    assert app._can_restart_to_update() is False
+    assert app._restart_to_update() is False
+    assert events == []
+
+
+def test_restart_to_update_blocks_hotkey_then_shuts_down(monkeypatch):
+    app, events = make_update_app(monkeypatch)
+
+    assert app._can_restart_to_update() is True
+    assert app._restart_to_update() is True
+    assert events == [("schedule", True), "stop"]
+    app.hotkey_manager._on_hotkey_pressed()
+    assert app.hotkey_manager.get_state() is HotkeyState.IDLE
+
+
+def test_failed_update_handoff_keeps_dictation_available(monkeypatch, capsys):
+    app, events = make_update_app(monkeypatch, schedule_error=OSError("locked"))
+
+    assert app._restart_to_update() is False
+    assert events == [("schedule", True)]
+    assert "locked" not in capsys.readouterr().out
+    app.hotkey_manager._on_hotkey_pressed()
+    assert app.hotkey_manager.get_state() is HotkeyState.RECORDING

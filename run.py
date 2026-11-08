@@ -15,8 +15,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from src.launch import ensure_output_streams as _ensure_output_streams
 
 
+def _before_uninstall(_version: str) -> None:
+    """Drop this install's Start with Windows entry before Velopack removes it."""
+    from src.autostart import remove_autostart_for_this_install
+
+    remove_autostart_for_this_install()
+
+
 def _run_app() -> None:
     """Import and start the desktop runtime after handling build-only commands."""
+    import velopack
+
+    # Must run first: Velopack install, update, and uninstall launches may exit here.
+    velopack.App().on_before_uninstall_fast_callback(_before_uninstall).run()
+
     from src.build_info import capture_build_info_in_background
 
     capture_build_info_in_background()

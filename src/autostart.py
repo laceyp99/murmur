@@ -73,3 +73,25 @@ def is_autostart_enabled() -> bool:
         return True
     except FileNotFoundError:
         return False
+
+
+def remove_autostart_for_this_install() -> None:
+    """Remove auto-start only when it launches this executable.
+
+    Velopack runs this before uninstall so Windows does not try to start a
+    deleted executable at login, while entries owned by other murmur copies stay.
+    """
+    if winreg is None:
+        return
+
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ
+        ) as key:
+            command, _ = winreg.QueryValueEx(key, "murmur")
+    except FileNotFoundError:
+        return
+    if command == _get_launch_command():
+        set_autostart(False)

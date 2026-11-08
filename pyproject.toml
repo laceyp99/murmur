@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "murmur"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local speech-to-text hotkey app"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,6 +20,8 @@ dependencies = [
     "customtkinter>=5.2.2",
     "pystray>=0.19.5",
     "Pillow>=10.0.0",
+    # Keep in step with the vpk CLI version used to pack releases.
+    "velopack==1.2.161",
     'setuptools<82; platform_system == "Windows"',
     'win10toast>=0.9; platform_system == "Windows"',
     'winrt-runtime>=3.0.0; platform_system == "Windows"',

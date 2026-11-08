@@ -1466,3 +1466,41 @@ def test_purge_training_data_confirms_count_and_size(monkeypatch):
     assert confirm_calls[0][1] == {"parent": window.root}
     assert len(info_calls) == 1
     assert info_calls[0][1] == {"parent": window.root}
+
+
+@pytest.mark.parametrize(
+    ("state", "enabled", "status", "polls"),
+    [
+        (
+            settings_module.updater.UpdateState.UNAVAILABLE,
+            "disabled",
+            "Updates require the installed version",
+            0,
+        ),
+        (settings_module.updater.UpdateState.CHECKING, "disabled", None, 1),
+        (settings_module.updater.UpdateState.FAILED, "normal", None, 0),
+    ],
+)
+def test_update_controls_mirror_updater_state(
+    monkeypatch, state, enabled, status, polls
+):
+    class FakeWidget:
+        def __init__(self):
+            self.options = {}
+
+        def configure(self, **kwargs):
+            self.options.update(kwargs)
+
+    after_calls = []
+    monkeypatch.setattr(settings_module.updater, "get_state", lambda: state)
+    window = settings_module.SettingsWindow.__new__(settings_module.SettingsWindow)
+    window.root = SimpleNamespace(after=lambda *args: after_calls.append(args))
+    window._update_button = FakeWidget()
+    window._update_status_label = FakeWidget()
+
+    window._render_update_state()
+
+    assert window._update_button.options == {"state": enabled}
+    if status is not None:
+        assert window._update_status_label.options == {"text": status}
+    assert len(after_calls) == polls
