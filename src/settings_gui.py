@@ -236,8 +236,8 @@ _UPDATE_STATUS = {
     updater.UpdateState.IDLE: "",
     updater.UpdateState.CHECKING: "Checking for updates…",
     updater.UpdateState.UP_TO_DATE: "Up to date",
-    updater.UpdateState.READY: "Update ready: use Restart to update in the tray",
-    updater.UpdateState.FAILED: "Couldn't check for updates. Try again later.",
+    updater.UpdateState.READY: "Update ready: restart from the tray",
+    updater.UpdateState.FAILED: "Couldn't check for updates",
 }
 
 
@@ -1505,22 +1505,22 @@ class SettingsWindow:
         threading.Thread(target=run, daemon=True).start()
 
     def _add_update_controls(self, header):
-        """Show the running version and a manual update check on every tab."""
+        """Show update status, the running version, and a manual update check on one row."""
         controls = ctk.CTkFrame(header, fg_color="transparent")
         controls.grid(row=0, column=2, sticky="e")
+        self._update_status_label = ctk.CTkLabel(
+            controls, text="", font=ctk.CTkFont(size=12), text_color="gray"
+        )
+        self._update_status_label.grid(row=0, column=0, padx=(0, 10))
         version = get_build_info().get("app_version")
         if version:
             ctk.CTkLabel(controls, text=f"v{version} ·").grid(
-                row=0, column=0, padx=(0, 6)
+                row=0, column=1, padx=(0, 6)
             )
         self._update_button = ctk.CTkButton(
             controls, text=_UPDATE_BUTTON_TEXT, command=self._check_for_updates
         )
-        self._update_button.grid(row=0, column=1)
-        self._update_status_label = ctk.CTkLabel(
-            controls, text="", font=ctk.CTkFont(size=12), text_color="gray"
-        )
-        self._update_status_label.grid(row=1, column=0, columnspan=2, sticky="e")
+        self._update_button.grid(row=0, column=2)
         self._render_update_state()
 
     def _check_for_updates(self):
