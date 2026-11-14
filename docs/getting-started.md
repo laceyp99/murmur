@@ -11,7 +11,7 @@ the full recording remains available as a fallback.
 | Requirement | Purpose | Required? |
 | --- | --- | --- |
 | Windows 10 or 11 | Global hotkeys, tray integration, and Windows media/notification features | Yes |
-| Python 3.12 | Supported runtime | Yes |
+| Python 3.12 | Supported runtime for source installs | Source installs only |
 | Microphone | Audio capture through `sounddevice` | Yes |
 | NVIDIA GPU and CUDA-enabled PyTorch | Faster Whisper inference | Optional; CPU fallback is supported |
 | Ollama server and configured model | Final punctuation/correction pass | Optional; local cleanup remains available |
@@ -21,7 +21,42 @@ Python packages and downloading a Whisper model may require internet access.
 Ollama defaults to `http://localhost:11434`; configuring a remote Ollama
 endpoint sends the final transcript to that endpoint.
 
-## Install
+## Install the packaged app
+
+Download `murmur-win-Setup.exe` from the
+[latest GitHub Release](https://github.com/laceyp99/murmur/releases/latest) and
+run it. Setup installs murmur for the current user in `%LOCALAPPDATA%\murmur`
+without administrator rights and adds Desktop and Start Menu shortcuts. Setup is
+not code signed, so Windows SmartScreen may ask for confirmation the first time
+(**More info > Run anyway**).
+
+Packaged releases use CPU-only PyTorch and need no separate Python or FFmpeg
+installation. The first launch can download the configured Whisper model if it
+is not already in the user's cache. The rest of this page covers running from
+source for development.
+
+### Updates
+
+Installed copies update from GitHub Releases. The settings window header shows
+the running version and **Check for updates** on every tab. murmur checks only
+when you click it. The check and download run in the background and never block
+dictation; if the check fails, for example while offline, murmur reports it and
+keeps the current version. The check contacts only this repository's public
+GitHub Releases, without a token or any user data.
+
+When a release finishes downloading, the tray menu shows **Restart to update**.
+It is unavailable while recording or transcribing. Choosing it stops the hotkey,
+shuts murmur down normally, installs the update, and relaunches. If you never
+choose it, the update installs the next time murmur starts.
+
+Updates and uninstall replace only the application folder. Settings, statistics,
+vocabulary, and opted-in training data in `%APPDATA%\murmur` are kept. Uninstall
+also removes this install's **Start with Windows** entry. Source checkouts and
+manually copied builds show the button as unavailable, and their console shows
+a harmless `VelopackApp: Error loading manager/locator: NotInstalled` line at
+startup.
+
+## Install from source
 
 Run these commands from a PowerShell window in the repository root:
 
@@ -111,19 +146,30 @@ both the version bump and matching notes, except for the `skip-release` label or
 Conventional Commit title types `test`, `ci`, `docs`, `style`, and `chore`.
 
 On each merge to `main`, the release workflow reads `project.version`. If its
-`v<version>` tag does not exist, it creates the tag and a GitHub Release using
-that version's changelog section as the release notes. Existing tags are skipped.
-This job publishes notes only; Windows builds and packaging remain local.
-The initial automation merge also publishes the baseline release if untagged.
+`v<version>` tag does not exist, it builds the Windows app with CPU-only Torch,
+packs it with Velopack's `vpk` CLI, and publishes a GitHub Release. The release
+carries the Setup installer, the full update package, a delta update from the
+previous release, and that version's changelog section as notes. Existing tags
+are skipped. A failed build publishes nothing, so the next push to `main`
+retries. The workflow installs the `vpk` version matching the `velopack==` pin in
+`pyproject.toml`, so upgrading Velopack is a single pin change.
 
 ```mermaid
 flowchart LR
     PR[Version bump and changelog] --> Check[PR release check]
     Check --> Main[Merge to main]
     Main --> Tag{Version tag exists?}
-    Tag -->|No| Release[Tag and GitHub Release]
     Tag -->|Yes| Skip[Skip]
+    Tag -->|No| Build[Build and self-check]
+    Build --> Pack[vpk pack with delta]
+    Pack --> Release[Tag and GitHub Release]
 ```
+
+TODO(GPU builds): CUDA builds exceed GitHub's 2 GiB release asset limit and need
+another host, such as Cloudflare R2, read through Velopack's `HttpSource`. Unlike
+`GithubSource`, `HttpSource` adds a random per-install ID (`stagingId`) to every
+update check. Decide how to avoid sending it before adding a GPU feed. Tracked
+in [#101](https://github.com/laceyp99/murmur/issues/101).
 
 ## Build a packaged release
 
@@ -140,23 +186,11 @@ Windows icon and version resources, builds murmur, and runs a packaged dependenc
 self-check. The first build can take several minutes because Whisper, Torch, and
 their native libraries are analyzed.
 
-The release is written to `dist\murmur\`. Keep that directory together when
-copying or distributing the application. For a manual per-user installation,
-copy or extract the complete folder to:
-
-```text
-%LOCALAPPDATA%\Programs\murmur
-```
-
-Launch `murmur.exe` from that folder. Do not move the executable out of the
-folder or distribute it by itself. An optional Desktop shortcut can point to
-`murmur.exe` while leaving the application files together. The **Start with
-Windows** setting in murmur controls automatic launch and does not require a
-Desktop or Start Menu shortcut.
-
-End users do not need a separate Python or FFmpeg installation. The first
-launch can download the configured Whisper model if it is not already in the
-user's cache.
+The build is written to `dist\murmur\`. Keep that directory together and
+launch `murmur.exe` from it for local testing; do not move the executable out of
+the folder. For daily use, install from a GitHub Release instead (see
+[Install the packaged app](#install-the-packaged-app)), because only installed
+copies can update.
 
 For repeat local builds after dependencies are installed, skip the install step:
 

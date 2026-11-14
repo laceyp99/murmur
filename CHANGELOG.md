@@ -7,6 +7,20 @@ Release versions are declared in `pyproject.toml`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-07
+
+### Added
+
+- Windows installer published with each GitHub Release. Installed copies check
+  for updates from the settings window header and apply them through
+  **Restart to update** in the tray, which stays unavailable during dictation.
+- Release builds include small delta updates from the previous version.
+
+### Changed
+
+- Uninstalling removes this install's **Start with Windows** entry while keeping
+  settings, statistics, and training data.
+
 ## [0.1.0] - 2026-11-06
 
 ### Added

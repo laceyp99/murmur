@@ -156,3 +156,22 @@ def test_is_autostart_enabled_propagates_failure_and_closes_handle(registry, ope
 
     assert caught.value is error
     assert registry.closed is (operation == "query")
+
+
+@pytest.mark.parametrize(("owner", "removed"), [("command", True), ("other", False)])
+def test_uninstall_removes_autostart_only_for_this_install(
+    registry, monkeypatch, owner, removed
+):
+    monkeypatch.setattr(registry, "QueryValueEx", lambda *args: (owner, 1))
+
+    autostart_module.remove_autostart_for_this_install()
+
+    assert ("delete" in registry.calls) is removed
+
+
+def test_uninstall_ignores_missing_autostart_entry(registry):
+    registry.errors["open"] = FileNotFoundError("missing")
+
+    autostart_module.remove_autostart_for_this_install()
+
+    assert "delete" not in registry.calls

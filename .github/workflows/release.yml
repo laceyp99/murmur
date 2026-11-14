@@ -1,8 +1,10 @@
 name: Release
 
-# Tags and publishes a GitHub release whenever main declares a version in
-# pyproject.toml that has no matching tag yet. Release notes come from the
-# matching CHANGELOG.md section, which release-check requires on each PR.
+# Builds, packs, and publishes a GitHub release whenever main declares a version
+# in pyproject.toml that has no matching tag yet. Release notes come from the
+# matching CHANGELOG.md section, which release-check requires on each PR. The
+# release carries the Velopack installer and update packages that installed
+# copies of murmur check through "Check for updates".
 
 on:
   push:
@@ -20,19 +22,25 @@ concurrency:
 jobs:
   release:
     name: release
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - name: Publish release for new version
-        env:
-          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Find unreleased version
+        id: version
+        shell: bash
         run: |
           version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
-          tag="v${version}"
-          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-            echo "${tag} already exists; nothing to release."
+          if git rev-parse -q --verify "refs/tags/v${version}" >/dev/null; then
+            echo "v${version} already exists; nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           python - "$version" > release-notes.md <<'PY'
@@ -46,5 +54,51 @@ jobs:
               sys.exit(f"CHANGELOG.md has no [{sys.argv[1]}] section")
           print(body.strip())
           PY
-          gh release create "${tag}" --target "${GITHUB_SHA}" \
-            --title "murmur ${tag}" --notes-file release-notes.md
+          # vpk must match the velopack package the app is built with.
+          vpk_version=$(python -c "import re, tomllib; deps = tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']; print(next(re.fullmatch(r'velopack==(\S+)', d)[1] for d in deps if d.startswith('velopack==')))")
+          {
+            echo "release=true"
+            echo "version=${version}"
+            echo "vpk=${vpk_version}"
+          } >> "$GITHUB_OUTPUT"
+
+      # CPU-only torch keeps release packages under GitHub's 2 GiB asset limit.
+      - name: Build packaged app
+        if: steps.version.outputs.release == 'true'
+        shell: pwsh
+        run: |
+          python -m venv venv
+          venv\Scripts\python.exe -m pip install --upgrade pip
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          venv\Scripts\python.exe -m pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          .\build_windows.ps1
+
+      - name: Set up .NET
+        if: steps.version.outputs.release == 'true'
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Pack and publish release
+        if: steps.version.outputs.release == 'true'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          VPK_VERSION: ${{ steps.version.outputs.vpk }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = "https://github.com/${{ github.repository }}"
+          dotnet tool install -g vpk --version $env:VPK_VERSION
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          # The previous full package lets vpk build a small delta update.
+          vpk download github --repoUrl $repo --token $env:GH_TOKEN --outputDir releases
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          vpk pack --packId murmur --packVersion $env:VERSION --packTitle murmur `
+            --packDir dist\murmur --mainExe murmur.exe --icon build\windows\murmur.ico `
+            --releaseNotes release-notes.md --outputDir releases
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          vpk upload github --repoUrl $repo --token $env:GH_TOKEN --outputDir releases `
+            --tag "v$env:VERSION" --releaseName "murmur v$env:VERSION" `
+            --targetCommitish $env:GITHUB_SHA --publish
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }

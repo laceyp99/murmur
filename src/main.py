@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 
+from . import updater
 from .audio import AudioData, AudioRecorder
 from .autostart import set_autostart
 from .build_info import capture_build_info_in_background
@@ -100,7 +101,10 @@ class MurmurApp:
             on_exit_callback=self.stop,
             on_cancel_callback=self._on_recording_cancel,
             get_cancel_session_callback=self._get_cancel_session,
+            on_update_callback=self._restart_to_update,
+            can_update_callback=self._can_restart_to_update,
         )
+        updater.set_ready_listener(lambda: self.tray.refresh_menu())
         self.media_controller = get_media_controller()
         self._media_pause_thread: threading.Thread | None = None
 
@@ -553,6 +557,35 @@ class MurmurApp:
             ):
                 return self._overlay_session
             return None
+
+    def _can_restart_to_update(self) -> bool:
+        """Whether a downloaded update can be applied without touching a session."""
+        return (
+            updater.pending_update() is not None
+            and not self._shutdown_event.is_set()
+            and self.hotkey_manager.get_state() == HotkeyState.IDLE
+        )
+
+    def _restart_to_update(self) -> bool:
+        """Hand the downloaded release to Update.exe, then shut down normally.
+
+        The hotkey is blocked in the same step as the idle check, so no dictation
+        can start before exit. Returns False, leaving murmur running, when a
+        session is active or the update cannot be staged.
+        """
+        info = updater.pending_update()
+        if info is None or self._shutdown_event.is_set():
+            return False
+        if not self.hotkey_manager.stop_requests_if_idle():
+            return False
+        try:
+            updater.schedule_update(info)
+        except Exception as exc:
+            self.hotkey_manager.resume_requests()
+            print(f"Could not start update ({type(exc).__name__}).")
+            return False
+        self.stop()
+        return True
 
     def _on_recording_cancel(
         self,

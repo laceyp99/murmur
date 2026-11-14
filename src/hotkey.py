@@ -281,6 +281,23 @@ class HotkeyManager:
                 request.request_stop()
             return request
 
+    def stop_requests_if_idle(self) -> bool:
+        """Reject future activations only when no session is recording or processing.
+
+        Used before restarting to update, so the idle check and the hotkey block
+        happen atomically and no dictation can start in between.
+        """
+        with self._lock:
+            if self._stopped or self._state != HotkeyState.IDLE:
+                return False
+            self._stopped = True
+            return True
+
+    def resume_requests(self) -> None:
+        """Accept activations again after an abandoned stop_requests_if_idle()."""
+        with self._lock:
+            self._stopped = False
+
     def set_processing(self) -> None:
         """Set state to processing."""
         with self._lock:

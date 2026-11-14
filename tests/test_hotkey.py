@@ -214,3 +214,20 @@ def test_second_press_cancels_request_before_start_callback_initializes(hotkey_e
     finally:
         release.set()
     assert outcomes == [False]
+
+
+def test_update_restart_blocks_hotkey_only_when_idle():
+    manager = HotkeyManager()
+    manager._on_hotkey_pressed()
+
+    assert manager.get_state() is HotkeyState.RECORDING
+    assert manager.stop_requests_if_idle() is False
+
+    manager.set_idle()
+    assert manager.stop_requests_if_idle() is True
+    manager._on_hotkey_pressed()
+    assert manager.get_state() is HotkeyState.IDLE
+
+    manager.resume_requests()
+    manager._on_hotkey_pressed()
+    assert manager.get_state() is HotkeyState.RECORDING
