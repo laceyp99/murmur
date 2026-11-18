@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # Keeps the SHA-pinned actions in .github/workflows current. The "ci" title
+  # prefix makes release-check skip these pull requests.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci

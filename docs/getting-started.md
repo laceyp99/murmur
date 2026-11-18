@@ -308,7 +308,8 @@ venv\Scripts\ruff.exe check .
 venv\Scripts\pytest.exe
 ```
 
-After changing Python packaging or launch paths, also run:
+After changing Python packaging or launch paths, also run the wheel check. CI
+runs it on Windows for every pull request:
 
 ```powershell
 venv\Scripts\python.exe tools\check_wheel_install.py
@@ -331,7 +332,9 @@ venv\Scripts\python.exe -m pip install mkdocs-material pymdown-extensions
 venv\Scripts\python.exe -m mkdocs serve
 ```
 
-Use `venv\Scripts\python.exe -m mkdocs build --strict` for a CI-style build.
+Use `venv\Scripts\python.exe -m mkdocs build --strict` to run the same build as
+CI. CI pins the MkDocs package versions in
+[`ci.yml`](https://github.com/laceyp99/murmur/blob/main/.github/workflows/ci.yml).
 
 See the [pipeline documentation](pipeline.md) for implementation details and
 the [settings and privacy guide](settings-and-privacy.md) for persistent data
