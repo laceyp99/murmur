@@ -31,6 +31,7 @@ from .recording_overlay import (
 )
 from .transcription import FinalTranscript, Transcriber
 from .transcription_live import (
+    LiveSegmentLike,
     LiveSegmentMetrics,
     LiveTranscriptionWorker,
     TranscriptAccumulator,
@@ -1215,7 +1216,7 @@ class MurmurApp:
         if self.live_transcription_worker is not None:
             self.live_transcription_worker.submit_segment(segment)
 
-    def _on_live_segment_queued(self, segment: LiveSpeechSegment) -> None:
+    def _on_live_segment_queued(self, segment: LiveSegmentLike) -> None:
         """Emit debug logging when a live segment is queued for transcription."""
         print(
             "Live segment queued: "
@@ -1244,7 +1245,7 @@ class MurmurApp:
 
     def _on_live_segment_failed(
         self,
-        segment: LiveSpeechSegment,
+        segment: LiveSegmentLike,
         exc: Exception,
         attempt_count: int,
     ) -> None:
@@ -1283,7 +1284,7 @@ def main():
     def run_tray():
         nonlocal tray_error
         try:
-            app.tray.run()
+            app.tray.run()  # ty: ignore[missing-union-attribute]
         except BaseException as exc:
             # Forward worker failures to the entrypoint's normal exit handling.
             tray_error = exc

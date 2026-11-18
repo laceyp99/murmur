@@ -95,7 +95,7 @@ def _check_and_download() -> None:
     try:
         manager = _manager()
         info = manager.check_for_updates() if manager is not None else None
-        if info is not None:
+        if manager is not None and info is not None:
             manager.download_updates(info)
         with _lock:
             _pending = info

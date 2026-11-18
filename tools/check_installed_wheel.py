@@ -52,14 +52,14 @@ def main() -> None:
         sys.stderr.flush()
         calls.append(True)
 
-    runtime.main = record_launch
+    runtime.main = record_launch  # ty: ignore[missing-attribute]
     sys.modules["src.main"] = runtime
     stdout, stderr = sys.stdout, sys.stderr
     sys.stdout = sys.stderr = None
     try:
         runpy.run_module("src", run_name="__main__")
-        assert sys.stdout.name == os.devnull
-        assert sys.stderr.name == os.devnull
+        assert sys.stdout.name == os.devnull  # ty: ignore[missing-attribute]
+        assert sys.stderr.name == os.devnull  # ty: ignore[missing-attribute]
     finally:
         for stream in (sys.stdout, sys.stderr):
             if stream is not None:

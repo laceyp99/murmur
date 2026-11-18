@@ -27,7 +27,8 @@ def _windows_version(version: str) -> tuple[int, int, int, int]:
     parts = [int(part) if part is not None else 0 for part in match.groups()]
     if any(part > 65535 for part in parts):
         raise ValueError("Windows version components must not exceed 65535")
-    return tuple(parts)
+    major, minor, patch, build = parts
+    return major, minor, patch, build
 
 
 def _write_icon(source: Path, destination: Path) -> None:

@@ -123,6 +123,12 @@ jobs:
       - name: Run tests
         run: pytest
 
+      # Windows only: the winrt imports do not resolve on other platforms.
+      - name: Check types
+        if: runner.os == 'Windows'
+        shell: bash
+        run: ty check --python "$(python -c 'import sys; print(sys.executable)')"
+
       - name: Check wheel install
         if: runner.os == 'Windows'
         run: python tools/check_wheel_install.py

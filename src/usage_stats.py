@@ -23,7 +23,7 @@ from contextlib import suppress
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 STAGES = (
     "capture",
@@ -361,7 +361,7 @@ class UsageStatsService:
         self._incomplete = False
         self._reconciliation_incomplete = False
         self._storage_error = None
-        self._run_lock = None
+        self._run_lock: Any = None
         self._lock_dir = self.path.parent / (self.path.name + ".runs")
         self._closed = False
         self._state_lock = threading.Lock()

@@ -54,7 +54,7 @@ def _as_optional_float(value: object) -> float | None:
         return None
 
     try:
-        return float(value)
+        return float(value)  # ty: ignore[invalid-argument-type]
     except (TypeError, ValueError):
         return None
 
@@ -62,8 +62,11 @@ def _as_optional_float(value: object) -> float | None:
 class AudioSegmentLike(Protocol):
     """Structural type for audio segments accepted by the transcriber."""
 
-    audio: np.ndarray
-    sample_rate: int
+    @property
+    def audio(self) -> np.ndarray: ...
+
+    @property
+    def sample_rate(self) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -336,7 +339,7 @@ class Transcriber:
 
         started = time.perf_counter()
         try:
-            result = self._model.transcribe(
+            result = self._model.transcribe(  # ty: ignore[missing-union-attribute]
                 prepared_audio,
                 language=self.config.language,
                 fp16=(self._device == "cuda"),

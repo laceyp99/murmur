@@ -15,7 +15,7 @@ Unknown injected model identities are None. No text, audio, or exceptions enter
 events. Callbacks run on the calling thread and should be quick and thread safe.
 """
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from typing import TypedDict
@@ -43,7 +43,7 @@ _whisper_stage: ContextVar[str] = ContextVar("whisper_stage", default="whisper_o
 @contextmanager
 def observe_transcription(
     callback: ObservationCallback | None, *, stage: str = "whisper_offline"
-) -> Iterator[None]:
+) -> Generator[None]:
     """Install an observer for this call scope, restoring any enclosing scope."""
     observer_token = _observer.set(callback)
     stage_token = _whisper_stage.set(stage)

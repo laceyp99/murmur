@@ -299,12 +299,13 @@ registered icon.
 
 ## Development checks
 
-The project uses Ruff and pytest. With the repository virtual environment:
+The project uses Ruff, ty, and pytest. With the repository virtual environment:
 
 ```powershell
 venv\Scripts\python.exe -m pip install -e ".[dev]"
 venv\Scripts\ruff.exe format --check .
 venv\Scripts\ruff.exe check .
+venv\Scripts\ty.exe check --python venv
 venv\Scripts\pytest.exe
 ```
 

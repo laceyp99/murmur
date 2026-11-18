@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from collections import deque
 from queue import Empty, Queue
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -24,7 +24,7 @@ class LiveVADSegmentationWorker:
         settings: VADSettings | None = None,
         on_segment: Callable[[LiveSpeechSegment], None] | None = None,
         on_worker_degraded: Callable[[str], None] | None = None,
-        vad: object | None = None,
+        vad: Any = None,
         queue_timeout_seconds: float = 0.1,
         **kwargs,
     ):

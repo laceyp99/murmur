@@ -11,14 +11,23 @@ from .observations import ObservationCallback, observe_transcription
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    import numpy as np
+
 
 class LiveSegmentLike(Protocol):
     """Structural type for live segments accepted by the worker."""
 
-    segment_id: int
-    audio: object
-    sample_rate: int
-    duration: float
+    @property
+    def segment_id(self) -> int: ...
+
+    @property
+    def audio(self) -> np.ndarray: ...
+
+    @property
+    def sample_rate(self) -> int: ...
+
+    @property
+    def duration(self) -> float: ...
 
 
 class LiveTranscriberLike(Protocol):
