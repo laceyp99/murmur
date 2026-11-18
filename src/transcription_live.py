@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from queue import Empty, Queue
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from .observations import ObservationCallback, observe_transcription
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class LiveSegmentLike(Protocol):

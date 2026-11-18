@@ -157,13 +157,17 @@ def _statistics_view(summary) -> StatisticsView:
         ),
         (
             "Cancelled / no speech / interrupted",
-            f"{counts.get('cancelled', 0)} / {counts.get('no_speech', 0)} / "
-            f"{counts.get('interrupted', 0)}",
+            (
+                f"{counts.get('cancelled', 0)} / {counts.get('no_speech', 0)} / "
+                f"{counts.get('interrupted', 0)}"
+            ),
         ),
         (
             "Needed transcription fallback",
-            f"{summary.get('fallback_count', 0)} of "
-            f"{summary.get('fallback_denominator', 0)}",
+            (
+                f"{summary.get('fallback_count', 0)} of "
+                f"{summary.get('fallback_denominator', 0)}"
+            ),
         ),
         ("Problems recovered automatically", str(summary.get("recovered_failures", 0))),
         (
@@ -177,8 +181,10 @@ def _statistics_view(summary) -> StatisticsView:
     speed = (
         (
             "Stop to clipboard (median / p95)",
-            f"{_seconds(latency.get('median_seconds'))} / "
-            f"{_seconds(latency.get('p95_seconds'))}",
+            (
+                f"{_seconds(latency.get('median_seconds'))} / "
+                f"{_seconds(latency.get('p95_seconds'))}"
+            ),
         ),
         ("Average recording", _seconds(summary.get("mean_capture_seconds"))),
         ("Total recorded", "n/a" if minutes is None else f"{minutes:.1f} min"),

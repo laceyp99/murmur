@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from collections.abc import Callable, Sequence
 from queue import Empty, Queue
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -11,6 +11,9 @@ from .vad_audio import float32_to_pcm16
 from .vad_config import SUPPORTED_VAD_SAMPLE_RATES, VADSettings
 from .vad_segmenter import _create_vad
 from .vad_types import AudioFrame, LiveSpeechSegment
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
 
 class LiveVADSegmentationWorker:

@@ -297,15 +297,19 @@ class MurmurApp:
                 return None, False
 
             return (
-                f"Configured hotkey '{configured_hotkey}' was invalid and has been reset "
-                f"to '{fallback_hotkey}'.",
+                (
+                    f"Configured hotkey '{configured_hotkey}' was invalid and has been reset "
+                    f"to '{fallback_hotkey}'."
+                ),
                 True,
             )
 
         if configured_hotkey == fallback_hotkey:
             return (
-                f"Default hotkey '{fallback_hotkey}' could not be registered{error_suffix}. "
-                "Check permissions or whether another application is using it.",
+                (
+                    f"Default hotkey '{fallback_hotkey}' could not be registered{error_suffix}. "
+                    "Check permissions or whether another application is using it."
+                ),
                 False,
             )
 
@@ -317,14 +321,18 @@ class MurmurApp:
                 f"'{fallback_hotkey}': {exc}"
             )
             return (
-                f"Configured hotkey '{configured_hotkey}' could not be registered"
-                f"{error_suffix}.",
+                (
+                    f"Configured hotkey '{configured_hotkey}' could not be registered"
+                    f"{error_suffix}."
+                ),
                 False,
             )
 
         return (
-            f"Configured hotkey '{configured_hotkey}' could not be registered"
-            f"{error_suffix} and has been reset to '{fallback_hotkey}'.",
+            (
+                f"Configured hotkey '{configured_hotkey}' could not be registered"
+                f"{error_suffix} and has been reset to '{fallback_hotkey}'."
+            ),
             True,
         )
 

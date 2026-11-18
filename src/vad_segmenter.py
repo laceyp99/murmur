@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from .vad_audio import generate_frames, resample_audio
 from .vad_config import VADSettings
 from .vad_types import AudioFrame, SpeechSegment, _SegmentBounds
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 try:
     import webrtcvad
