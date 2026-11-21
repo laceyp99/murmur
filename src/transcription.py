@@ -332,6 +332,9 @@ class Transcriber:
         """Transcribe one waveform segment without final document cleanup."""
         if self._model is None:
             self.load_model()
+        model = self._model
+        if model is None:
+            raise RuntimeError("Whisper model is not loaded")
 
         prepared_audio = self._prepare_audio(audio, sample_rate)
         if prepared_audio.size == 0:
@@ -339,7 +342,7 @@ class Transcriber:
 
         started = time.perf_counter()
         try:
-            result = self._model.transcribe(  # ty: ignore[missing-union-attribute]
+            result = model.transcribe(
                 prepared_audio,
                 language=self.config.language,
                 fp16=(self._device == "cuda"),
