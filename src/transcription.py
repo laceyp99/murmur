@@ -54,7 +54,7 @@ def _as_optional_float(value: object) -> float | None:
         return None
 
     try:
-        return float(value)
+        return float(value)  # ty: ignore[invalid-argument-type]
     except (TypeError, ValueError):
         return None
 
@@ -62,8 +62,11 @@ def _as_optional_float(value: object) -> float | None:
 class AudioSegmentLike(Protocol):
     """Structural type for audio segments accepted by the transcriber."""
 
-    audio: np.ndarray
-    sample_rate: int
+    @property
+    def audio(self) -> np.ndarray: ...
+
+    @property
+    def sample_rate(self) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -329,6 +332,9 @@ class Transcriber:
         """Transcribe one waveform segment without final document cleanup."""
         if self._model is None:
             self.load_model()
+        model = self._model
+        if model is None:
+            raise RuntimeError("Whisper model is not loaded")
 
         prepared_audio = self._prepare_audio(audio, sample_rate)
         if prepared_audio.size == 0:
@@ -336,7 +342,7 @@ class Transcriber:
 
         started = time.perf_counter()
         try:
-            result = self._model.transcribe(
+            result = model.transcribe(
                 prepared_audio,
                 language=self.config.language,
                 fp16=(self._device == "cuda"),

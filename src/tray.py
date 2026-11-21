@@ -88,7 +88,7 @@ class TrayManager:
     def _on_update(self, icon, item):
         """Restart into the downloaded release; murmur keeps running if refused."""
         try:
-            restarting = self.on_update_callback()
+            restarting = self.on_update_callback()  # ty: ignore[not-callable]
         except Exception as exc:
             print(f"Tray update failed ({type(exc).__name__}).", file=sys.stderr)
             return
@@ -123,7 +123,7 @@ class TrayManager:
 
     def _run_cancel(self, session):
         try:
-            self.on_cancel_callback(session)
+            self.on_cancel_callback(session)  # ty: ignore[not-callable]
         except Exception as exc:
             print(f"Tray cancellation failed ({type(exc).__name__}).", file=sys.stderr)
 

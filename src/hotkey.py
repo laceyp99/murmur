@@ -113,7 +113,7 @@ class _ChordGuard:
             self._consumed.discard(event.scan_code)
         else:
             self._fresh = None if event.scan_code in self._held else event.scan_code
-            self._held.add(event.scan_code)
+            self._held.add(event.scan_code)  # ty: ignore[invalid-argument-type]
         # Keep suppressing after modifiers are released, when add_hotkey no
         # longer matches the chord and would leak key-up to a focused player.
         return not consumed

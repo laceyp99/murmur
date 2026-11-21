@@ -14,6 +14,7 @@ import time
 import tkinter as tk
 from ctypes import wintypes
 from tkinter import font as tkfont
+from typing import Any
 
 HIDDEN = "hidden"
 RECORDING = "recording"
@@ -81,7 +82,7 @@ class RecordingOverlay:
         self._master = master
         self._view_factory = view_factory or OverlayWindow
         self._clock = clock
-        self._view = None
+        self._view: Any = None
         self._failed = False
         self.state = HIDDEN
         self._session = None
@@ -91,7 +92,7 @@ class RecordingOverlay:
         self._frame_job = None
         self._hide_job = None
         self._on_cancel = on_cancel
-        self._cancelled_at = None
+        self._cancelled_at: float | None = None
 
     def cancel(self):
         """Dispatch cancellation for the displayed session only."""
@@ -167,10 +168,9 @@ class RecordingOverlay:
         if state in _ANIMATED_STATES:
             self._frame_job = self._master.after(ANIMATION_FRAME_MS, self._on_frame)
         elif state == CANCELLED_DONE:
-            remaining = max(
-                0,
-                CANCELLED_HIDE_MS - round((self._clock() - self._cancelled_at) * 1000),
-            )
+            # _cancelled_at is set above before either cancelled state renders.
+            elapsed = self._clock() - self._cancelled_at  # ty: ignore[unsupported-operator]
+            remaining = max(0, CANCELLED_HIDE_MS - round(elapsed * 1000))
             self._hide_job = self._master.after(remaining, self._on_hide_timeout)
         elif state != CANCELLED:
             delay = SUCCESS_HIDE_MS if state == SUCCESS else ERROR_HIDE_MS
@@ -246,7 +246,7 @@ class OverlayWindow:
         if sys.platform == "win32" and self._hwnd is None:
             window.destroy()
             raise RuntimeError("Could not make recording overlay passive")
-        self._geometry = None
+        self._geometry: Any = None
         self._visible = False
         self._state = HIDDEN
         self._cancel_callback = None

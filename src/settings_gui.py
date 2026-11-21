@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
+from typing import Any
 
 import customtkinter as ctk
 from PIL import Image
@@ -157,13 +158,17 @@ def _statistics_view(summary) -> StatisticsView:
         ),
         (
             "Cancelled / no speech / interrupted",
-            f"{counts.get('cancelled', 0)} / {counts.get('no_speech', 0)} / "
-            f"{counts.get('interrupted', 0)}",
+            (
+                f"{counts.get('cancelled', 0)} / {counts.get('no_speech', 0)} / "
+                f"{counts.get('interrupted', 0)}"
+            ),
         ),
         (
             "Needed transcription fallback",
-            f"{summary.get('fallback_count', 0)} of "
-            f"{summary.get('fallback_denominator', 0)}",
+            (
+                f"{summary.get('fallback_count', 0)} of "
+                f"{summary.get('fallback_denominator', 0)}"
+            ),
         ),
         ("Problems recovered automatically", str(summary.get("recovered_failures", 0))),
         (
@@ -177,8 +182,10 @@ def _statistics_view(summary) -> StatisticsView:
     speed = (
         (
             "Stop to clipboard (median / p95)",
-            f"{_seconds(latency.get('median_seconds'))} / "
-            f"{_seconds(latency.get('p95_seconds'))}",
+            (
+                f"{_seconds(latency.get('median_seconds'))} / "
+                f"{_seconds(latency.get('p95_seconds'))}"
+            ),
         ),
         ("Average recording", _seconds(summary.get("mean_capture_seconds"))),
         ("Total recorded", "n/a" if minutes is None else f"{minutes:.1f} min"),
@@ -260,7 +267,7 @@ def _format_bytes(size_bytes):
 
 
 _MUTED_TEXT = ("gray35", "gray70")
-_OUTLINE_BUTTON = {
+_OUTLINE_BUTTON: dict[str, Any] = {
     "fg_color": "transparent",
     "border_width": 1,
     "border_color": ("gray55", "gray40"),
@@ -268,7 +275,7 @@ _OUTLINE_BUTTON = {
     "hover_color": ("gray78", "gray25"),
 }
 # Destructive actions: outlined in red so they stand apart from normal buttons.
-_DANGER_BUTTON = {
+_DANGER_BUTTON: dict[str, Any] = {
     **_OUTLINE_BUTTON,
     "border_color": ("#C0392B", "#C94B4B"),
     "text_color": ("#B03A2E", "#FF8A80"),
@@ -725,7 +732,7 @@ def _run_settings_ui(return_focus=False):
         _configure_customtkinter()
         previous_foreground = _foreground_window() if return_focus else None
         root = ctk.CTk()
-        root._murmur_window_icon = _apply_window_icon(root)
+        root._murmur_window_icon = _apply_window_icon(root)  # ty: ignore[missing-attribute]
         root.withdraw()
         if previous_foreground:
             _return_foreground(previous_foreground, root)
@@ -815,8 +822,8 @@ class SettingsWindow:
         self._ollama_test_button = None
         self._ollama_test_in_progress = False
         self._ollama_test_token = None
-        self._update_button = None
-        self._update_status_label = None
+        self._update_button: Any = None
+        self._update_status_label: Any = None
         self._statistics_results = queue.Queue()
         self._statistics_token = None
 
@@ -1098,7 +1105,7 @@ class SettingsWindow:
             height=52,
             wrap="word",
             fg_color="transparent",
-            text_color=("#5D431B", "#F1D8AA"),
+            text_color=("#5D431B", "#F1D8AA"),  # ty: ignore[invalid-argument-type]
             border_width=0,
         )
         notice_text.grid(
@@ -1480,7 +1487,10 @@ class SettingsWindow:
         timeout_setting = SETTINGS_BY_KEY["ollama_timeout_seconds"]
         timeout_var = self.numeric_vars.get("ollama_timeout_seconds")
         try:
-            configured_timeout = parse_numeric_text(timeout_var.get(), timeout_setting)
+            configured_timeout = parse_numeric_text(
+                timeout_var.get(),  # ty: ignore[missing-union-attribute]
+                timeout_setting,
+            )
         except (AttributeError, NumericSettingError):
             configured_timeout = timeout_setting.default
 
@@ -1876,7 +1886,7 @@ class SettingsWindow:
 
         old_overlay_enabled = self.config.show_recording_overlay
         new_autostart = self.autostart_var.get()
-        updated_values = {
+        updated_values: dict[str, Any] = {
             "hotkey": new_hotkey,
             "model": normalize_value(self.model_var.get(), SETTINGS_BY_KEY["model"]),
             "device": normalize_value(self.device_var.get(), SETTINGS_BY_KEY["device"]),

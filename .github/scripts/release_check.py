@@ -120,7 +120,8 @@ def section_body(text: str, version: str) -> str | None:
         if label != version:
             continue
         match = HEADING.fullmatch(lines[start])
-        heading_date = (match.group("date") or "").strip()
+        # sections() only returns lines that already matched HEADING.
+        heading_date = (match.group("date") or "").strip()  # ty: ignore[missing-union-attribute]
         try:
             if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", heading_date):
                 raise ValueError("expected YYYY-MM-DD")

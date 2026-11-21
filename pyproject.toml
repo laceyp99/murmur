@@ -34,6 +34,7 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "ruff==0.16.2",
+    "ty==0.0.104",
 ]
 packaging = [
     "pyinstaller==6.22.2",
@@ -60,4 +61,8 @@ line-length = 88
 line-ending = "lf"
 
 [tool.ruff.lint]
-select = ["A", "ASYNC", "B", "C4", "DTZ", "E4", "E7", "E9", "F", "FLY", "FURB", "I", "N", "NPY", "PERF", "PGH", "PIE", "PT", "PTH", "RET", "RSE", "RUF", "SIM", "UP", "W605"]
+select = ["A", "ASYNC", "B", "C4", "DTZ", "E4", "E7", "E9", "ERA", "F", "FLY", "FURB", "I", "ISC", "N", "NPY", "PERF", "PGH", "PIE", "PLE", "PT", "PTH", "RET", "RSE", "RUF", "S110", "S112", "SIM", "T10", "TC", "UP", "W605"]
+
+[tool.ty.src]
+# Tests lean on mocks and fakes, so only shipped code is type checked.
+include = ["src", "tools", "run.py", ".github/scripts"]

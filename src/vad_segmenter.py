@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -8,13 +8,16 @@ from .vad_audio import generate_frames, resample_audio
 from .vad_config import VADSettings
 from .vad_types import AudioFrame, SpeechSegment, _SegmentBounds
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 try:
     import webrtcvad
 except ImportError:  # pragma: no cover - exercised when dependency is missing.
     webrtcvad = None
 
 
-def _create_vad(aggressiveness: int) -> object:
+def _create_vad(aggressiveness: int) -> Any:
     """Construct a WebRTC VAD instance or fail with a clear message."""
     if webrtcvad is None:
         raise RuntimeError("webrtcvad-wheels is required to use murmur VAD")
@@ -27,7 +30,7 @@ class WebRTCVADSegmenter:
     def __init__(
         self,
         settings: VADSettings | None = None,
-        vad: object | None = None,
+        vad: Any = None,
         **kwargs,
     ):
         if settings is not None and kwargs:

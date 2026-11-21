@@ -7,6 +7,7 @@ Briefly describe the change and the user-facing impact.
 - [ ] `python -m pip install -e .[dev]`
 - [ ] `ruff format --check .`
 - [ ] `ruff check .`
+- [ ] `ty check --python venv`
 - [ ] `pytest`
 
 # Notes

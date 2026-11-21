@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .config import get_app_data_dir
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 DEFAULT_USER_VOCAB_PATH = Path(__file__).resolve().parents[1] / "user_vocab.json"
 

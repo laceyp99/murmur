@@ -31,6 +31,7 @@ from .recording_overlay import (
 )
 from .transcription import FinalTranscript, Transcriber
 from .transcription_live import (
+    LiveSegmentLike,
     LiveSegmentMetrics,
     LiveTranscriptionWorker,
     TranscriptAccumulator,
@@ -297,15 +298,19 @@ class MurmurApp:
                 return None, False
 
             return (
-                f"Configured hotkey '{configured_hotkey}' was invalid and has been reset "
-                f"to '{fallback_hotkey}'.",
+                (
+                    f"Configured hotkey '{configured_hotkey}' was invalid and has been reset "
+                    f"to '{fallback_hotkey}'."
+                ),
                 True,
             )
 
         if configured_hotkey == fallback_hotkey:
             return (
-                f"Default hotkey '{fallback_hotkey}' could not be registered{error_suffix}. "
-                "Check permissions or whether another application is using it.",
+                (
+                    f"Default hotkey '{fallback_hotkey}' could not be registered{error_suffix}. "
+                    "Check permissions or whether another application is using it."
+                ),
                 False,
             )
 
@@ -317,14 +322,18 @@ class MurmurApp:
                 f"'{fallback_hotkey}': {exc}"
             )
             return (
-                f"Configured hotkey '{configured_hotkey}' could not be registered"
-                f"{error_suffix}.",
+                (
+                    f"Configured hotkey '{configured_hotkey}' could not be registered"
+                    f"{error_suffix}."
+                ),
                 False,
             )
 
         return (
-            f"Configured hotkey '{configured_hotkey}' could not be registered"
-            f"{error_suffix} and has been reset to '{fallback_hotkey}'.",
+            (
+                f"Configured hotkey '{configured_hotkey}' could not be registered"
+                f"{error_suffix} and has been reset to '{fallback_hotkey}'."
+            ),
             True,
         )
 
@@ -1207,7 +1216,7 @@ class MurmurApp:
         if self.live_transcription_worker is not None:
             self.live_transcription_worker.submit_segment(segment)
 
-    def _on_live_segment_queued(self, segment: LiveSpeechSegment) -> None:
+    def _on_live_segment_queued(self, segment: LiveSegmentLike) -> None:
         """Emit debug logging when a live segment is queued for transcription."""
         print(
             "Live segment queued: "
@@ -1236,7 +1245,7 @@ class MurmurApp:
 
     def _on_live_segment_failed(
         self,
-        segment: LiveSpeechSegment,
+        segment: LiveSegmentLike,
         exc: Exception,
         attempt_count: int,
     ) -> None:
@@ -1275,7 +1284,7 @@ def main():
     def run_tray():
         nonlocal tray_error
         try:
-            app.tray.run()
+            app.tray.run()  # ty: ignore[missing-union-attribute]
         except BaseException as exc:
             # Forward worker failures to the entrypoint's normal exit handling.
             tray_error = exc

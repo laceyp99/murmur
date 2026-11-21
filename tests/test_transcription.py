@@ -459,8 +459,10 @@ def test_transcribe_segments_strip_only_trailing_ellipses_from_segment_text():
                 "We should probably",
                 "Wait until tomorrow.",
             ],
-            "We should ask Microsoft about the patch NASA has notes "
-            "I think We should probably Wait until tomorrow.",
+            (
+                "We should ask Microsoft about the patch NASA has notes "
+                "I think We should probably Wait until tomorrow."
+            ),
         ),
         (
             ["We should go.", "and bring the laptop."],

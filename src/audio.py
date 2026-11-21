@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -55,7 +56,7 @@ class AudioRecorder:
         self._recording = False
         self._audio_data = []
         self._lock = threading.RLock()
-        self._stream = None
+        self._stream: Any = None
         self._recording_start: float | None = None
         self._block_callback: Callable[[np.ndarray], None] | None = None
         self._on_block_callback_error: Callable[[Exception], None] | None = None
@@ -236,14 +237,18 @@ class AudioRecorder:
         # feed its early blocks to either the full recording or live VAD.
         stream = None
         try:
-            callback_state = None
+            callback_state: Any = None
 
             def make_stream(**kwargs):
                 nonlocal callback_state
                 self._first_callback.clear()
                 callback_lock = threading.RLock()
                 buffered = []
-                state = {"lock": callback_lock, "buffered": buffered, "ready": False}
+                state: dict[str, Any] = {
+                    "lock": callback_lock,
+                    "buffered": buffered,
+                    "ready": False,
+                }
                 callback_state = state
 
                 def candidate_callback(indata, frames, time_info, status):
@@ -258,7 +263,7 @@ class AudioRecorder:
                             self._audio_callback(indata, frames, time_info, status)
 
                 kwargs["callback"] = candidate_callback
-                return sd.InputStream(**kwargs)
+                return sd.InputStream(**kwargs)  # ty: ignore[missing-union-attribute]
 
             with input_backend.lock:
                 input_backend.refresh_if_pending()
