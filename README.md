@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="app/readme-logo.png" alt="Conductor Core Logo" width="100%">
+  <img src="app/readme-logo.png" alt="murmur Logo" width="100%">
 </div>
 
 A lightweight Windows application that enables dictation anywhere on your
